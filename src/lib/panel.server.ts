@@ -777,10 +777,10 @@ const OPERATIONS_DEPLOY_WORKFLOW=process.env.OPERATIONS_DEPLOY_WORKFLOW||"produc
 const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml";
 const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml";
 const OPERATIONS_REPOS={
- baseSource:{repo:process.env.BASE_REPO||"lucaskerim123/V1-vercel-base",label:"V1 Vercel Base",ci:"ci.yml",deploy:"base-release-ci.yml",quickDeploy:"base-release-ci.yml"},
- engineSource:{repo:process.env.ENGINE_REPO||"lucaskerim123/V1-vercel-engine",label:"V1 Vercel Engine",ci:"ci.yml",deploy:"publish-engine-release.yml",quickDeploy:"publish-engine-release.yml"},
- licenseManager:{repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",label:"Custom License Manager",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW},
- billingStore:{repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",label:"V2 Billing Store",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:BILLING_STORE_QUICK_DEPLOY_WORKFLOW},
+ baseSource:{repo:process.env.BASE_REPO||"lucaskerim123/V1-vercel-base",branch:process.env.BASE_REF||"base-release",label:"V1 Vercel Base",ci:"ci.yml",deploy:"base-release-ci.yml",quickDeploy:"base-release-ci.yml"},
+ engineSource:{repo:process.env.ENGINE_REPO||"lucaskerim123/V1-vercel-engine",branch:process.env.ENGINE_REF||"UPDATE_RELEASE",label:"V1 Vercel Engine",ci:"ci.yml",deploy:"publish-engine-release.yml",quickDeploy:"publish-engine-release.yml"},
+ licenseManager:{repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",branch:"main",label:"Custom License Manager",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW},
+ billingStore:{repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",branch:"main",label:"V2 Billing Store",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:BILLING_STORE_QUICK_DEPLOY_WORKFLOW},
 } as const;
 
 type OperationsSystem=keyof typeof OPERATIONS_REPOS;
@@ -834,12 +834,12 @@ function fallbackOperationFailure(job:any,logTail:string){
 }
 async function operationsRunDetail(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem]){
  const [ciRows,deployRows,quickDeployRows,deploySuccessRows,quickDeploySuccessRows,ref]=await Promise.all([
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch=main&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch=main&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch=main&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch=main&status=success&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch=main&status=success&per_page=1"),
-  github("/repos/"+cfg.repo+"/git/ref/heads/main"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+  github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
  ]);
  const ciRun=ciRows?.workflow_runs?.[0]||null;
  const deployRun=deployRows?.workflow_runs?.[0]||null;
@@ -897,7 +897,7 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
 
 async function findOperationsRun(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem],workflow:string,startedAt:number){
  for(let attempt=0;attempt<8;attempt++){
-  const runs=await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/runs?branch=main&per_page=5");
+  const runs=await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=5");
   const run=(runs?.workflow_runs||[]).find((x:any)=>new Date(x.created_at).getTime()>=startedAt-2000);
   if(run)return cleanOperationsRun(run);
   await new Promise(resolve=>setTimeout(resolve,750));
@@ -913,16 +913,16 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
  const workflow=action==="ci"?cfg.ci:action==="override-deploy"?cfg.quickDeploy:cfg.deploy;
  if(action==="deploy"){
   const [latest,latestDeploy,ref]=await Promise.all([
-   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch=main&per_page=1"),
-   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch=main&status=success&per_page=1"),
-   github("/repos/"+cfg.repo+"/git/ref/heads/main"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
   ]);
   const latestRun=latest?.workflow_runs?.[0],deployedRun=latestDeploy?.workflow_runs?.[0],mainSha=String(ref?.object?.sha||"");
   if(deployedRun?.head_sha===mainSha)throw new Error("No deployment needed. The latest main commit is already deployed to production.");
   if(!latestRun||latestRun.status!=="completed"||latestRun.conclusion!=="success"||latestRun.head_sha!==mainSha)throw new Error("Deploy is blocked until the current main commit has a successful CI/preflight run. A CI run for an older commit cannot be reused.");
  }
  const startedAt=Date.now();
- await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main"})});
+ await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:cfg.branch})});
  const run=await findOperationsRun(cfg,workflow,startedAt);
  return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"CI":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
 });
@@ -941,12 +941,12 @@ async function operationsAllCompareCommits(repo:string,base:string,head:string){
 export const getOperationsScan=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem}})=>{
  requireOperationsUser(data.token);
  const cfg=operationsConfig(data.system);
- const ref=await github("/repos/"+cfg.repo+"/git/ref/heads/main");
+ const ref=await github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch));
  const currentSha=String(ref?.object?.sha||"");
  if(!currentSha)throw new Error("Unable to resolve main branch for "+cfg.repo+".");
  const [deploySuccess,ciSuccess]=await Promise.all([
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch=main&status=success&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch=main&status=success&per_page=1"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
  ]);
  const deployedRun=deploySuccess?.workflow_runs?.[0]||null;
  const baselineSha=deployedRun?.head_sha||ciSuccess?.workflow_runs?.[0]?.head_sha||null;
