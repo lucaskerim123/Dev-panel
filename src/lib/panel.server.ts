@@ -895,9 +895,36 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
  return {checkedAt:new Date().toISOString(),systems:Object.fromEntries(entries)};
 });
 
+async function findOperationsRun(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem],workflow:string,startedAt:number){
+ for(let attempt=0;attempt<8;attempt++){
+  const runs=await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/runs?branch=main&per_page=5");
+  const run=(runs?.workflow_runs||[]).find((x:any)=>new Date(x.created_at).getTime()>=startedAt-2000);
+  if(run)return cleanOperationsRun(run);
+  await new Promise(resolve=>setTimeout(resolve,750));
+ }
+ return null;
+}
+
 export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem;action:"ci"|"deploy"|"override-deploy"}})=>{
  requireOperationsUser(data.token);
- throw new Error("Dev Panel is status-only. Run CI and deployment workflows from their owning repository/Billing Store controls.");
+ const cfg=operationsConfig(data.system);
+ const action=String(data.action||"");
+ if(!["ci","deploy","override-deploy"].includes(action))throw new Error("Unknown Operations action");
+ const workflow=action==="ci"?cfg.ci:action==="override-deploy"?cfg.quickDeploy:cfg.deploy;
+ if(action==="deploy"){
+  const [latest,latestDeploy,ref]=await Promise.all([
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch=main&per_page=1"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch=main&status=success&per_page=1"),
+   github("/repos/"+cfg.repo+"/git/ref/heads/main"),
+  ]);
+  const latestRun=latest?.workflow_runs?.[0],deployedRun=latestDeploy?.workflow_runs?.[0],mainSha=String(ref?.object?.sha||"");
+  if(deployedRun?.head_sha===mainSha)throw new Error("No deployment needed. The latest main commit is already deployed to production.");
+  if(!latestRun||latestRun.status!=="completed"||latestRun.conclusion!=="success"||latestRun.head_sha!==mainSha)throw new Error("Deploy is blocked until the current main commit has a successful CI/preflight run. A CI run for an older commit cannot be reused.");
+ }
+ const startedAt=Date.now();
+ await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main"})});
+ const run=await findOperationsRun(cfg,workflow,startedAt);
+ return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"CI":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
 });
 
 async function operationsFullTree(repo:string,treeSha:string,prefix=""){
