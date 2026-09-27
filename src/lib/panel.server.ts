@@ -654,17 +654,22 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
  return {ok:true,version,channel,releaseType,deletedReleases:releases.length,deletedDrafts:(drafts||[]).length};
 });
 
-export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"approve"|"reject"|"rollback"|"revert"|"withdraw"|"archive"|"restore";reason?:string}})=>{
+export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"withdraw"}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role).toLowerCase()))throw new Error("Admin access required");
  const id=String(data.releaseId||"").trim();
  if(!id)throw new Error("Release ID is required");
- const action=String(data.action||"").trim().toLowerCase();
- if(!["approve","reject","rollback","revert","withdraw","archive","restore"].includes(action))throw new Error("Unsupported release action");
- const reason=String(data.reason||"").trim();
- if(["rollback","revert","archive"].includes(action)&&!reason)throw new Error("A reason is required so this lifecycle change remains auditable.");
- const result=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action,reason:reason||undefined})});
- return result;
+ if(String(data.action||"").trim().toLowerCase()!=="withdraw")throw new Error("Dev Panel only supports unpublishing releases. Use Billing Store for release control.");
+ const configured=String(process.env.BILLING_STORE_URL||process.env.CUSTOMER_PORTAL_URL||"").trim();
+ if(!configured)throw new Error("Billing Store URL is not configured.");
+ const base=new URL(configured);
+ if(base.protocol!=="https:")throw new Error("Billing Store URL must use HTTPS.");
+ base.pathname="";base.search="";base.hash="";
+ return requestJson(base.origin+"/api/internal/orbitfs/release-control",{
+  method:"POST",
+  headers:{authorization:"Bearer "+required("DEV_PANEL_EVENT_SECRET")},
+  body:JSON.stringify({action:"withdraw",releaseId:id})
+ });
 });
 
 export const getChannelsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
@@ -772,6 +777,8 @@ const OPERATIONS_DEPLOY_WORKFLOW=process.env.OPERATIONS_DEPLOY_WORKFLOW||"produc
 const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml";
 const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml";
 const OPERATIONS_REPOS={
+ baseSource:{repo:process.env.BASE_REPO||"lucaskerim123/V1-vercel-base",label:"V1 Vercel Base",ci:"ci.yml",deploy:"base-release-ci.yml",quickDeploy:"base-release-ci.yml"},
+ engineSource:{repo:process.env.ENGINE_REPO||"lucaskerim123/V1-vercel-engine",label:"V1 Vercel Engine",ci:"ci.yml",deploy:"publish-engine-release.yml",quickDeploy:"publish-engine-release.yml"},
  licenseManager:{repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",label:"Custom License Manager",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW},
  billingStore:{repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",label:"V2 Billing Store",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:BILLING_STORE_QUICK_DEPLOY_WORKFLOW},
 } as const;
