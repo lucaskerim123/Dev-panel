@@ -193,6 +193,26 @@ jobs:
             --metadata release-package/database-schema.json
           test -s supabase/customer-schema.sql || { echo "::error::customer-schema.sql was not generated"; exit 1; }
 
+      - name: Verify generated database snapshot is current
+        working-directory: base-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_source_migration="$(find supabase/migrations -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*.sql' -printf '%f\n' | sort | tail -n1 | cut -c1-14)"
+          packaged_latest_migration="$(jq -r '.latestMigration // empty' release-package/database-schema.json)"
+          migration_count_source="$(find supabase/migrations -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*.sql' | wc -l | tr -d ' ')"
+          migration_count_packaged="$(jq -r '.migrationCount // 0' release-package/database-schema.json)"
+          test -n "$latest_source_migration" || { echo "::error::No Base migrations found."; exit 1; }
+          test "$packaged_latest_migration" = "$latest_source_migration" || {
+            echo "::error::Generated customer DB snapshot is stale. Source latest migration is $latest_source_migration but package metadata reports $packaged_latest_migration."
+            exit 1
+          }
+          test "$migration_count_packaged" = "$migration_count_source" || {
+            echo "::error::Generated customer DB snapshot migration count mismatch. Source has $migration_count_source migrations but package metadata reports $migration_count_packaged."
+            exit 1
+          }
+          echo "Customer DB snapshot is current: $migration_count_packaged migrations, latest $packaged_latest_migration."
+
       - name: Build release information
         working-directory: base-source
         shell: bash
