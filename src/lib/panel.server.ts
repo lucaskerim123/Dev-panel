@@ -643,6 +643,7 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
    }catch{}
   }
  }
+ await billingStoreReset({releaseIds:releases.map((r:any)=>String(r.id)),version,releaseType,channel});
  for(const release of releases){
   await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"delete"})});
  }
@@ -747,6 +748,22 @@ async function github(path:string,init:RequestInit={}){
 }
 async function licenseMaster(path:string,init:RequestInit={}){
  return requestJson(`${masterUrl()}${path}`,{...init,headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`,...(init.headers||{})}});
+}
+
+async function billingStoreReset(input:{releaseIds:string[];version:string;releaseType:"base"|"update";channel:string}){
+ const configured=String(process.env.BILLING_STORE_URL||process.env.CUSTOMER_PORTAL_URL||"").trim();
+ if(!configured)throw new Error("Billing Store URL is not configured for Start Fresh.");
+ const base=new URL(configured);
+ if(base.protocol!=="https:")throw new Error("Billing Store URL must use HTTPS.");
+ base.pathname="";
+ base.search="";
+ base.hash="";
+ const secret=required("DEV_PANEL_EVENT_SECRET");
+ return requestJson(base.origin+"/api/internal/orbitfs/release-reset",{
+  method:"POST",
+  headers:{authorization:"Bearer "+secret},
+  body:JSON.stringify(input)
+ });
 }
 
 
