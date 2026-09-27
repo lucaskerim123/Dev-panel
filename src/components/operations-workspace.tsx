@@ -59,7 +59,7 @@ export function OperationsWorkspace({session}:{session:any}){
    <div>
     <p className="orbit-eyebrow">ORBITFS / PRODUCTION OPERATIONS</p>
     <h1>Operations</h1>
-    <p>Production CI, exact-commit deployment gates, live GitHub Actions output and failure diagnostics for License Manager and Billing Store.</p>
+    <p>Full Scan, exact-commit deployment gates, live GitHub Actions output and failure diagnostics for License Manager and Billing Store.</p>
    </div>
    <div className="flex flex-wrap items-center gap-2">
     <span className="orbit-status-chip"><span className={`orbit-dot ${live?"orbit-dot-good":""}`}/>{live?"LIVE MONITORING":"STATUS MONITOR"}</span>
@@ -72,7 +72,7 @@ export function OperationsWorkspace({session}:{session:any}){
 
   <section className="release-surface overflow-hidden">
    <div className="orbit-section-bar">
-    <div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div><h2>Manual deployment control</h2><p>Scan & Prepare validates the exact main commit. Production deploy remains blocked until that commit passes unless Override is explicitly used.</p></div></div>
+    <div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div><h2>Manual deployment control</h2><p>Full Scan validates the exact main commit once. Deploy reuses that successful scan and remains blocked for any other commit unless Override is explicitly used.</p></div></div>
     <span className="text-[10px] text-muted-foreground">No automatic deployment from this page</span>
    </div>
   </section>
@@ -81,7 +81,8 @@ export function OperationsWorkspace({session}:{session:any}){
    {SYSTEMS.map(system=>{
     const s=data.systems?.[system.key]||{};
     const run=s.run;
-    const passed=run?.status==="completed"&&run?.conclusion==="success"&&run?.head_sha===s.currentSha;
+    const ciRun=s.ciRun;
+    const passed=ciRun?.status==="completed"&&ciRun?.conclusion==="success"&&ciRun?.head_sha===s.currentSha;
     const productionCurrent=!!s.productionCurrent;
     const isCollapsed=!!collapsed[system.key];
     const isConsoleOpen=consoleOpen[system.key]!==false;
@@ -97,24 +98,24 @@ export function OperationsWorkspace({session}:{session:any}){
      {!isCollapsed&&<div>
       <div className="grid gap-px border-b bg-border md:grid-cols-4">
        <div className="orbit-tech-stat"><span>Main commit</span><strong className="font-mono">{s.currentSha?.slice(0,12)||"—"}</strong></div>
-       <div className="orbit-tech-stat"><span>CI run</span><strong>{run?"#"+run.run_number:"No run"}</strong></div>
-       <div className="orbit-tech-stat"><span>CI gate</span><strong>{passed?"Exact commit passed":"Not ready"}</strong></div>
+       <div className="orbit-tech-stat"><span>Full scan</span><strong>{ciRun?"#"+ciRun.run_number:"No scan"}</strong></div>
+       <div className="orbit-tech-stat"><span>Scan gate</span><strong>{passed?"Exact commit passed":"Not ready"}</strong></div>
        <div className="orbit-tech-stat"><span>Production state</span><strong>{productionCurrent?"Current":s.latestDeployment?"Update pending":"Not deployed"}</strong></div>
       </div>
 
       <div className="grid gap-0 lg:grid-cols-2">
        <div className="border-b p-4 lg:border-b-0 lg:border-r">
         <div className="flex items-start justify-between gap-3">
-         <div><p className="text-xs font-semibold">Scan & Prepare</p><p className="mt-1 text-[10px] leading-5 text-muted-foreground">{run?`#${run.run_number} · ${time(run.updated_at)} · ${run.head_sha?.slice(0,12)}`:"No production gate run yet."}</p></div>
+         <div><p className="text-xs font-semibold">Full Scan</p><p className="mt-1 text-[10px] leading-5 text-muted-foreground">{ciRun?`#${ciRun.run_number} · ${time(ciRun.updated_at)} · ${ciRun.head_sha?.slice(0,12)}`:"No Full Scan run yet."}</p></div>
          <div className="flex flex-wrap justify-end gap-2">
           {run?.html_url&&<a className="button-secondary" href={run.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>View job</a>}
-          <button className="button-primary" onClick={()=>action(system.key,"ci")} disabled={!!busy}>{busy===system.key+"ci"?<Loader2 size={13} className="animate-spin"/>:<Play size={13}/>}Scan & Prepare</button>
+          <button className="button-primary" onClick={()=>action(system.key,"ci")} disabled={!!busy}>{busy===system.key+"ci"?<Loader2 size={13} className="animate-spin"/>:<Play size={13}/>}Full Scan</button>
          </div>
         </div>
        </div>
        <div className="p-4">
         <div className="flex items-start justify-between gap-3">
-         <div><p className="text-xs font-semibold">Production deployment</p><p className="mt-1 text-[10px] leading-5 text-muted-foreground">{productionCurrent?"Current main is already deployed. No deployment is needed.":passed?"Ready — exact current main commit passed Scan & Prepare.":"Blocked until the exact current main commit passes Scan & Prepare."}</p></div>
+         <div><p className="text-xs font-semibold">Production deployment</p><p className="mt-1 text-[10px] leading-5 text-muted-foreground">{productionCurrent?"Current main is already deployed. No deployment is needed.":passed?"Ready — exact current main commit passed Full Scan. Deploy will not scan it again.":"Blocked until the exact current main commit passes Full Scan."}</p></div>
          <div className="flex flex-wrap justify-end gap-2">
           <button className="button-primary" onClick={()=>action(system.key,"deploy")} disabled={!!busy||!passed||productionCurrent}>{busy===system.key+"deploy"?<Loader2 size={13} className="animate-spin"/>:<Zap size={13}/>}Deploy</button>
           <button className="button-secondary border-red-400/30 text-red-200" onClick={()=>action(system.key,"override-deploy")} disabled={!!busy}><AlertTriangle size={13}/>Override</button>
