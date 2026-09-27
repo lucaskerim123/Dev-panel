@@ -244,11 +244,11 @@ function Index() {
     <div className="min-h-screen bg-background">
       <Header connected={masterConnected} loading={loading} onRefresh={() => load()} onSignOut={signOut} user={session} />
       <MobileNav tab={tab} setTab={setTab} activeRun={!!run && !run.conclusion} />
-      <div className="mx-auto flex min-h-[calc(100vh-66px)] max-w-[1680px]">
+      <div className="mx-auto flex min-h-[calc(100vh-57px)] max-w-[1680px]">
         <Sidebar tab={tab} setTab={setTab} activeRun={!!run && !run.conclusion} />
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 xl:px-8">
           <div className="mx-auto max-w-[1440px] space-y-4">
-            {error && <div className="sticky top-[80px] z-30"><Alert tone="error" onClose={() => setError("")}>{error}</Alert></div>}
+            {error && <div className="sticky top-[64px] z-30"><Alert tone="error" onClose={() => setError("")}>{error}</Alert></div>}
             {notice && <Alert tone="success" onClose={() => setNotice("")}>{notice}</Alert>}
             {tab === "overview" && <Dashboard stats={stats} releases={allReleases} connected={masterConnected} run={run} channels={availableChannels}
               onBase={() => { resetComposer(); setTab("base"); }} onEngine={() => { resetComposer(); setTab("engine"); }}
@@ -307,85 +307,79 @@ function Login(p: any) {
 }
 
 function Header({ connected, loading, onRefresh, onSignOut, user }: any) {
-  return <header className="orbit-topbar sticky top-0 z-40 border-b">
-    <div className="flex h-[72px] items-center gap-4 px-4 sm:px-6">
-      <div className="flex min-w-0 items-center gap-3 md:hidden">
-        <div className="orbit-brandmark"><span></span></div>
+  return <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+    <div className="mx-auto flex h-14 max-w-[1680px] items-center justify-between px-4 sm:px-6 xl:px-8">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-black text-primary-foreground">O</div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold tracking-tight">OrbitFS Control</p>
-          <p className="truncate text-[10px] text-muted-foreground">Release operations</p>
+          <div className="truncate text-sm font-semibold">OrbitFS Release Control</div>
+          <div className="hidden text-[11px] text-muted-foreground sm:block">Stage 1 · Release preparation</div>
         </div>
       </div>
-      <div className="hidden min-w-0 flex-1 md:block">
-        <div className="orbit-commandbar max-w-[720px]">
-          <Search size={15}/><span>Search releases, repositories, runs…</span><kbd>/</kbd>
+      <div className="flex items-center gap-2">
+        <div className="hidden items-center gap-2 rounded-lg border bg-card px-2.5 py-1.5 text-xs sm:flex">
+          <i className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-emerald-400" : "bg-destructive"}`} />
+          {connected ? "License Master" : "Master offline"}
         </div>
-      </div>
-      <div className="ml-auto flex items-center gap-2">
-        <div className={`orbit-master-badge ${connected?"is-online":"is-offline"}`}><span></span>{connected?"License Master online":"License Master offline"}</div>
         <button className="icon-button" title="Refresh" onClick={onRefresh}><RefreshCw className={loading ? "animate-spin" : ""} size={15}/></button>
-        <div className="orbit-user-chip">
-          <div className="orbit-avatar">{String(user.display_name || user.email || "O").slice(0,1).toUpperCase()}</div>
-          <div className="hidden sm:block"><p>{user.display_name || user.email}</p><small>{user.role || "operator"}</small></div>
-          <button onClick={onSignOut} title="Sign out"><ChevronDown size={14}/></button>
+        <div className="hidden border-l pl-2 text-right sm:block">
+          <p className="text-xs font-medium">{user.display_name || user.email}</p>
+          <p className="text-[10px] text-muted-foreground">{user.role || "operator"}</p>
         </div>
+        <button className="icon-button" title="Sign out" onClick={onSignOut}><UploadCloud className="rotate-180" size={15}/></button>
       </div>
     </div>
   </header>;
 }
 
-const NAV_STANDALONE = [
-  ["overview","Overview","Command center",Gauge],
-] as const;
-
-const NAV_GROUPS = [
-  {label:"Status",items:[
-    ["operations","Systems","Four-repository status",Server],
-    ["releases","Release Registry","Published / draft / validation state",PackageCheck],
-    ["activity","Release Runs","Workflow execution",Activity],
-  ]},
+const NAV_ITEMS = [
+  ["overview","Dashboard","System overview",Activity],
+  ["base","Base releases","orbitfs_base",Rocket],
+  ["engine","Update releases","APEX · MCP · Studio",Layers3],
+  ["releases","Release registry","Published / draft / validation",PackageCheck],
+  ["activity","Release runs","History and live jobs",Terminal],
+  ["operations","Operations","Manual production controls",Server],
+  ["repositories","Repositories","Source & workers",Boxes],
+  ["channels","Channels","Release delivery channels",GitBranch],
+  ["portal","Customer portal","Publication state",Globe2],
+  ["monitoring","Monitoring","System telemetry",BarChart3],
+  ["audit","Audit history","Authority events",History],
+  ["access","Users & access","Panel permissions",Users],
+  ["settings","Configuration","Connections and sources",Settings2],
 ] as const;
 
 function MobileNav({ tab, setTab, activeRun }: any) {
-  const items = [
-    ...NAV_STANDALONE,
-    ...NAV_GROUPS.flatMap(group=>group.items),
-  ];
-  return <div className="orbit-mobile-nav md:hidden">
-    <div className="orbit-mobile-nav-track">
-      {items.map(([id,label,,Icon])=><button key={id} onClick={()=>setTab(id as Tab)} className={`orbit-mobile-nav-item ${tab===id?"is-active":""}`}>
-        <Icon size={15}/><span>{label}</span>{id==="activity"&&activeRun&&<i/>}
+  return <div className="border-b bg-background/95 md:hidden">
+    <div className="flex gap-1 overflow-x-auto px-3 py-2">
+      {NAV_ITEMS.map(([id,label,,Icon])=><button key={id} onClick={()=>setTab(id as Tab)}
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] ${tab===id?"border-primary/40 bg-primary/10 text-foreground":"border-transparent text-muted-foreground"}`}>
+        <Icon size={14}/><span>{label}</span>{id==="activity"&&activeRun&&<i className="h-1.5 w-1.5 rounded-full bg-emerald-400"/>}
       </button>)}
     </div>
   </div>;
 }
 
 function Sidebar({ tab, setTab, activeRun }: any) {
-  return <aside className="orbit-sidebar hidden shrink-0 md:block">
-    <div className="sticky top-[72px] flex h-[calc(100vh-72px)] flex-col overflow-y-auto p-3">
-      <div className="orbit-sidebar-brand"><div className="orbit-brandmark"><span></span></div><div><b>OrbitFS</b><small>Release Control</small></div></div>
-      <nav className="space-y-5">
-        <div>
-          <div className="space-y-1">
-            {NAV_STANDALONE.map(([id,label,detail,Icon])=><button key={id} onClick={()=>setTab(id as Tab)}
-              className={`orbit-nav-item ${tab===id?"orbit-nav-active":""}`}>
-              <span className="orbit-nav-icon"><Icon size={16}/></span>
-              <span className="min-w-0 flex-1"><b>{label}</b><small>{detail}</small></span>
-            </button>)}
-          </div>
-        </div>
-        {NAV_GROUPS.map(group=><div key={group.label}>
-          <p className="orbit-nav-group">{group.label}</p>
-          <div className="mt-2 space-y-1">
-            {group.items.map(([id,label,detail,Icon])=><button key={id} onClick={()=>setTab(id as Tab)}
-              className={`orbit-nav-item ${tab===id?"orbit-nav-active":""}`}>
-              <span className="orbit-nav-icon"><Icon size={16}/></span>
-              <span className="min-w-0 flex-1"><b>{label}</b><small>{detail}</small></span>
-              {id==="activity"&&activeRun&&<span className="orbit-run-dot"/>}
-            </button>)}
-          </div>
-        </div>)}
+  return <aside className="hidden w-60 shrink-0 border-r md:block">
+    <div className="sticky top-14 max-h-[calc(100vh-56px)] overflow-y-auto p-3">
+      <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Workspace</p>
+      <nav className="space-y-1">
+        {NAV_ITEMS.map(([id,label,detail,Icon])=><button key={id} onClick={()=>setTab(id as Tab)}
+          className={`nav-item ${tab===id?"nav-item-active":""}`}>
+          <span className="nav-icon"><Icon size={15}/></span>
+          <span className="min-w-0 flex-1"><b>{label}</b><small>{detail}</small></span>
+          {id==="activity"&&activeRun&&<span className="ml-auto h-2 w-2 rounded-full bg-emerald-400 animate-pulse"/>}
+        </button>)}
       </nav>
+      <div className="mt-6 rounded-xl border bg-card/60 p-3">
+        <p className="flex items-center gap-2 text-xs font-semibold"><ShieldCheck size={14}/> Controlled pipeline</p>
+        <div className="mt-3 space-y-2 text-[11px] text-muted-foreground">
+          <StepLine n="1" text="Dev Panel prepares" active/>
+          <StepLine n="2" text="License Master validates"/>
+          <StepLine n="3" text="Billing Store reviews"/>
+          <StepLine n="4" text="Customer release publishes"/>
+        </div>
+      </div>
     </div>
   </aside>;
 }
