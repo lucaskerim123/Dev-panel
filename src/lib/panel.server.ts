@@ -619,6 +619,40 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  return {ok:true,release:result?.release||null};
 });
 
+export const startFreshRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to start a release fresh.");
+ const version=String(data.version||"").trim();
+ if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("A valid release version is required.");
+ const channel=normalizeChannel(data.channel||"stable");
+ const releaseType=data.type==="base"?"base":"update";
+ const workerRepo=data.type==="base"?BASE_WORKER_REPO:ENGINE_REPO;
+ const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
+ const releases=(Array.isArray(result?.releases)?result.releases:[]).filter((r:any)=>String(r.version||"")===version&&String(r.channel||"stable").toLowerCase()===channel&&String(r.release_type||"").toLowerCase()===releaseType);
+ const published=releases.find((r:any)=>String(r.status||"").toLowerCase()==="published");
+ if(published)throw new Error(`v${version} is currently published. Withdraw or disable it first, then use Start Fresh.`);
+ const sb=authClient();
+ const {data:drafts,error:draftReadError}=await sb.from("panel_release_drafts").select("id,status,last_run_id").eq("release_type",releaseType).eq("version",version).eq("channel",channel);
+ if(draftReadError)throw new Error("Unable to inspect Stage 1 draft state: "+draftReadError.message);
+ for(const draft of drafts||[]){
+  const runId=Number(draft.last_run_id||0);
+  if(String(draft.status)==="building"&&runId){
+   try{
+    const run=await github(`/repos/${workerRepo}/actions/runs/${runId}`);
+    if(run?.status!=="completed")await github(`/repos/${workerRepo}/actions/runs/${runId}/cancel`,{method:"POST"});
+   }catch{}
+  }
+ }
+ for(const release of releases){
+  await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"delete"})});
+ }
+ const {error:eventDeleteError}=await sb.from("panel_release_events").delete().eq("release_version",version).eq("release_type",releaseType).eq("channel",channel);
+ if(eventDeleteError)throw new Error("Release records were cleared, but Dev Panel lifecycle history could not be reset: "+eventDeleteError.message);
+ const {error:draftDeleteError}=await sb.from("panel_release_drafts").delete().eq("release_type",releaseType).eq("version",version).eq("channel",channel);
+ if(draftDeleteError)throw new Error("Release records were cleared, but the Stage 1 draft could not be reset: "+draftDeleteError.message);
+ return {ok:true,version,channel,releaseType,deletedReleases:releases.length,deletedDrafts:(drafts||[]).length};
+});
+
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"approve"|"reject"|"rollback"|"revert"|"withdraw"|"archive"|"restore";reason?:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role).toLowerCase()))throw new Error("Admin access required");
