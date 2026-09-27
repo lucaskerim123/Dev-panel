@@ -895,16 +895,6 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
  return {checkedAt:new Date().toISOString(),systems:Object.fromEntries(entries)};
 });
 
-async function findOperationsRun(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem],workflow:string,startedAt:number){
- for(let attempt=0;attempt<8;attempt++){
-  const runs=await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=5");
-  const run=(runs?.workflow_runs||[]).find((x:any)=>new Date(x.created_at).getTime()>=startedAt-2000);
-  if(run)return cleanOperationsRun(run);
-  await new Promise(resolve=>setTimeout(resolve,750));
- }
- return null;
-}
-
 export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem;action:"ci"|"deploy"|"override-deploy"}})=>{
  requireOperationsUser(data.token);
  throw new Error("Dev Panel is status-only. Run CI and deployment workflows from their owning repository/Billing Store controls.");
