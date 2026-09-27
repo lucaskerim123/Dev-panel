@@ -606,6 +606,19 @@ export const getControlState=createServerFn({method:"POST"}).handler(async({data
  };
 });
 
+export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role).toLowerCase()))throw new Error("Admin access required");
+ const id=String(data.releaseId||"").trim();
+ if(!id)throw new Error("Release ID is required");
+ const current=await licenseMaster(`/releases/${encodeURIComponent(id)}`);
+ const release=current?.release;
+ if(!release)throw new Error("Release was not found in License Manager");
+ if(String(release.status||"").toLowerCase()==="published"||release.published_at)throw new Error("Published releases cannot be deleted.");
+ const result=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete"})});
+ return {ok:true,release:result?.release||null};
+});
+
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"approve"|"reject"|"rollback"|"revert"|"withdraw"|"archive"|"restore";reason?:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role).toLowerCase()))throw new Error("Admin access required");
