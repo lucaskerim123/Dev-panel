@@ -912,19 +912,22 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
  if(!["ci","deploy","override-deploy"].includes(action))throw new Error("Unknown Operations action");
  const workflow=action==="ci"?cfg.ci:action==="override-deploy"?cfg.quickDeploy:cfg.deploy;
  if(action==="deploy"){
-  const [latest,latestDeploy,ref]=await Promise.all([
-   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch=main&per_page=1"),
-   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch=main&status=success&per_page=1"),
-   github("/repos/"+cfg.repo+"/git/ref/heads/main"),
+  const [scanRows,latestDeploy,latestQuickDeploy,ref]=await Promise.all([
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&event=workflow_dispatch&per_page=50"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
   ]);
-  const latestRun=latest?.workflow_runs?.[0],deployedRun=latestDeploy?.workflow_runs?.[0],mainSha=String(ref?.object?.sha||"");
+  const mainSha=String(ref?.object?.sha||"");
+  const latestScan=(scanRows?.workflow_runs||[]).filter((run:any)=>run.head_sha===mainSha).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime())[0]||null;
+  const deployedRun=[latestDeploy?.workflow_runs?.[0],latestQuickDeploy?.workflow_runs?.[0]].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime())[0]||null;
   if(deployedRun?.head_sha===mainSha)throw new Error("No deployment needed. The latest main commit is already deployed to production.");
-  if(!latestRun||latestRun.status!=="completed"||latestRun.conclusion!=="success"||latestRun.head_sha!==mainSha)throw new Error("Deploy is blocked until the current main commit has a successful CI/preflight run. A CI run for an older commit cannot be reused.");
+  if(!latestScan||latestScan.status!=="completed"||latestScan.conclusion!=="success")throw new Error("Deploy is blocked until the exact current main commit has a successful Full Scan. A scan for an older commit cannot be reused.");
  }
  const startedAt=Date.now();
  await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main"})});
  const run=await findOperationsRun(cfg,workflow,startedAt);
- return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"CI":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
+ return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
 });
 
 async function operationsFullTree(repo:string,treeSha:string,prefix=""){
