@@ -108,7 +108,7 @@ export function OperationsWorkspace({session}:{session:any}){
         <div className="flex items-start justify-between gap-3">
          <div><p className="text-xs font-semibold">Full Scan</p><p className="mt-1 text-[10px] leading-5 text-muted-foreground">{ciRun?`#${ciRun.run_number} · ${time(ciRun.updated_at)} · ${ciRun.head_sha?.slice(0,12)}`:"No Full Scan run yet."}</p></div>
          <div className="flex flex-wrap justify-end gap-2">
-          {run?.html_url&&<a className="button-secondary" href={run.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>View job</a>}
+          {ciRun?.html_url&&<a className="button-secondary" href={ciRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>View scan</a>}
           <button className="button-primary" onClick={()=>action(system.key,"ci")} disabled={!!busy}>{busy===system.key+"ci"?<Loader2 size={13} className="animate-spin"/>:<Play size={13}/>}Full Scan</button>
          </div>
         </div>
