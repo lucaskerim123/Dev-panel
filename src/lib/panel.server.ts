@@ -614,7 +614,7 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  const current=await licenseMaster(`/releases/${encodeURIComponent(id)}`);
  const release=current?.release;
  if(!release)throw new Error("Release was not found in License Manager");
- if(String(release.status||"").toLowerCase()==="published"||release.published_at)throw new Error("Published releases cannot be deleted.");
+ if(String(release.status||"").toLowerCase()==="published")throw new Error("Currently published releases cannot be deleted.");
  const result=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete"})});
  return {ok:true,release:result?.release||null};
 });
