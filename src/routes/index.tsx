@@ -429,7 +429,7 @@ function Dashboard({ stats, releases, connected, run, channels, onBase, onEngine
       </section>
       <aside className="space-y-4">
         <section className="orbit-panel p-4"><SectionHead icon={ShieldCheck} title="System status" detail="Live authority and worker state"/><div className="mt-4 space-y-1"><StatusRow label="License Master" value={connected?"Connected":"Unavailable"} good={connected}/><StatusRow label="Release health" value={health+"%"} good={health===100}/><StatusRow label="Workflow" value={run?(run.conclusion||run.status||"queued"):"Idle"} good={!run||run.conclusion==="success"}/>{run?.id&&<StatusRow label="Run" value={"#"+run.id}/>}</div><button className="button-secondary mt-3 w-full" onClick={onActivity}>Open monitoring <ArrowRight size={13}/></button></section>
-        <section className="orbit-panel p-4"><SectionHead icon={Server} title="Release channels" detail="Enabled authoritative channels"/><div className="orbit-chip-list mt-4">{channels.length?channels.map((x:string)=><span key={x}>{x}</span>):<span>None reported</span>}</div></section>
+
       </aside>
     </div>
     <div className="orbit-dashboard-bottom-grid">
