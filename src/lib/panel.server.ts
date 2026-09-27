@@ -907,24 +907,7 @@ async function findOperationsRun(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem]
 
 export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem;action:"ci"|"deploy"|"override-deploy"}})=>{
  requireOperationsUser(data.token);
- const cfg=operationsConfig(data.system);
- const action=String(data.action||"");
- if(!["ci","deploy","override-deploy"].includes(action))throw new Error("Unknown Operations action");
- const workflow=action==="ci"?cfg.ci:action==="override-deploy"?cfg.quickDeploy:cfg.deploy;
- if(action==="deploy"){
-  const [latest,latestDeploy,ref]=await Promise.all([
-   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
-   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
-   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
-  ]);
-  const latestRun=latest?.workflow_runs?.[0],deployedRun=latestDeploy?.workflow_runs?.[0],mainSha=String(ref?.object?.sha||"");
-  if(deployedRun?.head_sha===mainSha)throw new Error("No deployment needed. The latest main commit is already deployed to production.");
-  if(!latestRun||latestRun.status!=="completed"||latestRun.conclusion!=="success"||latestRun.head_sha!==mainSha)throw new Error("Deploy is blocked until the current main commit has a successful CI/preflight run. A CI run for an older commit cannot be reused.");
- }
- const startedAt=Date.now();
- await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:cfg.branch})});
- const run=await findOperationsRun(cfg,workflow,startedAt);
- return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"CI":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
+ throw new Error("Dev Panel is status-only. Run CI and deployment workflows from their owning repository/Billing Store controls.");
 });
 
 async function operationsFullTree(repo:string,treeSha:string,prefix=""){
