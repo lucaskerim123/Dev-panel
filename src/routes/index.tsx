@@ -339,25 +339,10 @@ const NAV_STANDALONE = [
 ] as const;
 
 const NAV_GROUPS = [
-  {label:"Operate",items:[
-    ["base","Base Releases","Build, package & handoff",Rocket],
-    ["engine","Update Releases","Detect, package & handoff",Layers3],
-    ["operations","Operations","Deploy Billing Store & License Manager",Terminal],
-  ]},
-  {label:"Monitor",items:[
-    ["releases","Release Registry","Lifecycle state",PackageCheck],
+  {label:"Status",items:[
+    ["operations","Systems","Four-repository status",Server],
+    ["releases","Release Registry","Published / draft / validation state",PackageCheck],
     ["activity","Release Runs","Workflow execution",Activity],
-    ["monitoring","Monitoring","System health",BarChart3],
-  ]},
-  {label:"Control",items:[
-    ["channels","Channels","Read only",Server],
-    ["portal","Customer Portal","Publication state",Globe2],
-    ["repositories","Repositories","Sources & workers",Boxes],
-  ]},
-  {label:"Govern",items:[
-    ["audit","Audit History","Authority events",History],
-    ["access","Users & Access","Panel permissions",Users],
-    ["settings","Configuration","Runtime & panel settings",Settings2],
   ]},
 ] as const;
 
@@ -418,11 +403,10 @@ function Dashboard({ stats, releases, connected, run, channels, onBase, onEngine
   const pending=releases.filter((r:any)=>r.review_status==="pending").length;
   return <section className="orbit-screen space-y-4">
     <div className="orbit-reference-head">
-      <div><p className="orbit-reference-kicker">RELEASE OPERATIONS</p><h1>Overview</h1><span>Build, review, and hand off OrbitFS releases from one operational control surface.</span></div>
+      <div><p className="orbit-reference-kicker">ORBITFS STATUS</p><h1>Overview</h1><span>Read-only release and workflow status. Release configuration, approval and deployment controls live in Billing Store and License Manager.</span></div>
       <div className="orbit-reference-actions">
-        <button className="button-secondary" onClick={onReleases}><PackageCheck size={14}/> Release history</button>
-        <button className="button-secondary" onClick={onBase}><Rocket size={14}/> Base deployment</button>
-        <button className="button-primary" onClick={onEngine}><Layers3 size={14}/> Update release</button>
+        <button className="button-secondary" onClick={onReleases}><PackageCheck size={14}/> Release registry</button>
+        <button className="button-primary" onClick={onActivity}><Activity size={14}/> Workflow status</button>
       </div>
     </div>
     <div className="orbit-metric-grid">
@@ -656,17 +640,17 @@ function ReleasesPage({releases,session,onChanged,onBase,onEngine}:any) {
   const channels=Array.from(new Set(releases.map((r:any)=>String(r.channel||"stable"))));
   const lifecycleFor=(r:any)=>lifecycleEvents.find((e:any)=>!e.installation_id&&(String(e.release_id||"")===String(r.id)||(!e.release_id&&String(e.release_version)===String(r.version)&&String(e.release_type)===String(r.release_type)&&String(e.channel||"stable")===String(r.channel||"stable"))));
   const filtered=releases.filter((r:any)=>{if(type!=="all"&&String(r.release_type)!==type)return false;if(state!=="all"){const life=String(r.manifest?.lifecycle?.state||lifecycleFor(r)?.event_type||"");const s=life==="rolled_back"?"rolled_back":life==="reverted"?"reverted":(lifecycleFor(r)?.archived||r.archived_at)?"archived":String(r.status||"draft");if(s!==state)return false;}if(channel!=="all"&&String(r.channel)!==channel)return false;const q=query.trim().toLowerCase();if(q&&!String(r.version||"").toLowerCase().includes(q)&&!String(r.source_sha||"").toLowerCase().includes(q)&&!String(r.product_name||"orbitfs").toLowerCase().includes(q))return false;return true;});
-  const act=async(row:any,action:"approve"|"reject"|"rollback"|"revert"|"withdraw"|"archive"|"restore")=>{setBusy(row.id+":"+action);setError("");setMessage("");try{let reason:string|undefined;if(action==="rollback"||action==="revert"||action==="archive"){reason=prompt(action==="rollback"?"Reason this version was rolled back:":action==="revert"?"Reason this version was reverted:":"Reason for archiving this release:","")||undefined;if(!reason?.trim()){setBusy("");return}}await controlRelease({data:{token:session.token,releaseId:row.id,action,reason}});setMessage(action==="rollback"?"Version marked rolled back and archived.":action==="revert"?"Version marked reverted and archived.":"Release action completed: "+action+".");await onChanged?.()}catch(x:any){setError(x.message||"Release action failed.")}finally{setBusy("")}};
+  const unpublish=async(row:any)=>{if(!confirm("Unpublish v"+row.version+" through Billing Store?"))return;setBusy(row.id+":withdraw");setError("");setMessage("");try{await controlRelease({data:{token:session.token,releaseId:row.id,action:"withdraw"}});setMessage("Release unpublished through Billing Store; License Manager recorded the authoritative state.");await onChanged?.()}catch(x:any){setError(x.message||"Unpublish failed.")}finally{setBusy("")}};
   const published=releases.filter((r:any)=>r.status==="published"&&!r.archived_at).length,pending=releases.filter((r:any)=>r.review_status==="pending"&&!r.archived_at).length,failed=releases.filter((r:any)=>r.manifest?.validation?.status==="failed"&&!r.archived_at).length;
   return <section className="orbit-screen space-y-4">
-    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">RELEASE REGISTRY</p><h1>Releases</h1><span>Review Base and Update release state, validation, technical approval, and lifecycle actions.</span></div><div className="orbit-reference-actions"><button className="button-secondary" onClick={onBase}><Rocket size={14}/> New Base</button><button className="button-primary" onClick={onEngine}><Layers3 size={14}/> New Update</button></div></div>
+    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">RELEASE REGISTRY</p><h1>Releases</h1><span>Status-only view of Base and Update releases. The only lifecycle action exposed here is Unpublish, which is routed through Billing Store.</span></div></div>
     {error&&<Alert tone="error" onClose={()=>setError("")}>{error}</Alert>}{message&&<Alert tone="success" onClose={()=>setMessage("")}>{message}</Alert>}
     <section className="orbit-filterbar"><div className="orbit-filter-search"><Search size={14}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search version, product, or commit…"/></div><select value={type} onChange={e=>setType(e.target.value)}><option value="all">All types</option><option value="base">Base</option><option value="update">Update</option></select><select value={state} onChange={e=>setState(e.target.value)}><option value="all">All states</option><option value="draft">Draft</option><option value="published">Published</option><option value="disabled">Unpublished</option><option value="archived">Archived</option><option value="rolled_back">Rolled back</option><option value="reverted">Reverted</option></select><select value={channel} onChange={e=>setChannelFilter(e.target.value)}><option value="all">All channels</option>{channels.map((x:any)=><option key={x} value={x}>{x}</option>)}</select></section>
     <div className="orbit-registry-grid">
       <section className="orbit-panel overflow-hidden">
-        <div className="orbit-panel-toolbar"><SectionHead icon={PackageCheck} title="Release history" detail={String(filtered.length)+" of "+String(releases.length)+" releases"}/><span className="orbit-small-note">Technical state + Dev Panel rollback history</span></div>
+        <div className="orbit-panel-toolbar"><SectionHead icon={PackageCheck} title="Release history" detail={String(filtered.length)+" of "+String(releases.length)+" releases"}/><span className="orbit-small-note">Authoritative state from License Manager · control in Billing Store</span></div>
         <div className="orbit-registry-head"><span>Release</span><span>Type</span><span>Channel</span><span>Validation</span><span>Review</span><span>Status</span></div>
-        <div>{filtered.map((r:any)=>{const lifecycle=lifecycleFor(r);return <div key={r.id} className="orbit-registry-row"><div className="orbit-release-title"><b>{r.product_name||"OrbitFS"} v{r.version}</b><small>{r.source_ref||"—"} · {(r.source_sha||"").slice(0,8)||"no SHA"}{r.manifest?.lifecycle?.state?` · ${String(r.manifest.lifecycle.state).replaceAll("_"," ")}: ${r.manifest.lifecycle.reason||"No reason recorded"}`:lifecycle?` · ${String(lifecycle.event_type).replaceAll("_"," ")}: ${lifecycle.reason}`:""}</small></div><span>{r.release_type||"—"}</span><span>{r.channel||"stable"}</span><StatusPill text={r.manifest?.validation?.status||"not run"}/><StatusPill text={r.review_status||"pending"}/><StatusPill text={r.manifest?.lifecycle?.state?String(r.manifest.lifecycle.state).replaceAll("_"," "):lifecycle?String(lifecycle.event_type).replaceAll("_"," "):r.archived_at?"archived":r.status||"draft"}/><div className="orbit-registry-actions">{r.review_status==="pending"&&r.manifest?.validation?.status==="passed"&&<button className="button-primary" disabled={!!busy} onClick={()=>act(r,"approve")}>Approve</button>}{r.review_status==="pending"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"reject")}>Reject</button>}{r.status==="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"rollback")}>Mark rolled back</button>}{r.status==="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"revert")}>Mark reverted</button>}{r.status==="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"withdraw")}>Unpublish</button>}{!r.archived_at&&r.status!=="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"archive")}>Archive</button>}{r.archived_at&&!r.manifest?.lifecycle?.state&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"restore")}>Restore</button>}</div></div>})}{!filtered.length&&<div className="orbit-empty">No releases match these filters.</div>}</div>
+        <div>{filtered.map((r:any)=>{const lifecycle=lifecycleFor(r);return <div key={r.id} className="orbit-registry-row"><div className="orbit-release-title"><b>{r.product_name||"OrbitFS"} v{r.version}</b><small>{r.source_ref||"—"} · {(r.source_sha||"").slice(0,8)||"no SHA"}{r.manifest?.lifecycle?.state?` · ${String(r.manifest.lifecycle.state).replaceAll("_"," ")}: ${r.manifest.lifecycle.reason||"No reason recorded"}`:lifecycle?` · ${String(lifecycle.event_type).replaceAll("_"," ")}: ${lifecycle.reason}`:""}</small></div><span>{r.release_type||"—"}</span><span>{r.channel||"stable"}</span><StatusPill text={r.manifest?.validation?.status||"not run"}/><StatusPill text={r.review_status||"pending"}/><StatusPill text={r.manifest?.lifecycle?.state?String(r.manifest.lifecycle.state).replaceAll("_"," "):lifecycle?String(lifecycle.event_type).replaceAll("_"," "):r.archived_at?"archived":r.status||"draft"}/><div className="orbit-registry-actions">{r.status==="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>unpublish(r)}>Unpublish</button>}</div></div>})}{!filtered.length&&<div className="orbit-empty">No releases match these filters.</div>}</div>
       </section>
       <aside className="space-y-4"><section className="orbit-panel p-4"><SectionHead icon={BarChart3} title="Registry summary" detail="Current visible release state"/><div className="mt-4"><StatusRow label="Published" value={String(published)} good/><StatusRow label="Pending review" value={String(pending)}/><StatusRow label="Validation failed" value={String(failed)} good={failed===0}/><StatusRow label="Channels" value={String(channels.length)}/></div></section><section className="orbit-panel overflow-hidden"><div className="border-b p-4"><SectionHead icon={History} title="Rollback / revert history" detail="Operational results reported back to Dev Panel."/></div><div className="max-h-[360px] overflow-auto">{lifecycleEvents.slice(0,10).map((ev:any)=><div key={ev.id||ev.event_id} className="border-b p-3 last:border-b-0"><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold">v{ev.release_version}</p><StatusPill text={String(ev.event_type||"event").replaceAll("_"," ")}/></div><p className="mt-1 text-[10px] text-muted-foreground">{ev.release_type} · {ev.channel||"stable"}{ev.target_version?" → v"+ev.target_version:""}</p><p className="mt-2 text-[10px] leading-5">{ev.reason}</p><p className="mt-1 text-[9px] text-muted-foreground">{ev.occurred_at?new Date(ev.occurred_at).toLocaleString():""}{ev.installation_id?" · installation "+String(ev.installation_id).slice(0,10)+"…":""}</p></div>)}{!lifecycleEvents.length&&<div className="p-6 text-center text-[10px] text-muted-foreground">No rollback or revert events recorded.</div>}</div></section></aside>
     </div>
