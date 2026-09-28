@@ -642,7 +642,7 @@ export const getControlState=createServerFn({method:"POST"}).handler(async({data
  };
 });
 
-export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;confirmation:string}})=>{
+export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role).toLowerCase()))throw new Error("Admin access required");
  const id=String(data.releaseId||"").trim();
@@ -650,11 +650,26 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  const current=await licenseMaster(`/releases/${encodeURIComponent(id)}`);
  const release=current?.release;
  if(!release)throw new Error("Release was not found in License Manager");
- if(String(release.status||"").toLowerCase()==="published")throw new Error("Currently published releases cannot be deleted.");
+ const status=String(release.status||"").toLowerCase();
+ if(status==="published")throw new Error("Currently published releases cannot be deleted.");
+ const deletable=Boolean(release.archived_at)||(status==="draft"&&!release.published_at);
+ if(!deletable)throw new Error("Only archived releases or never-published drafts can be permanently deleted.");
  const expected=`DELETE_RELEASE:${id}:${release.version}`;
- if(String(data.confirmation||"").trim()!==expected)throw new Error("Permanent release deletion confirmation did not match. Archive the release instead if rollback history must be retained.");
+
+ let billingWarning="";
+ try{
+  await billingStoreReset({
+   releaseIds:[id],
+   version:String(release.version||""),
+   releaseType:String(release.release_type||"").toLowerCase()==="update"?"update":"base",
+   channel:String(release.channel||"stable").toLowerCase()
+  });
+ }catch(error:any){
+  billingWarning="Billing presentation cleanup could not be confirmed: "+String(error?.message||"unknown error")+".";
+ }
+
  const result=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation:expected})});
- return {ok:true,release:result?.release||null};
+ return {ok:true,deleted:result?.deleted===true,id,warning:billingWarning||null};
 });
 
 export const startFreshRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{
