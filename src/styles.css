@@ -1218,3 +1218,31 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
 .orbit-sidebar .orbit-nav-item{min-height:46px;padding:.5rem .58rem}
 .orbit-sidebar .orbit-nav-icon{width:29px;height:29px}
 .orbit-sidebar .orbit-authority-card{padding:.7rem}
+
+
+/* Compact density pass: keep every Dev Panel page slightly tighter without changing the layout language. */
+html{font-size:15px}
+.button-danger{
+  display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
+  border:1px solid rgba(255,98,110,.28);border-radius:.55rem;
+  background:rgba(111,28,38,.18);color:#ff9ba4;
+  padding:.58rem .78rem;font-size:.72rem;font-weight:650;
+  transition:background-color .15s ease,border-color .15s ease,opacity .15s ease
+}
+.button-danger:hover:not(:disabled){background:rgba(135,35,46,.3);border-color:rgba(255,98,110,.46)}
+.button-danger:disabled{cursor:not-allowed;opacity:.4}
+.orbit-sidebar{width:250px!important}
+.orbit-sidebar .orbit-nav-item{min-height:43px;padding:.43rem .52rem}
+.orbit-sidebar .orbit-nav-icon{width:27px;height:27px}
+.orbit-sidebar .sticky{padding:.65rem!important}
+.orbit-panel-toolbar{min-height:50px;padding:.58rem .75rem}
+.orbit-release-row,.orbit-registry-row{padding:.55rem .72rem}
+.orbit-reference-head h1{font-size:2rem}
+.orbit-page-head{padding:1.05rem 1.15rem}
+.orbit-page-head h1{font-size:1.85rem}
+.orbit-metric{min-height:96px;padding:.75rem .82rem}
+.orbit-metric-value{font-size:1.62rem}
+@media(max-width:767px){
+  html{font-size:14.5px}
+  .orbit-reference-head h1,.orbit-page-head h1{font-size:1.72rem}
+}
