@@ -171,7 +171,23 @@ function Index() {
       setFiles(r.files || []);
       setCommits(r.commits || []);
       const bootstrapVersion=r.initialUpdate?String(r.baseline?.initialReleaseVersion||r.baseline?.version||"").trim():"";
-      setBaseline({ ...(r.baseline || {}), repo: r.repo, ref: r.ref, head: r.head, baseBaseline: r.baseBaseline || null, inspectionMode:r.inspectionMode, initialUpdate:r.initialUpdate===true, detectedComponents, bootstrapVersion });
+      setBaseline({
+        ...(r.baseline || {}),
+        repo:r.repo,
+        ref:r.ref,
+        head:r.head,
+        baseBaseline:r.baseBaseline||null,
+        inspectionMode:r.inspectionMode,
+        initialRelease:r.initialRelease===true,
+        initialUpdate:r.initialUpdate===true,
+        detectedComponents,
+        bootstrapVersion,
+        hasSourceChanges:r.hasSourceChanges===true,
+        changeSummary:r.changeSummary||null,
+        diffComplete:r.diffComplete!==false,
+        commitCount:Number(r.commitCount??(r.commits||[]).length),
+        compareMetadataFiles:Number(r.compareMetadataFiles??0),
+      });
       if (type === "engine") {
         if(!String(minBase||"").trim()&&r.baseBaseline?.version)setMinBase(resolvedMinBase);
         if(bootstrapVersion)setVersion(bootstrapVersion);
@@ -195,11 +211,14 @@ function Index() {
         baseline:r.baseline||null,
       }));
       setReviewOpen(true);
+      const summary=r.changeSummary||{};
       setNotice(r.initialRelease
-        ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0, 8)} · initial Base snapshot · ${r.files.length} tracked files inspected.`
+        ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · initial Base snapshot · ${r.files.length} tracked files inspected.`
         : r.initialUpdate
-          ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0, 8)} · locked bootstrap baseline ${String(r.baseline?.sourceSha||"").slice(0,8)} → first Update v${bootstrapVersion||"1.0.0"} · ${r.files.length} changed files · targets: ${detectedComponents.join(", ")||"none"}.`
-          : `${r.repo}@${r.ref} resolved at ${r.head.slice(0, 8)} · ${r.files.length} changed files detected against published Update baseline${type==="engine"&&detectedComponents.length?` · targets: ${detectedComponents.join(", ")}`:""}.`);
+          ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · locked bootstrap snapshot · ${r.files.length} tracked files · targets: ${detectedComponents.join(", ")||"none"}.`
+          : r.hasSourceChanges
+            ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · ${r.files.length} file changes since published ${type==="base"?"Base":"Update"} baseline · +${summary.added||0} added · ~${summary.modified||0} modified · −${summary.deleted||0} deleted${summary.renamed?` · ${summary.renamed} renamed`:""}${type==="engine"&&detectedComponents.length?` · targets: ${detectedComponents.join(", ")}`:""}.`
+            : `${r.repo}@${r.ref} is already up to date with the published ${type==="base"?"Base":"Update"} baseline. No added, modified, deleted or renamed files were detected; a new release is blocked until source changes exist.`);
     } catch (x: any) {
       setError(x.message || "Unable to inspect source.");
     } finally { setBusy(""); }
@@ -487,7 +506,7 @@ function buildChangelog(type: ReleaseType, data: any) {
       ? `Initial Engine baseline snapshot: ${files.length} tracked files. The exact Engine inventory and SHA-256 values are recorded in the packaged Update manifest; the workflow control payload does not carry the full file list.`
     : files.length
       ? visibleFiles.map((f:any) => `• ${f.filename} (${f.status}, +${f.additions || 0} / -${f.deletions || 0})`).join("\n") + (files.length > visibleFiles.length ? `\n• … ${files.length-visibleFiles.length} additional changed files recorded in the release manifest.` : "")
-      : "No source changes were detected against the previous published Base release.";
+      : `No source file changes were detected against the previous published ${base ? "Base" : "Update"} release.`;
   const commitLines = commits.length ? commits.map((s:string) => `• ${s}`).join("\n") : "No commits were returned for this source range.";
   const changes = initialRelease
     ? `No previously published Base release exists in this channel. This initial Base deployment will package the complete current source snapshot (${files.length} tracked files).`
@@ -495,9 +514,7 @@ function buildChangelog(type: ReleaseType, data: any) {
       ? `No previously published Update exists in this channel. v${String(data.baseline?.initialReleaseVersion||data.version||"1.0.0")} is the locked Engine snapshot baseline at ${String(data.baseline?.sourceSha||data.head||"").slice(0,12)||"the inspected UPDATE_RELEASE SHA"}. It packages the current Engine state once; future releases compare against this published source SHA and contain only the newly detected change set.`
     : files.length
     ? `This ${base ? "deployment" : "update"} contains ${files.length} changed source file${files.length === 1 ? "" : "s"}.${base ? "" : ` The selected components are ${(data.components || []).map((x:string)=>x.toUpperCase()).join(", ") || "not specified"}.`}`
-    : base
-      ? "No source changes were detected against the previous published Base release. This is still a complete Base deployment: the current Base source state will be packaged and go through the normal checks."
-      : "No source changes were detected. An Engine update requires source changes, so this release cannot be dispatched until changes are available.";
+    : `No source file changes were detected against the previous published ${base ? "Base" : "Update"} release. There is nothing new to release, so dispatch is blocked until source files change.`;
   const checks = [
     "✓ Source checked",
     "✓ Change detection completed",
