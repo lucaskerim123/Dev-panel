@@ -31,7 +31,7 @@ export function ReleaseWorkspace(p:any){
  const published=releases.filter((r:any)=>r.status==="published"&&!r.archived_at).length;
  const active=releases.filter((r:any)=>!r.archived_at&&!["published","disabled"].includes(String(r.status||""))).length;
  const rollback=releases.filter((r:any)=>Boolean(r.manifest?.rollback_from)).length;
- const inspected=Boolean(p.reviewOpen);
+ const inspected=Boolean(p.reviewOpen&&p.baseline?.head);
  const sourceRepo=p.baseline?.repo||(base?"lucaskerim123/V1-vercel-base":"lucaskerim123/V1-vercel-engine");
  const sourceRef=p.baseline?.ref||(base?"base-release":"UPDATE_RELEASE");
  const sourceSha=p.baseline?.head||"";
@@ -71,12 +71,13 @@ export function ReleaseWorkspace(p:any){
   renamed:p.files.filter((x:any)=>fileStatusLabel(x.status)==="renamed").length,
   snapshot:p.files.filter((x:any)=>fileStatusLabel(x.status)==="snapshot").length,
  };
- const hasSourceChanges=inspected&&(snapshotInspection?p.files.length>0:(p.baseline?.hasSourceChanges===true||p.files.length>0));
+ const hasSourceChanges=inspected&&(snapshotInspection?p.files.length>0:p.baseline?.hasSourceChanges===true);
  const canStart=Boolean(p.version&&hasSourceChanges&&p.changelogDraft?.trim()&&(base||p.components.length));
  const stageLabels=base?[["01","Inspect source","Repository + baseline"],["02","Stage 1 draft","Definition + deployment log"],["03","Build package","Artifact + manifest + checksum"],["04","Handoff","Read-only downstream status"]]:[["01","Inspect Engine","Source + update targets"],["02","Stage 1 draft","Compatibility + changelog"],["03","Package update","Manifest + artifact + checksum"],["04","Handoff","Read-only downstream status"]];
 
- function openNew(){setSelected(null);setActiveDraft(null);setReleaseState(null);setMessage("");setError("");setStage(0);setWorkspace(true)}
- function openDraft(d:any){const input=d.inputs||{};setSelected(null);setActiveDraft(d);setReleaseState(null);setMessage("");setError("");p.setVersion?.(d.version||"");p.setChannel?.(d.channel||"stable");p.setNotes?.(input.notes||"");p.setComponents?.(Array.isArray(input.components)?input.components:[]);if(input.minimumBaseVersion)p.setMinBase?.(String(input.minimumBaseVersion));if(input.protocol)p.setProtocol?.(String(input.protocol));if(input.changelogTemplate)p.setChangelogTemplate?.(input.changelogTemplate);p.setChangelogDraft?.(String(input.changelogDraft||input.notes||""));setStage(1);setWorkspace(true)}
+ function invalidateInspection(){p.setFiles?.([]);p.setCommits?.([]);p.setBaseline?.(null);p.setReviewOpen?.(false);p.setChangelogDraft?.("")}
+ function openNew(){invalidateInspection();setSelected(null);setActiveDraft(null);setReleaseState(null);setMessage("");setError("");setStage(0);setWorkspace(true)}
+ function openDraft(d:any){invalidateInspection();const input=d.inputs||{};setSelected(null);setActiveDraft(d);setReleaseState(null);setMessage("");setError("");p.setVersion?.(d.version||"");p.setChannel?.(d.channel||"stable");p.setNotes?.(input.notes||"");p.setComponents?.(Array.isArray(input.components)?input.components:[]);if(input.minimumBaseVersion)p.setMinBase?.(String(input.minimumBaseVersion));if(input.protocol)p.setProtocol?.(String(input.protocol));if(input.changelogTemplate)p.setChangelogTemplate?.(input.changelogTemplate);p.setChangelogDraft?.(String(input.changelogDraft||input.notes||""));setStage(1);setWorkspace(true)}
  function openExisting(r:any){setSelected(r);setActiveDraft(null);setReleaseState(r);setMessage("");setError("");setStage(3);setWorkspace(true)}
  async function saveDraft(){setActionBusy("save");setError("");setMessage("");try{const r=await saveReleaseDraft({data:{token:p.session.token,draftId:activeDraft?.id||null,type:p.type,version:p.version,channel:p.channel,notes:p.notes,components:p.components,minimumBaseVersion:p.minBase,protocol:p.protocol,changelogTemplate:p.changelogTemplate,changelogDraft:p.changelogDraft,sourceSha:p.baseline?.head||activeDraft?.source_sha||null}});setActiveDraft(r.draft);setMessage(r.created?"Stage 1 draft created.":"Stage 1 draft updated.");await p.onChanged?.()}catch(x:any){setError(x.message||"Unable to save Stage 1 draft.")}finally{setActionBusy("")}}
  async function archiveDraft(d:any,archived:boolean){setActionBusy((archived?"archive:":"restore:")+d.id);setError("");setMessage("");try{await setReleaseDraftArchived({data:{token:p.session.token,draftId:d.id,archived}});setMessage(archived?"Stage 1 draft archived.":"Stage 1 draft restored.");if(activeDraft?.id===d.id&&archived){setWorkspace(false);setActiveDraft(null)}await p.onChanged?.()}catch(x:any){setError(x.message||"Unable to update Stage 1 draft.")}finally{setActionBusy("")}}
