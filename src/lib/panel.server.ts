@@ -79,6 +79,121 @@ function detectUpdateComponents(files:any[]){
  return out;
 }
 
+type SourceFileChange={
+ filename:string;
+ status:string;
+ additions:number;
+ deletions:number;
+ changes:number;
+ patch?:string;
+ previous_filename?:string|null;
+ size?:number;
+};
+
+async function sourceTreeFiles(repo:string,commitSha:string){
+ const commit=await github(`/repos/${repo}/git/commits/${encodeURIComponent(commitSha)}`);
+ const treeSha=String(commit?.tree?.sha||"");
+ if(!treeSha)throw new Error(`Could not resolve source tree for ${repo}@${commitSha.slice(0,8)}`);
+ const walk=async(sha:string,prefix=""):Promise<any[]>=>{
+  const tree=await github(`/repos/${repo}/git/trees/${encodeURIComponent(sha)}`);
+  const groups=await Promise.all((tree?.tree||[]).map(async(item:any)=>{
+   const path=prefix?prefix+"/"+String(item.path||""):String(item.path||"");
+   if(item.type==="tree")return walk(String(item.sha),path);
+   if(item.type==="blob"&&path)return [{path,sha:String(item.sha||""),mode:String(item.mode||""),size:Number(item.size||0)}];
+   return [];
+  }));
+  return groups.flat();
+ };
+ return walk(treeSha);
+}
+
+function sourceChangeSummary(files:any[]){
+ const summary={total:0,added:0,modified:0,deleted:0,renamed:0,copied:0,snapshot:0,other:0};
+ for(const file of files||[]){
+  summary.total++;
+  const status=String(file?.status||"modified").toLowerCase();
+  if(status==="added")summary.added++;
+  else if(status==="modified"||status==="changed")summary.modified++;
+  else if(status==="removed"||status==="deleted")summary.deleted++;
+  else if(status==="renamed")summary.renamed++;
+  else if(status==="copied")summary.copied++;
+  else if(status==="snapshot")summary.snapshot++;
+  else summary.other++;
+ }
+ return summary;
+}
+
+async function sourceSnapshotFiles(repo:string,head:string):Promise<SourceFileChange[]>{
+ const tree=await sourceTreeFiles(repo,head);
+ return tree
+  .sort((a:any,b:any)=>String(a.path).localeCompare(String(b.path)))
+  .map((entry:any)=>({filename:String(entry.path),status:"snapshot",additions:0,deletions:0,changes:0,size:Number(entry.size||0)}));
+}
+
+async function sourceCompareCommits(repo:string,from:string,head:string){
+ const commits:any[]=[];
+ for(let page=1;page<=100;page++){
+  const cmp=await github(`/repos/${repo}/compare/${encodeURIComponent(from)}...${encodeURIComponent(head)}?per_page=100&page=${page}`);
+  const rows=cmp?.commits||[];
+  commits.push(...rows);
+  if(rows.length<100)break;
+ }
+ return commits;
+}
+
+async function completeSourceDiff(repo:string,from:string,head:string){
+ const [before,after,compareMeta,commits]=await Promise.all([
+  sourceTreeFiles(repo,from),
+  sourceTreeFiles(repo,head),
+  github(`/repos/${repo}/compare/${encodeURIComponent(from)}...${encodeURIComponent(head)}?per_page=100&page=1`),
+  sourceCompareCommits(repo,from,head),
+ ]);
+ const beforeMap=new Map(before.map((entry:any)=>[String(entry.path),entry]));
+ const afterMap=new Map(after.map((entry:any)=>[String(entry.path),entry]));
+ const changes=new Map<string,SourceFileChange>();
+
+ for(const path of new Set([...beforeMap.keys(),...afterMap.keys()])){
+  const oldFile:any=beforeMap.get(path),newFile:any=afterMap.get(path);
+  if(!oldFile&&newFile)changes.set(path,{filename:path,status:"added",additions:0,deletions:0,changes:0,size:Number(newFile.size||0)});
+  else if(oldFile&&!newFile)changes.set(path,{filename:path,status:"removed",additions:0,deletions:0,changes:0,size:Number(oldFile.size||0)});
+  else if(oldFile&&newFile&&(oldFile.sha!==newFile.sha||oldFile.mode!==newFile.mode)){
+   changes.set(path,{filename:path,status:"modified",additions:0,deletions:0,changes:0,size:Number(newFile.size||0)});
+  }
+ }
+
+ const metadata=Array.isArray(compareMeta?.files)?compareMeta.files:[];
+ for(const file of metadata){
+  const filename=String(file?.filename||"");
+  if(!filename)continue;
+  const status=String(file?.status||"modified").toLowerCase();
+  const previous=String(file?.previous_filename||"").trim();
+  if(status==="renamed"&&previous){
+   changes.delete(previous);
+   changes.delete(filename);
+  }
+  const existing=changes.get(filename);
+  changes.set(filename,{
+   filename,
+   status,
+   additions:Number(file?.additions||0),
+   deletions:Number(file?.deletions||0),
+   changes:Number(file?.changes||0),
+   patch:String(file?.patch||""),
+   previous_filename:previous||null,
+   size:Number((afterMap.get(filename) as any)?.size||(existing as any)?.size||0),
+  });
+ }
+
+ const files=[...changes.values()].sort((a,b)=>a.filename.localeCompare(b.filename));
+ return {
+  files,
+  commits,
+  summary:sourceChangeSummary(files),
+  diffComplete:true,
+  compareMetadataFiles:metadata.length,
+ };
+}
+
 async function initialEngineSourceBaseline(head:string){
  const config=await github(`/repos/${ENGINE_REPO}/contents/release/update-baseline.json?ref=${encodeURIComponent(ENGINE_REF)}`);
  const raw=String(config?.content||"").replace(/\n/g,"");
@@ -352,54 +467,78 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
  const releaseType=data.type==="base"?"base":"update";
  const channel=normalizeChannel(data.channel||"stable");
  const branch=await github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(ref)}`);
- const head=branch?.object?.sha;if(!head)throw new Error(`Could not resolve ${repo}@${ref}`);
+ const head=String(branch?.object?.sha||"");
+ if(!head)throw new Error(`Could not resolve ${repo}@${ref}`);
+
  let baseline:any=null;
  let baseBaseline:any=null;
- try {
-   const baseResult = await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(ENGINE_BASE_COMPATIBILITY_CHANNEL)}&type=base&include_archived=false`);
-   baseBaseline=(baseResult?.releases||[])
-     .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
-     .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
- } catch {}
- try {
-   const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);
-   baseline=(result?.releases||[])
-     .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
-     .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
- } catch {}
+ try{
+  const baseResult=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(ENGINE_BASE_COMPATIBILITY_CHANNEL)}&type=base&include_archived=false`);
+  baseBaseline=(baseResult?.releases||[])
+   .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
+   .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+ }catch{}
+ try{
+  const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);
+  baseline=(result?.releases||[])
+   .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
+   .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+ }catch{}
 
  const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha,channel:ENGINE_BASE_COMPATIBILITY_CHANNEL}:null;
- let from=String(baseline?.source_sha||"");
- let baselineInfo:any=baseline?{id:baseline.id,version:baseline.version,sourceSha:baseline.source_sha,kind:"published_update"}:null;
- let initialRelease=false;
- let initialUpdate=false;
- let inspectionMode="compare";
+ const from=String(baseline?.source_sha||"");
+ let baselineInfo:any=baseline?{
+  id:baseline.id,
+  version:baseline.version,
+  sourceSha:baseline.source_sha,
+  channel:String(baseline.channel||channel),
+  kind:data.type==="base"?"published_base":"published_update"
+ }:null;
 
  if(!from&&data.type==="engine"){
-   const initial=await initialEngineSourceBaseline(head);
-   const commit=await github(`/repos/${repo}/git/commits/${encodeURIComponent(head)}`);
-   const treeSha=commit?.tree?.sha;
-   const tree=treeSha?await github(`/repos/${repo}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`):null;
-   const files=(tree?.tree||[])
-     .filter((entry:any)=>entry.type==="blob"&&entry.path)
-     .map((entry:any)=>({filename:String(entry.path),status:"snapshot",additions:0,deletions:0,changes:0,size:Number(entry.size||0)}));
-   baselineInfo={id:null,version:initial.initialReleaseVersion,sourceSha:head,kind:"initial_snapshot",ref:initial.ref,locked:initial.locked,initialReleaseVersion:initial.initialReleaseVersion};
-   return {repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:true,inspectionMode:"initial_snapshot",detectedComponents:initial.components,files,commits:[]};
- }
- if(!from){
-   const commit=await github(`/repos/${repo}/git/commits/${encodeURIComponent(head)}`);
-   const treeSha=commit?.tree?.sha;
-   const tree=treeSha?await github(`/repos/${repo}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`):null;
-   const files=(tree?.tree||[])
-     .filter((entry:any)=>entry.type==="blob"&&entry.path)
-     .map((entry:any)=>({filename:String(entry.path),status:"snapshot",additions:0,deletions:0,changes:0,size:Number(entry.size||0)}));
-   return {repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,initialRelease:true,initialUpdate:false,inspectionMode:"full_snapshot",detectedComponents:[],files,commits:[]};
+  const initial=await initialEngineSourceBaseline(head);
+  const files=await sourceSnapshotFiles(repo,head);
+  const changeSummary=sourceChangeSummary(files);
+  baselineInfo={id:null,version:initial.initialReleaseVersion,sourceSha:head,kind:"initial_snapshot",ref:initial.ref,locked:initial.locked,initialReleaseVersion:initial.initialReleaseVersion};
+  return {
+   repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,
+   initialRelease:false,initialUpdate:true,inspectionMode:"initial_snapshot",
+   detectedComponents:initial.components,files,commits:[],
+   changeSummary,hasSourceChanges:files.length>0,diffComplete:true,commitCount:0
+  };
  }
 
- if(from===head)return {repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate,inspectionMode,detectedComponents:[],files:[],commits:[]};
- const cmp=await github(`/repos/${repo}/compare/${encodeURIComponent(from)}...${encodeURIComponent(head)}`);
- const files=(cmp?.files||[]).map((f:any)=>({filename:f.filename,status:f.status,additions:f.additions,deletions:f.deletions,changes:f.changes,patch:f.patch||""}));
- return {repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease,initialUpdate,inspectionMode,detectedComponents:data.type==="engine"?detectUpdateComponents(files):[],files,commits:cmp?.commits||[]};
+ if(!from){
+  const files=await sourceSnapshotFiles(repo,head);
+  const changeSummary=sourceChangeSummary(files);
+  return {
+   repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,
+   initialRelease:true,initialUpdate:false,inspectionMode:"full_snapshot",
+   detectedComponents:[],files,commits:[],
+   changeSummary,hasSourceChanges:files.length>0,diffComplete:true,commitCount:0
+  };
+ }
+
+ if(from===head){
+  const changeSummary=sourceChangeSummary([]);
+  return {
+   repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,
+   initialRelease:false,initialUpdate:false,inspectionMode:"compare",
+   detectedComponents:[],files:[],commits:[],
+   changeSummary,hasSourceChanges:false,diffComplete:true,commitCount:0
+  };
+ }
+
+ const diff=await completeSourceDiff(repo,from,head);
+ return {
+  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,
+  initialRelease:false,initialUpdate:false,inspectionMode:"compare",
+  detectedComponents:data.type==="engine"?detectUpdateComponents(diff.files):[],
+  files:diff.files,commits:diff.commits,
+  changeSummary:diff.summary,hasSourceChanges:diff.files.length>0,
+  diffComplete:diff.diffComplete,commitCount:diff.commits.length,
+  compareMetadataFiles:diff.compareMetadataFiles
+ };
 });
 
 export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{  readSession(data.token);  const product="orbitfs_base";  const releaseType=data.type==="base"?"base":"update";  const channel=normalizeChannel(data.channel);  const result=await licenseMaster(`/releases?product=${product}&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);  const release=(result?.releases||[]).find((r:any)=>String(r.version)===String(data.version)&&!r.archived_at);  return {release:release||null,product,releaseType,channel};});export const getReleaseRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId?:number}})=>{
@@ -494,30 +633,19 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
    if(version!==initialUpdateConfig.initialReleaseVersion)throw new Error(`The first published Update is locked to v${initialUpdateConfig.initialReleaseVersion}. Set the Update version to ${initialUpdateConfig.initialReleaseVersion}; later releases can use any advancing SemVer.`);
    sourceBaselineKind="initial_snapshot";
  }
- let detectedFiles:any[] = [];
- if (initialRelease) {
-   const commit=await github(`/repos/${repo}/git/commits/${encodeURIComponent(head)}`);
-   const treeSha=commit?.tree?.sha;
-   const tree=treeSha?await github(`/repos/${repo}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`):null;
-   detectedFiles=(tree?.tree||[])
-     .filter((entry:any)=>entry.type==="blob"&&entry.path)
-     .map((entry:any)=>({filename:String(entry.path),status:"snapshot",additions:0,deletions:0,changes:0,size:Number(entry.size||0)}));
- } else if (!initialUpdate && previousSourceCommit && previousSourceCommit !== head) {
-   const cmp = await github(`/repos/${repo}/compare/${encodeURIComponent(previousSourceCommit)}...${encodeURIComponent(head)}`);
-   detectedFiles = (cmp?.files || []).map((f:any)=>({
-     filename:f.filename,
-     status:f.status,
-     additions:f.additions,
-     deletions:f.deletions,
-     changes:f.changes,
-     patch:f.patch||"",
-   }));
+ let detectedFiles:any[]=[];
+ if(initialRelease||initialUpdate){
+  detectedFiles=await sourceSnapshotFiles(repo,head);
+ }else if(previousSourceCommit&&previousSourceCommit!==head){
+  detectedFiles=(await completeSourceDiff(repo,previousSourceCommit,head)).files;
  }
 
- if (data.type === "engine" && previousSourceCommit === head) {
-   throw new Error("No source changes detected since the Update source baseline.");
+ if(!initialRelease&&!initialUpdate&&previousSourceCommit===head){
+  throw new Error(`No ${data.type==="base"?"Base":"Update"} source changes detected since the authoritative published baseline. There is nothing new to release.`);
  }
- if(data.type==="engine"&&!initialUpdate&&!detectedFiles.length)throw new Error("No Update source changes were detected against the authoritative published baseline.");
+ if(!initialRelease&&!initialUpdate&&!detectedFiles.length){
+  throw new Error(`No ${data.type==="base"?"Base":"Update"} file changes were detected against the authoritative published baseline. There is nothing new to release.`);
+ }
 
  const selectedComponents = data.type === "engine"
    ? [...new Set((data.components || []).map((x:string)=>String(x).trim().toLowerCase()).filter((x:string)=>["base","apex","mcp","studio"].includes(x)))]
