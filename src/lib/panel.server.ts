@@ -66,7 +66,10 @@ function detectUpdateComponents(files:any[]){
   if(path==="updates/base/delete.txt"){
    const patch=String(item?.patch||"");
    const addsRealDeletion=patch.split("\n").some((line:string)=>line.startsWith("+")&&!line.startsWith("+++")&&Boolean(line.slice(1).trim())&&!line.slice(1).trim().startsWith("#"));
-   if(addsRealDeletion)add("base");
+   // A complete tree diff can detect this file even when GitHub omits patch
+   // metadata after its compare-file cap. In that case prefer a conservative
+   // Base target rather than silently missing a deletion instruction.
+   if(addsRealDeletion||(!patch&&String(item?.status||"").toLowerCase()!=="removed"))add("base");
   }
   if(migration&&migration[1]!=="shared")add(migration[1].toLowerCase());
   if(path.includes("/addons/apex/"))add("apex");
@@ -88,6 +91,7 @@ type SourceFileChange={
  patch?:string;
  previous_filename?:string|null;
  size?:number;
+ lineStatsKnown?:boolean;
 };
 
 async function sourceTreeFiles(repo:string,commitSha:string){
@@ -127,7 +131,7 @@ async function sourceSnapshotFiles(repo:string,head:string):Promise<SourceFileCh
  const tree=await sourceTreeFiles(repo,head);
  return tree
   .sort((a:any,b:any)=>String(a.path).localeCompare(String(b.path)))
-  .map((entry:any)=>({filename:String(entry.path),status:"snapshot",additions:0,deletions:0,changes:0,size:Number(entry.size||0)}));
+  .map((entry:any)=>({filename:String(entry.path),status:"snapshot",additions:0,deletions:0,changes:0,size:Number(entry.size||0),lineStatsKnown:false}));
 }
 
 async function sourceCompareCommits(repo:string,from:string,head:string){
@@ -154,10 +158,10 @@ async function completeSourceDiff(repo:string,from:string,head:string){
 
  for(const path of new Set([...beforeMap.keys(),...afterMap.keys()])){
   const oldFile:any=beforeMap.get(path),newFile:any=afterMap.get(path);
-  if(!oldFile&&newFile)changes.set(path,{filename:path,status:"added",additions:0,deletions:0,changes:0,size:Number(newFile.size||0)});
-  else if(oldFile&&!newFile)changes.set(path,{filename:path,status:"removed",additions:0,deletions:0,changes:0,size:Number(oldFile.size||0)});
+  if(!oldFile&&newFile)changes.set(path,{filename:path,status:"added",additions:0,deletions:0,changes:0,size:Number(newFile.size||0),lineStatsKnown:false});
+  else if(oldFile&&!newFile)changes.set(path,{filename:path,status:"removed",additions:0,deletions:0,changes:0,size:Number(oldFile.size||0),lineStatsKnown:false});
   else if(oldFile&&newFile&&(oldFile.sha!==newFile.sha||oldFile.mode!==newFile.mode)){
-   changes.set(path,{filename:path,status:"modified",additions:0,deletions:0,changes:0,size:Number(newFile.size||0)});
+   changes.set(path,{filename:path,status:"modified",additions:0,deletions:0,changes:0,size:Number(newFile.size||0),lineStatsKnown:false});
   }
  }
 
@@ -181,6 +185,7 @@ async function completeSourceDiff(repo:string,from:string,head:string){
    patch:String(file?.patch||""),
    previous_filename:previous||null,
    size:Number((afterMap.get(filename) as any)?.size||(existing as any)?.size||0),
+   lineStatsKnown:true,
   });
  }
 
@@ -191,6 +196,8 @@ async function completeSourceDiff(repo:string,from:string,head:string){
   summary:sourceChangeSummary(files),
   diffComplete:true,
   compareMetadataFiles:metadata.length,
+  baselineFileCount:before.length,
+  currentFileCount:after.length,
  };
 }
 
@@ -467,77 +474,62 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
  const releaseType=data.type==="base"?"base":"update";
  const channel=normalizeChannel(data.channel||"stable");
  const branch=await github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(ref)}`);
- const head=String(branch?.object?.sha||"");
- if(!head)throw new Error(`Could not resolve ${repo}@${ref}`);
-
+ const head=branch?.object?.sha;if(!head)throw new Error(`Could not resolve ${repo}@${ref}`);
  let baseline:any=null;
  let baseBaseline:any=null;
- try{
-  const baseResult=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(ENGINE_BASE_COMPATIBILITY_CHANNEL)}&type=base&include_archived=false`);
-  baseBaseline=(baseResult?.releases||[])
-   .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
-   .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
- }catch{}
- try{
-  const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);
-  baseline=(result?.releases||[])
-   .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
-   .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
- }catch{}
+ try {
+   const baseResult = await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(ENGINE_BASE_COMPATIBILITY_CHANNEL)}&type=base&include_archived=false`);
+   baseBaseline=(baseResult?.releases||[])
+     .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
+     .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+ } catch {}
+ try {
+   const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);
+   baseline=(result?.releases||[])
+     .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
+     .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+ } catch {}
 
+ const inspectedAt=new Date().toISOString();
  const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha,channel:ENGINE_BASE_COMPATIBILITY_CHANNEL}:null;
  const from=String(baseline?.source_sha||"");
- let baselineInfo:any=baseline?{
-  id:baseline.id,
-  version:baseline.version,
-  sourceSha:baseline.source_sha,
-  channel:String(baseline.channel||channel),
-  kind:data.type==="base"?"published_base":"published_update"
- }:null;
+ const baselineInfo:any=baseline?{id:baseline.id,version:baseline.version,sourceSha:baseline.source_sha,kind:data.type==="base"?"published_base":"published_update",channel}:null;
 
  if(!from&&data.type==="engine"){
-  const initial=await initialEngineSourceBaseline(head);
-  const files=await sourceSnapshotFiles(repo,head);
-  const changeSummary=sourceChangeSummary(files);
-  baselineInfo={id:null,version:initial.initialReleaseVersion,sourceSha:head,kind:"initial_snapshot",ref:initial.ref,locked:initial.locked,initialReleaseVersion:initial.initialReleaseVersion};
-  return {
-   repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,
-   initialRelease:false,initialUpdate:true,inspectionMode:"initial_snapshot",
-   detectedComponents:initial.components,files,commits:[],
-   changeSummary,hasSourceChanges:files.length>0,diffComplete:true,commitCount:0
-  };
+   const initial=await initialEngineSourceBaseline(head);
+   const files=await sourceSnapshotFiles(repo,head);
+   const summary=sourceChangeSummary(files);
+   const info={id:null,version:initial.initialReleaseVersion,sourceSha:head,kind:"initial_snapshot",ref:initial.ref,locked:initial.locked,initialReleaseVersion:initial.initialReleaseVersion,channel};
+   return {
+    repo,ref,head,baseline:info,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:true,
+    inspectionMode:"initial_snapshot",detectedComponents:initial.components,files,commits:[],
+    changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt
+   };
  }
-
  if(!from){
-  const files=await sourceSnapshotFiles(repo,head);
-  const changeSummary=sourceChangeSummary(files);
-  return {
-   repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,
-   initialRelease:true,initialUpdate:false,inspectionMode:"full_snapshot",
-   detectedComponents:[],files,commits:[],
-   changeSummary,hasSourceChanges:files.length>0,diffComplete:true,commitCount:0
-  };
+   const files=await sourceSnapshotFiles(repo,head);
+   const summary=sourceChangeSummary(files);
+   return {
+    repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,initialRelease:true,initialUpdate:false,
+    inspectionMode:"full_snapshot",detectedComponents:[],files,commits:[],
+    changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt
+   };
  }
 
- if(from===head){
-  const changeSummary=sourceChangeSummary([]);
-  return {
-   repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,
-   initialRelease:false,initialUpdate:false,inspectionMode:"compare",
-   detectedComponents:[],files:[],commits:[],
-   changeSummary,hasSourceChanges:false,diffComplete:true,commitCount:0
-  };
- }
+ if(from===head)return {
+  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:false,
+  inspectionMode:"compare",detectedComponents:[],files:[],commits:[],
+  changeSummary:sourceChangeSummary([]),diffComplete:true,baselineFileCount:null,currentFileCount:null,hasSourceChanges:false,inspectedAt
+ };
 
  const diff=await completeSourceDiff(repo,from,head);
  return {
-  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,
-  initialRelease:false,initialUpdate:false,inspectionMode:"compare",
+  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:false,
+  inspectionMode:"compare",
   detectedComponents:data.type==="engine"?detectUpdateComponents(diff.files):[],
-  files:diff.files,commits:diff.commits,
-  changeSummary:diff.summary,hasSourceChanges:diff.files.length>0,
-  diffComplete:diff.diffComplete,commitCount:diff.commits.length,
-  compareMetadataFiles:diff.compareMetadataFiles
+  files:diff.files,commits:diff.commits,changeSummary:diff.summary,diffComplete:diff.diffComplete,
+  baselineFileCount:diff.baselineFileCount,currentFileCount:diff.currentFileCount,
+  compareMetadataFiles:diff.compareMetadataFiles,hasSourceChanges:diff.files.length>0,inspectedAt
  };
 });
 
@@ -634,10 +626,14 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
    sourceBaselineKind="initial_snapshot";
  }
  let detectedFiles:any[]=[];
+ let sourceDiffMeta:any={summary:null,diffComplete:true,baselineFileCount:0,currentFileCount:0,compareMetadataFiles:0};
  if(initialRelease||initialUpdate){
   detectedFiles=await sourceSnapshotFiles(repo,head);
+  sourceDiffMeta={summary:sourceChangeSummary(detectedFiles),diffComplete:true,baselineFileCount:0,currentFileCount:detectedFiles.length,compareMetadataFiles:0};
  }else if(previousSourceCommit&&previousSourceCommit!==head){
-  detectedFiles=(await completeSourceDiff(repo,previousSourceCommit,head)).files;
+  const diff=await completeSourceDiff(repo,previousSourceCommit,head);
+  detectedFiles=diff.files;
+  sourceDiffMeta=diff;
  }
 
  if(!initialRelease&&!initialUpdate&&previousSourceCommit===head){
@@ -674,6 +670,11 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
   sourceRef: ref,
   previousSourceCommit: previousSourceCommit || null,
   detectedSourceChanges: detectedFiles.length,
+  changeSummary: sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),
+  sourceDiffComplete: sourceDiffMeta.diffComplete===true,
+  baselineFileCount: Number(sourceDiffMeta.baselineFileCount||0),
+  currentFileCount: Number(sourceDiffMeta.currentFileCount||0),
+  compareMetadataFiles: Number(sourceDiffMeta.compareMetadataFiles||0),
   inspectionMode: initialRelease ? "full_snapshot" : initialUpdate ? "initial_snapshot" : "compare",
   initialRelease,
   initialUpdate,
@@ -712,7 +713,7 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  const {data:existing,error:existingError}=await sb.from("panel_release_drafts").select("*").eq("release_type",releaseType).eq("version",version).eq("channel",channel).maybeSingle();
  if(existingError)throw new Error("Unable to resolve release draft: "+existingError.message);
  if(existing&&["archived","rejected"].includes(String(existing.status)))throw new Error("This release draft is closed. Use a new version instead of creating another attempt.");
- const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,detectedComponents};
+ const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents};
  let draft:any=existing;
  if(!draft){
    const {data:created,error:createError}=await sb.from("panel_release_drafts").insert({release_type:releaseType,version,channel,source_repo:repo,source_ref:ref,source_sha:head,status:"draft",inputs:inputSnapshot,created_by:actor.email||actor.id}).select("*").single();
