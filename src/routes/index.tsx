@@ -167,13 +167,13 @@ function Index() {
     try {
       const r = await inspectSource({ data: { token: session.token, type, channel } });
       const detectedComponents=type==="engine"&&Array.isArray(r.detectedComponents)?r.detectedComponents:[];
-      const resolvedMinBase=type==="engine"&&r.baseBaseline?.version?String(r.baseBaseline.version):minBase;
+      const resolvedMinBase=type==="engine"?(String(minBase||"").trim()||String(r.baseBaseline?.version||"").trim()||"1.0.0"):minBase;
       setFiles(r.files || []);
       setCommits(r.commits || []);
       const bootstrapVersion=r.initialUpdate?String(r.baseline?.initialReleaseVersion||r.baseline?.version||"").trim():"";
       setBaseline({ ...(r.baseline || {}), repo: r.repo, ref: r.ref, head: r.head, baseBaseline: r.baseBaseline || null, inspectionMode:r.inspectionMode, initialUpdate:r.initialUpdate===true, detectedComponents, bootstrapVersion });
       if (type === "engine") {
-        if(r.baseBaseline?.version)setMinBase(resolvedMinBase);
+        if(!String(minBase||"").trim()&&r.baseBaseline?.version)setMinBase(resolvedMinBase);
         if(bootstrapVersion)setVersion(bootstrapVersion);
         setComponents(detectedComponents);
       }
