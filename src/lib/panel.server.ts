@@ -356,7 +356,7 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
  let baseline:any=null;
  let baseBaseline:any=null;
  try {
-   const baseResult = await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=base&include_archived=false`);
+   const baseResult = await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(ENGINE_BASE_COMPATIBILITY_CHANNEL)}&type=base&include_archived=false`);
    baseBaseline=(baseResult?.releases||[])
      .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
      .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
@@ -368,7 +368,7 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
      .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
  } catch {}
 
- const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha}:null;
+ const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha,channel:ENGINE_BASE_COMPATIBILITY_CHANNEL}:null;
  let from=String(baseline?.source_sha||"");
  let baselineInfo:any=baseline?{id:baseline.id,version:baseline.version,sourceSha:baseline.source_sha,kind:"published_update"}:null;
  let initialRelease=false;
