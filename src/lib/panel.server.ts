@@ -571,7 +571,7 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
   throw new Error("Release workflow run is not available yet");
 });
 
-export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string}})=>{
+export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null}})=>{
  const actor=readSession(data.token);
  const version=data.version.trim();
  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("Version must be valid SemVer, e.g. 1.2.3");
@@ -613,9 +613,16 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  // Stage 1 is authoritative about the source snapshot sent to the worker.
  // Do not trust stale browser state for changed files or the previous commit.
  const branch = await github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(ref)}`);
- const head = branch?.object?.sha;
- if (!head) throw new Error(`Could not resolve ${repo}@${ref}`);
- let previousSourceCommit = String(previousRelease?.source_sha || "");
+ const head=String(branch?.object?.sha||"");
+ if(!head)throw new Error(`Could not resolve ${repo}@${ref}`);
+ const inspectedSourceSha=String(data.inspectedSourceSha||"").trim();
+ if(!/^[a-f0-9]{40}$/i.test(inspectedSourceSha))throw new Error("Inspect the source before starting a release.");
+ if(inspectedSourceSha!==head)throw new Error(`The ${data.type==="base"?"Base":"Update"} source changed after inspection (${inspectedSourceSha.slice(0,8)} → ${head.slice(0,8)}). Re-inspect before building so the reviewed file list matches the package.`);
+ let previousSourceCommit=String(previousRelease?.source_sha||"");
+ const inspectedPublishedBaselineSha=String(data.inspectedPublishedBaselineSha||"").trim();
+ if(inspectedPublishedBaselineSha!==previousSourceCommit){
+  throw new Error(`The authoritative published ${data.type==="base"?"Base":"Update"} baseline changed after inspection. Re-inspect before building so the source diff is recalculated.`);
+ }
  const initialRelease = data.type === "base" && !previousSourceCommit;
  const initialUpdate = data.type === "engine" && !previousSourceCommit;
  let initialUpdateConfig:any=null;
