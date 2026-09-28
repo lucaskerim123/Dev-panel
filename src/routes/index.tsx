@@ -243,7 +243,8 @@ function Index() {
   return (
     <div className="min-h-screen bg-background">
       <Header connected={masterConnected} loading={loading} onRefresh={() => load()} onSignOut={signOut} user={session} />
-      <div className="mx-auto flex min-h-[calc(100vh-57px)] max-w-[1680px]">
+      <MobileNav tab={tab} setTab={setTab} activeRun={!!run && !run.conclusion} />
+      <div className="mx-auto flex min-h-[calc(100vh-66px)] max-w-[1680px]">
         <Sidebar tab={tab} setTab={setTab} activeRun={!!run && !run.conclusion} />
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 xl:px-8">
           <div className="mx-auto max-w-[1440px] space-y-4">
@@ -288,35 +289,46 @@ function composerProps(p: any) {
 }
 
 function Login(p: any) {
-  return <div className="min-h-screen grid place-items-center p-5 bg-background">
-    <form onSubmit={p.onSubmit} className="w-full max-w-[420px] rounded-2xl border bg-card p-7 shadow-2xl">
-      <div className="mb-7">
-        <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-black">O</div>
-          <div><p className="text-xs font-semibold uppercase tracking-[.18em] text-primary">OrbitFS</p><h1 className="text-xl font-semibold">Release Control</h1></div></div>
-        <p className="mt-5 text-sm leading-6 text-muted-foreground">Release preparation and production operations for OrbitFS.</p>
-      </div>
-      <div className="space-y-3">
+  return <div className="orbit-login-shell">
+    <div className="orbit-login-brand"><div className="orbit-brandmark"><span></span></div><div><b>OrbitFS</b><small>Release Control</small></div></div>
+    <form onSubmit={p.onSubmit} className="orbit-login-card">
+      <p className="orbit-reference-kicker">PRIVATE OPERATIONS CONSOLE</p>
+      <h1>Sign in to OrbitFS</h1>
+      <p className="orbit-login-copy">Prepare Base deployments and manifest-driven updates, monitor release builders, and hand candidates to License Master.</p>
+      <div className="mt-6 space-y-3">
         <Field label="Email"><input className="control" type="email" value={p.email} onChange={e=>p.setEmail(e.target.value)} required/></Field>
         <Field label="Password"><input className="control" type="password" value={p.password} onChange={e=>p.setPassword(e.target.value)} required/></Field>
       </div>
       {p.error&&<div className="mt-4"><Alert tone="error">{p.error}</Alert></div>}
       <button className="button-primary mt-5 w-full" disabled={p.busy==="login"}>{p.busy==="login"?"Signing in…":"Sign in"}</button>
+      <div className="orbit-login-authority"><ShieldCheck size={14}/><span>License Manager remains the technical authority. Billing Store remains the customer publication gate for updates.</span></div>
     </form>
   </div>;
 }
 
 function Header({ connected, loading, onRefresh, onSignOut, user }: any) {
-  return <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
-    <div className="mx-auto flex h-14 max-w-[1680px] items-center justify-between px-4 sm:px-6 xl:px-8">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-black text-primary-foreground">O</div>
-        <div className="min-w-0"><div className="truncate text-sm font-semibold">OrbitFS Release Control</div><div className="hidden text-[11px] text-muted-foreground sm:block">Release preparation & operations</div></div>
+  return <header className="orbit-topbar sticky top-0 z-40 border-b">
+    <div className="flex h-[72px] items-center gap-4 px-4 sm:px-6">
+      <div className="flex min-w-0 items-center gap-3 md:hidden">
+        <div className="orbit-brandmark"><span></span></div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold tracking-tight">OrbitFS Control</p>
+          <p className="truncate text-[10px] text-muted-foreground">Release operations</p>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <div className="hidden items-center gap-2 rounded-lg border bg-card px-2.5 py-1.5 text-xs sm:flex"><i className={`h-1.5 w-1.5 rounded-full ${connected?"bg-emerald-400":"bg-destructive"}`}/>{connected?"License Master":"Master offline"}</div>
-        <button className="icon-button" title="Refresh" onClick={onRefresh}><RefreshCw className={loading?"animate-spin":""} size={15}/></button>
-        <div className="hidden border-l pl-2 text-right sm:block"><p className="text-xs font-medium">{user.display_name||user.email}</p><p className="text-[10px] text-muted-foreground">{user.role||"operator"}</p></div>
-        <button className="icon-button" title="Sign out" onClick={onSignOut}><UploadCloud className="rotate-180" size={15}/></button>
+      <div className="hidden min-w-0 flex-1 md:block">
+        <div className="orbit-commandbar max-w-[720px]">
+          <Search size={15}/><span>Search releases, repositories, runs…</span><kbd>/</kbd>
+        </div>
+      </div>
+      <div className="ml-auto flex items-center gap-2">
+        <div className={`orbit-master-badge ${connected?"is-online":"is-offline"}`}><span></span>{connected?"License Master online":"License Master offline"}</div>
+        <button className="icon-button" title="Refresh" onClick={onRefresh}><RefreshCw className={loading ? "animate-spin" : ""} size={15}/></button>
+        <div className="orbit-user-chip">
+          <div className="orbit-avatar">{String(user.display_name || user.email || "O").slice(0,1).toUpperCase()}</div>
+          <div className="hidden sm:block"><p>{user.display_name || user.email}</p><small>{user.role || "operator"}</small></div>
+          <button onClick={onSignOut} title="Sign out"><ChevronDown size={14}/></button>
+        </div>
       </div>
     </div>
   </header>;
@@ -327,40 +339,68 @@ const NAV_STANDALONE = [
 ] as const;
 
 const NAV_GROUPS = [
-  {label:"Status",items:[
-    ["operations","Systems","Four-repository status",Server],
-    ["releases","Release Registry","Published / draft / validation state",PackageCheck],
+  {label:"Operate",items:[
+    ["base","Base Releases","Build, package & handoff",Rocket],
+    ["engine","Update Releases","Detect, package & handoff",Layers3],
+    ["operations","Operations","Deploy Billing Store & License Manager",Terminal],
+  ]},
+  {label:"Monitor",items:[
+    ["releases","Release Registry","Lifecycle state",PackageCheck],
     ["activity","Release Runs","Workflow execution",Activity],
+    ["monitoring","Monitoring","System health",BarChart3],
+  ]},
+  {label:"Control",items:[
+    ["channels","Channels","Read only",Server],
+    ["portal","Customer Portal","Publication state",Globe2],
+    ["repositories","Repositories","Sources & workers",Boxes],
+  ]},
+  {label:"Govern",items:[
+    ["audit","Audit History","Authority events",History],
+    ["access","Users & Access","Panel permissions",Users],
+    ["settings","Configuration","Runtime & panel settings",Settings2],
   ]},
 ] as const;
 
-function Sidebar({ tab, setTab, activeRun }: any) {
-  const groups=[{label:"Workspace",items:[
+function MobileNav({ tab, setTab, activeRun }: any) {
+  const items = [
     ...NAV_STANDALONE,
     ...NAV_GROUPS.flatMap(group=>group.items),
-  ]}] as const;
-  return <aside className="hidden w-60 shrink-0 border-r lg:block">
-    <div className="sticky top-14 p-3">
-      {groups.map(group=><div key={group.label}>
-        <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{group.label}</p>
-        <nav className="space-y-1">
-          {group.items.map(([id,label,detail,Icon])=><button key={id} onClick={()=>setTab(id as Tab)}
-            className={`nav-item ${tab===id?"nav-item-active":""}`}>
-            <span className="nav-icon"><Icon size={15}/></span>
-            <span className="min-w-0 flex-1"><b>{label}</b><small>{detail}</small></span>
-            {id==="activity"&&activeRun&&<span className="ml-auto h-2 w-2 rounded-full bg-emerald-400 animate-pulse"/>}
-          </button>)}
-        </nav>
-      </div>)}
-      <div className="mt-6 rounded-xl border bg-card/60 p-3">
-        <p className="flex items-center gap-2 text-xs font-semibold"><ShieldCheck size={14}/> Controlled pipeline</p>
-        <div className="mt-3 space-y-2 text-[11px] text-muted-foreground">
-          <StepLine n="1" text="Dev Panel prepares" active/>
-          <StepLine n="2" text="License Master validates"/>
-          <StepLine n="3" text="Billing Store reviews"/>
-          <StepLine n="4" text="Customer release publishes"/>
+  ];
+  return <div className="orbit-mobile-nav md:hidden">
+    <div className="orbit-mobile-nav-track">
+      {items.map(([id,label,,Icon])=><button key={id} onClick={()=>setTab(id as Tab)} className={`orbit-mobile-nav-item ${tab===id?"is-active":""}`}>
+        <Icon size={15}/><span>{label}</span>{id==="activity"&&activeRun&&<i/>}
+      </button>)}
+    </div>
+  </div>;
+}
+
+function Sidebar({ tab, setTab, activeRun }: any) {
+  return <aside className="orbit-sidebar hidden shrink-0 md:block">
+    <div className="sticky top-[72px] flex h-[calc(100vh-72px)] flex-col overflow-y-auto p-3">
+      <div className="orbit-sidebar-brand"><div className="orbit-brandmark"><span></span></div><div><b>OrbitFS</b><small>Release Control</small></div></div>
+      <nav className="space-y-5">
+        <div>
+          <div className="space-y-1">
+            {NAV_STANDALONE.map(([id,label,detail,Icon])=><button key={id} onClick={()=>setTab(id as Tab)}
+              className={`orbit-nav-item ${tab===id?"orbit-nav-active":""}`}>
+              <span className="orbit-nav-icon"><Icon size={16}/></span>
+              <span className="min-w-0 flex-1"><b>{label}</b><small>{detail}</small></span>
+            </button>)}
+          </div>
         </div>
-      </div>
+        {NAV_GROUPS.map(group=><div key={group.label}>
+          <p className="orbit-nav-group">{group.label}</p>
+          <div className="mt-2 space-y-1">
+            {group.items.map(([id,label,detail,Icon])=><button key={id} onClick={()=>setTab(id as Tab)}
+              className={`orbit-nav-item ${tab===id?"orbit-nav-active":""}`}>
+              <span className="orbit-nav-icon"><Icon size={16}/></span>
+              <span className="min-w-0 flex-1"><b>{label}</b><small>{detail}</small></span>
+              {id==="activity"&&activeRun&&<span className="orbit-run-dot"/>}
+            </button>)}
+          </div>
+        </div>)}
+      </nav>
     </div>
   </aside>;
 }
@@ -369,38 +409,53 @@ function StepLine({ n, text, active }: any) {
   return <div className={`flex items-center gap-2 ${active ? "text-foreground" : ""}`}><span className="flex h-5 w-5 items-center justify-center rounded-full border text-[9px] font-bold">{n}</span>{text}</div>;
 }
 
-function Dashboard({ stats, releases, connected, run, onActivity, onReleases }: any) {
-  const recent=releases.slice(0,6);
-  return <section className="space-y-5">
-    <div className="flex flex-col justify-between gap-4 border-b pb-5 md:flex-row md:items-end">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-[.16em] text-primary">Developer workspace</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">OrbitFS release control</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Release status, source preparation, workflow monitoring and controlled production operations.</p>
+function Dashboard({ stats, releases, connected, run, channels, onBase, onEngine, onActivity, onReleases }: any) {
+  const recent=releases.slice(0,7);
+  const series=releaseSeries(releases);
+  const healthy=releases.filter((r:any)=>r.manifest?.validation?.status!=="failed").length;
+  const health=releases.length?Math.round((healthy/releases.length)*100):100;
+  const latest=releases[0];
+  const pending=releases.filter((r:any)=>r.review_status==="pending").length;
+  return <section className="orbit-screen space-y-4">
+    <div className="orbit-reference-head">
+      <div><p className="orbit-reference-kicker">RELEASE OPERATIONS</p><h1>Overview</h1><span>Build, review, and hand off OrbitFS releases from one operational control surface.</span></div>
+      <div className="orbit-reference-actions">
+        <button className="button-secondary" onClick={onReleases}><PackageCheck size={14}/> Release history</button>
+        <button className="button-secondary" onClick={onBase}><Rocket size={14}/> Base deployment</button>
+        <button className="button-primary" onClick={onEngine}><Layers3 size={14}/> Update release</button>
       </div>
-      <div className="flex gap-2"><button className="button-secondary" onClick={onReleases}><PackageCheck size={14}/> Release registry</button><button className="button-primary" onClick={onActivity}><Activity size={14}/> Release runs</button></div>
     </div>
-    <div className="grid grid-cols-2 overflow-hidden rounded-xl border bg-border md:grid-cols-4">
-      <Metric label="Candidates" value={stats.candidates||0} detail="Awaiting validation/review"/>
-      <Metric label="Validation failed" value={stats.validationFailed||0} detail="Needs attention"/>
-      <Metric label="Ready" value={stats.ready||0} detail="Approved, not published"/>
-      <Metric label="Published" value={stats.published||0} detail="Current release history"/>
+    <div className="orbit-metric-grid">
+      <Metric label="Latest release" value={latest?"v"+latest.version:"—"} detail={latest?(latest.release_type+" · "+latest.channel):"No release records"} />
+      <Metric label="Pending review" value={pending} detail="Technical candidates" />
+      <Metric label="Published" value={stats.published||0} detail="Customer-visible releases" />
+      <Metric label="Validation failed" value={stats.validationFailed||0} detail={stats.validationFailed?"Needs attention":"No failed validations"} />
     </div>
-    <div className="grid gap-4 xl:grid-cols-[1.4fr_.9fr]">
-      <section className="release-surface overflow-hidden">
-        <div className="flex items-center justify-between border-b p-4"><SectionHead icon={PackageCheck} title="Recent releases" detail="Latest candidates known to License Master."/><button className="text-xs font-medium text-primary" onClick={onReleases}>View all →</button></div>
-        <ReleaseTable releases={recent}/>
+    <div className="orbit-dashboard-reference-grid">
+      <section className="orbit-panel orbit-release-list-panel">
+        <div className="orbit-panel-toolbar"><SectionHead icon={PackageCheck} title="Recent releases" detail="Latest candidates and published releases from License Master."/><button onClick={onReleases}>View all <ArrowRight size={13}/></button></div>
+        <div className="orbit-release-table-head"><span>Release</span><span>Type</span><span>Channel</span><span>Review</span><span>Status</span></div>
+        <div className="orbit-release-rows">
+          {recent.map((r:any)=><button className="orbit-release-row" key={r.id} onClick={onReleases}>
+            <span className="orbit-release-title"><b>OrbitFS v{r.version}</b><small>{(r.source_sha||"").slice(0,8)||"no commit"}</small></span>
+            <span>{r.release_type||"—"}</span><span>{r.channel||"stable"}</span><StatusPill text={r.review_status||"pending"}/><StatusPill text={r.archived_at?"archived":r.status||"draft"}/>
+          </button>)}
+          {!recent.length&&<div className="orbit-empty">No release records are currently visible.</div>}
+        </div>
       </section>
-      <section className="release-surface p-4 sm:p-5">
-        <SectionHead icon={Server} title="System status" detail="Live control-plane state."/>
-        <div className="mt-4 space-y-2"><StatusRow label="License Master API" value={connected?"Connected":"Unavailable"} good={connected}/><StatusRow label="Workflow" value={run?(run.conclusion||run.status||"queued"):"Idle"} good={!run||run.conclusion==="success"}/>{run?.id&&<StatusRow label="Run" value={"#"+run.id}/>}</div>
-      </section>
+      <aside className="space-y-4">
+        <section className="orbit-panel p-4"><SectionHead icon={ShieldCheck} title="System status" detail="Live authority and worker state"/><div className="mt-4 space-y-1"><StatusRow label="License Master" value={connected?"Connected":"Unavailable"} good={connected}/><StatusRow label="Release health" value={health+"%"} good={health===100}/><StatusRow label="Workflow" value={run?(run.conclusion||run.status||"queued"):"Idle"} good={!run||run.conclusion==="success"}/>{run?.id&&<StatusRow label="Run" value={"#"+run.id}/>}</div><button className="button-secondary mt-3 w-full" onClick={onActivity}>Open monitoring <ArrowRight size={13}/></button></section>
+        <section className="orbit-panel p-4"><SectionHead icon={Server} title="Release channels" detail="Enabled authoritative channels"/><div className="orbit-chip-list mt-4">{channels.length?channels.map((x:string)=><span key={x}>{x}</span>):<span>None reported</span>}</div></section>
+      </aside>
+    </div>
+    <div className="orbit-dashboard-bottom-grid">
+      <section className="orbit-panel p-4"><div className="flex items-center justify-between"><SectionHead icon={Activity} title="Release activity" detail="Release records created during the last seven days."/><strong className="text-xs">{series.reduce((n:number,x:any)=>n+x.count,0)}</strong></div><MiniLineChart data={series}/></section>
     </div>
   </section>;
 }
 
 function Metric({ label, value, detail }: any) {
-  return <div className="border-r bg-card p-4 last:border-r-0"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-semibold">{value}</p><p className="mt-1 text-[11px] text-muted-foreground">{detail}</p></div>;
+  return <div className="orbit-metric"><div className="orbit-metric-label">{label}</div><div className="orbit-metric-value">{value}</div><div className="orbit-metric-detail">{detail}</div></div>;
 }
 
 function PipelineStep({ icon: Icon, title, text }: any) {
@@ -601,17 +656,17 @@ function ReleasesPage({releases,session,onChanged,onBase,onEngine}:any) {
   const channels=Array.from(new Set(releases.map((r:any)=>String(r.channel||"stable"))));
   const lifecycleFor=(r:any)=>lifecycleEvents.find((e:any)=>!e.installation_id&&(String(e.release_id||"")===String(r.id)||(!e.release_id&&String(e.release_version)===String(r.version)&&String(e.release_type)===String(r.release_type)&&String(e.channel||"stable")===String(r.channel||"stable"))));
   const filtered=releases.filter((r:any)=>{if(type!=="all"&&String(r.release_type)!==type)return false;if(state!=="all"){const life=String(r.manifest?.lifecycle?.state||lifecycleFor(r)?.event_type||"");const s=life==="rolled_back"?"rolled_back":life==="reverted"?"reverted":(lifecycleFor(r)?.archived||r.archived_at)?"archived":String(r.status||"draft");if(s!==state)return false;}if(channel!=="all"&&String(r.channel)!==channel)return false;const q=query.trim().toLowerCase();if(q&&!String(r.version||"").toLowerCase().includes(q)&&!String(r.source_sha||"").toLowerCase().includes(q)&&!String(r.product_name||"orbitfs").toLowerCase().includes(q))return false;return true;});
-  const unpublish=async(row:any)=>{if(!confirm("Unpublish v"+row.version+" through Billing Store?"))return;setBusy(row.id+":withdraw");setError("");setMessage("");try{await controlRelease({data:{token:session.token,releaseId:row.id,action:"withdraw"}});setMessage("Release unpublished through Billing Store; License Manager recorded the authoritative state.");await onChanged?.()}catch(x:any){setError(x.message||"Unpublish failed.")}finally{setBusy("")}};
+  const act=async(row:any,action:"approve"|"reject"|"rollback"|"revert"|"withdraw"|"archive"|"restore")=>{setBusy(row.id+":"+action);setError("");setMessage("");try{let reason:string|undefined;if(action==="rollback"||action==="revert"||action==="archive"){reason=prompt(action==="rollback"?"Reason this version was rolled back:":action==="revert"?"Reason this version was reverted:":"Reason for archiving this release:","")||undefined;if(!reason?.trim()){setBusy("");return}}await controlRelease({data:{token:session.token,releaseId:row.id,action,reason}});setMessage(action==="rollback"?"Version marked rolled back and archived.":action==="revert"?"Version marked reverted and archived.":"Release action completed: "+action+".");await onChanged?.()}catch(x:any){setError(x.message||"Release action failed.")}finally{setBusy("")}};
   const published=releases.filter((r:any)=>r.status==="published"&&!r.archived_at).length,pending=releases.filter((r:any)=>r.review_status==="pending"&&!r.archived_at).length,failed=releases.filter((r:any)=>r.manifest?.validation?.status==="failed"&&!r.archived_at).length;
   return <section className="orbit-screen space-y-4">
-    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">RELEASE REGISTRY</p><h1>Releases</h1><span>Status-only view of Base and Update releases. The only lifecycle action exposed here is Unpublish, which is routed through Billing Store.</span></div></div>
+    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">RELEASE REGISTRY</p><h1>Releases</h1><span>Review Base and Update release state, validation, technical approval, and lifecycle actions.</span></div><div className="orbit-reference-actions"><button className="button-secondary" onClick={onBase}><Rocket size={14}/> New Base</button><button className="button-primary" onClick={onEngine}><Layers3 size={14}/> New Update</button></div></div>
     {error&&<Alert tone="error" onClose={()=>setError("")}>{error}</Alert>}{message&&<Alert tone="success" onClose={()=>setMessage("")}>{message}</Alert>}
     <section className="orbit-filterbar"><div className="orbit-filter-search"><Search size={14}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search version, product, or commit…"/></div><select value={type} onChange={e=>setType(e.target.value)}><option value="all">All types</option><option value="base">Base</option><option value="update">Update</option></select><select value={state} onChange={e=>setState(e.target.value)}><option value="all">All states</option><option value="draft">Draft</option><option value="published">Published</option><option value="disabled">Unpublished</option><option value="archived">Archived</option><option value="rolled_back">Rolled back</option><option value="reverted">Reverted</option></select><select value={channel} onChange={e=>setChannelFilter(e.target.value)}><option value="all">All channels</option>{channels.map((x:any)=><option key={x} value={x}>{x}</option>)}</select></section>
     <div className="orbit-registry-grid">
       <section className="orbit-panel overflow-hidden">
-        <div className="orbit-panel-toolbar"><SectionHead icon={PackageCheck} title="Release history" detail={String(filtered.length)+" of "+String(releases.length)+" releases"}/><span className="orbit-small-note">Authoritative state from License Manager · control in Billing Store</span></div>
+        <div className="orbit-panel-toolbar"><SectionHead icon={PackageCheck} title="Release history" detail={String(filtered.length)+" of "+String(releases.length)+" releases"}/><span className="orbit-small-note">Technical state + Dev Panel rollback history</span></div>
         <div className="orbit-registry-head"><span>Release</span><span>Type</span><span>Channel</span><span>Validation</span><span>Review</span><span>Status</span></div>
-        <div>{filtered.map((r:any)=>{const lifecycle=lifecycleFor(r);return <div key={r.id} className="orbit-registry-row"><div className="orbit-release-title"><b>{r.product_name||"OrbitFS"} v{r.version}</b><small>{r.source_ref||"—"} · {(r.source_sha||"").slice(0,8)||"no SHA"}{r.manifest?.lifecycle?.state?` · ${String(r.manifest.lifecycle.state).replaceAll("_"," ")}: ${r.manifest.lifecycle.reason||"No reason recorded"}`:lifecycle?` · ${String(lifecycle.event_type).replaceAll("_"," ")}: ${lifecycle.reason}`:""}</small></div><span>{r.release_type||"—"}</span><span>{r.channel||"stable"}</span><StatusPill text={r.manifest?.validation?.status||"not run"}/><StatusPill text={r.review_status||"pending"}/><StatusPill text={r.manifest?.lifecycle?.state?String(r.manifest.lifecycle.state).replaceAll("_"," "):lifecycle?String(lifecycle.event_type).replaceAll("_"," "):r.archived_at?"archived":r.status||"draft"}/><div className="orbit-registry-actions">{r.status==="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>unpublish(r)}>Unpublish</button>}</div></div>})}{!filtered.length&&<div className="orbit-empty">No releases match these filters.</div>}</div>
+        <div>{filtered.map((r:any)=>{const lifecycle=lifecycleFor(r);return <div key={r.id} className="orbit-registry-row"><div className="orbit-release-title"><b>{r.product_name||"OrbitFS"} v{r.version}</b><small>{r.source_ref||"—"} · {(r.source_sha||"").slice(0,8)||"no SHA"}{r.manifest?.lifecycle?.state?` · ${String(r.manifest.lifecycle.state).replaceAll("_"," ")}: ${r.manifest.lifecycle.reason||"No reason recorded"}`:lifecycle?` · ${String(lifecycle.event_type).replaceAll("_"," ")}: ${lifecycle.reason}`:""}</small></div><span>{r.release_type||"—"}</span><span>{r.channel||"stable"}</span><StatusPill text={r.manifest?.validation?.status||"not run"}/><StatusPill text={r.review_status||"pending"}/><StatusPill text={r.manifest?.lifecycle?.state?String(r.manifest.lifecycle.state).replaceAll("_"," "):lifecycle?String(lifecycle.event_type).replaceAll("_"," "):r.archived_at?"archived":r.status||"draft"}/><div className="orbit-registry-actions">{r.review_status==="pending"&&r.manifest?.validation?.status==="passed"&&<button className="button-primary" disabled={!!busy} onClick={()=>act(r,"approve")}>Approve</button>}{r.review_status==="pending"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"reject")}>Reject</button>}{r.status==="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"rollback")}>Mark rolled back</button>}{r.status==="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"revert")}>Mark reverted</button>}{r.status==="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"withdraw")}>Unpublish</button>}{!r.archived_at&&r.status!=="published"&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"archive")}>Archive</button>}{r.archived_at&&!r.manifest?.lifecycle?.state&&<button className="button-secondary" disabled={!!busy} onClick={()=>act(r,"restore")}>Restore</button>}</div></div>})}{!filtered.length&&<div className="orbit-empty">No releases match these filters.</div>}</div>
       </section>
       <aside className="space-y-4"><section className="orbit-panel p-4"><SectionHead icon={BarChart3} title="Registry summary" detail="Current visible release state"/><div className="mt-4"><StatusRow label="Published" value={String(published)} good/><StatusRow label="Pending review" value={String(pending)}/><StatusRow label="Validation failed" value={String(failed)} good={failed===0}/><StatusRow label="Channels" value={String(channels.length)}/></div></section><section className="orbit-panel overflow-hidden"><div className="border-b p-4"><SectionHead icon={History} title="Rollback / revert history" detail="Operational results reported back to Dev Panel."/></div><div className="max-h-[360px] overflow-auto">{lifecycleEvents.slice(0,10).map((ev:any)=><div key={ev.id||ev.event_id} className="border-b p-3 last:border-b-0"><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold">v{ev.release_version}</p><StatusPill text={String(ev.event_type||"event").replaceAll("_"," ")}/></div><p className="mt-1 text-[10px] text-muted-foreground">{ev.release_type} · {ev.channel||"stable"}{ev.target_version?" → v"+ev.target_version:""}</p><p className="mt-2 text-[10px] leading-5">{ev.reason}</p><p className="mt-1 text-[9px] text-muted-foreground">{ev.occurred_at?new Date(ev.occurred_at).toLocaleString():""}{ev.installation_id?" · installation "+String(ev.installation_id).slice(0,10)+"…":""}</p></div>)}{!lifecycleEvents.length&&<div className="p-6 text-center text-[10px] text-muted-foreground">No rollback or revert events recorded.</div>}</div></section></aside>
     </div>
