@@ -662,9 +662,11 @@ function ReleasesPage({releases,session,onChanged,onBase,onEngine}:any) {
     const version=String(row.version||"");
     const archived=Boolean(row.archived_at);
     if(!archived&&String(row.status||"").toLowerCase()!=="draft"){setError("Only draft or archived releases can be deleted. Archive this release first.");return}
-    if(!confirm(`Permanently delete OrbitFS v${version} from the release registry? This cannot be undone. Audit history is retained.`))return;
+    const expected=`DELETE_RELEASE:${row.id}:${version}`;
+    const confirmation=prompt(`Permanent deletion can destroy rollback history. Type exactly:\n\n${expected}`,"");
+    if(confirmation!==expected)return;
     setBusy(row.id+":delete");setError("");setMessage("");
-    try{await deleteAuthoritativeRelease({data:{token:session.token,releaseId:row.id}});setMessage(`OrbitFS v${version} deleted from the release registry.`);await onChanged?.()}
+    try{await deleteAuthoritativeRelease({data:{token:session.token,releaseId:row.id,confirmation}});setMessage(`OrbitFS v${version} permanently deleted from the release registry.`);await onChanged?.()}
     catch(x:any){setError(x.message||"Release delete failed.")}
     finally{setBusy("")}
   };
