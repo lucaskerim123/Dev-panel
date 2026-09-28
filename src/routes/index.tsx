@@ -190,6 +190,8 @@ function Index() {
         baselineFileCount:r.baselineFileCount==null?null:Number(r.baselineFileCount),
         currentFileCount:r.currentFileCount==null?null:Number(r.currentFileCount),
         inspectedAt:r.inspectedAt||new Date().toISOString(),
+        inspectedChannel:channel,
+        publishedBaselineSha:r.publishedBaselineSha??null,
       });
       if (type === "engine") {
         if(!String(minBase||"").trim()&&r.baseBaseline?.version)setMinBase(resolvedMinBase);
@@ -231,8 +233,13 @@ function Index() {
     setBusy("start"); setError(""); setNotice("");
     try {
       const r = await startRelease({
-        data: { token: session.token, type, version, channel, notes, changelogDraft, files, components,
-          minimumBaseVersion: minBase, protocol, changelogTemplate }
+        data: { token:session.token, type, version, channel, notes, changelogDraft, files, components,
+          minimumBaseVersion:minBase,
+          protocol,
+          changelogTemplate,
+          inspectedSourceSha:String(baseline?.head||""),
+          inspectedPublishedBaselineSha:baseline?.publishedBaselineSha??null,
+        }
       });
       setReviewOpen(false);
       setRun(r.runId ? { id: r.runId, status: "queued", conclusion: null, name: `${type === "base" ? "Base" : "Engine"} release`, draftId: r.draftId, attemptNumber: r.attemptNumber, failure: null } : null);
@@ -513,7 +520,7 @@ function EmptyInline({text}:any){return <div className="p-5 text-center text-[11
 
 function buildChangelog(type: ReleaseType, data: any) {
   const base = type === "base";
-  const commits = (data.commits || []).map((c:any) => String(c.subject || c.message || "").trim()).filter(Boolean).slice(0, 20);
+  const commits = (data.commits || []).map((c:any) => String(c.subject || c.message || c.commit?.message || "").trim()).filter(Boolean).slice(0, 20);
   const files = data.files || [];
   const initialRelease = data.initialRelease === true;
   const initialUpdate = data.initialUpdate === true;
