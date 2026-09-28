@@ -503,7 +503,7 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
    return {
     repo,ref,head,baseline:info,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:true,
     inspectionMode:"initial_snapshot",detectedComponents:initial.components,files,commits:[],
-    changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt
+    changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt,publishedBaselineSha:from||null
    };
  }
  if(!from){
@@ -512,14 +512,14 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
    return {
     repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,initialRelease:true,initialUpdate:false,
     inspectionMode:"full_snapshot",detectedComponents:[],files,commits:[],
-    changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt
+    changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt,publishedBaselineSha:from||null
    };
  }
 
  if(from===head)return {
   repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:false,
   inspectionMode:"compare",detectedComponents:[],files:[],commits:[],
-  changeSummary:sourceChangeSummary([]),diffComplete:true,baselineFileCount:null,currentFileCount:null,hasSourceChanges:false,inspectedAt
+  changeSummary:sourceChangeSummary([]),diffComplete:true,baselineFileCount:null,currentFileCount:null,hasSourceChanges:false,inspectedAt,publishedBaselineSha:from||null
  };
 
  const diff=await completeSourceDiff(repo,from,head);
@@ -529,7 +529,7 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
   detectedComponents:data.type==="engine"?detectUpdateComponents(diff.files):[],
   files:diff.files,commits:diff.commits,changeSummary:diff.summary,diffComplete:diff.diffComplete,
   baselineFileCount:diff.baselineFileCount,currentFileCount:diff.currentFileCount,
-  compareMetadataFiles:diff.compareMetadataFiles,hasSourceChanges:diff.files.length>0,inspectedAt
+  compareMetadataFiles:diff.compareMetadataFiles,hasSourceChanges:diff.files.length>0,inspectedAt,publishedBaselineSha:from||null
  };
 });
 
