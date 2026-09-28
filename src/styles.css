@@ -1167,6 +1167,17 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
 .orbit-login-authority{display:flex;gap:.55rem;margin-top:1rem;border-top:1px solid rgba(255,255,255,.055);padding-top:1rem;color:#68778b;font-size:.6rem;line-height:1.5}
 
 
+
+
+/* Release workspace only: compact lifecycle badges so status does not crowd release metadata/actions. */
+.release-status-pill{
+  min-height:18px!important;
+  padding:.12rem .4rem!important;
+  font-size:.5rem!important;
+  line-height:1!important;
+  font-weight:700!important;
+  white-space:nowrap;
+}
 /* High-contrast semantic status badges */
 .orbit-status-pill{
   min-height:24px;
