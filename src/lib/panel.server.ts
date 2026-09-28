@@ -642,7 +642,7 @@ export const getControlState=createServerFn({method:"POST"}).handler(async({data
  };
 });
 
-export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string}})=>{
+export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;confirmation:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role).toLowerCase()))throw new Error("Admin access required");
  const id=String(data.releaseId||"").trim();
@@ -651,7 +651,9 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  const release=current?.release;
  if(!release)throw new Error("Release was not found in License Manager");
  if(String(release.status||"").toLowerCase()==="published")throw new Error("Currently published releases cannot be deleted.");
- const result=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete"})});
+ const expected=`DELETE_RELEASE:${id}:${release.version}`;
+ if(String(data.confirmation||"").trim()!==expected)throw new Error("Permanent release deletion confirmation did not match. Archive the release instead if rollback history must be retained.");
+ const result=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation:expected})});
  return {ok:true,release:result?.release||null};
 });
 
@@ -679,15 +681,24 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
    }catch{}
   }
  }
- await billingStoreReset({releaseIds:releases.map((r:any)=>String(r.id)),version,releaseType,channel});
- for(const release of releases){
-  await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"delete"})});
+ const disposable=releases.filter((release:any)=>String(release.status||"").toLowerCase()==="draft"&&!release.published_at);
+ const historical=releases.filter((release:any)=>!disposable.some((candidate:any)=>String(candidate.id)===String(release.id)));
+ await billingStoreReset({releaseIds:disposable.map((r:any)=>String(r.id)),version,releaseType,channel});
+ for(const release of historical){
+  if(!release.archived_at){
+   await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Preserved automatically by Dev Panel Start Fresh for rollback/history"})});
+  }
+ }
+ for(const release of disposable){
+  const id=String(release.id);
+  const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
+  await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
  }
  const {error:eventDeleteError}=await sb.from("panel_release_events").delete().eq("release_version",version).eq("release_type",releaseType).eq("channel",channel);
  if(eventDeleteError)throw new Error("Release records were cleared, but Dev Panel lifecycle history could not be reset: "+eventDeleteError.message);
  const {error:draftDeleteError}=await sb.from("panel_release_drafts").delete().eq("release_type",releaseType).eq("version",version).eq("channel",channel);
  if(draftDeleteError)throw new Error("Release records were cleared, but the Stage 1 draft could not be reset: "+draftDeleteError.message);
- return {ok:true,version,channel,releaseType,deletedReleases:releases.length,deletedDrafts:(drafts||[]).length};
+ return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,preservedHistoricalReleases:historical.length,deletedDrafts:(drafts||[]).length};
 });
 
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"withdraw"}})=>{
