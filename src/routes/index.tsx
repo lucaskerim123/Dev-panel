@@ -187,6 +187,9 @@ function Index() {
         diffComplete:r.diffComplete!==false,
         commitCount:Number(r.commitCount??(r.commits||[]).length),
         compareMetadataFiles:Number(r.compareMetadataFiles??0),
+        baselineFileCount:r.baselineFileCount==null?null:Number(r.baselineFileCount),
+        currentFileCount:r.currentFileCount==null?null:Number(r.currentFileCount),
+        inspectedAt:r.inspectedAt||new Date().toISOString(),
       });
       if (type === "engine") {
         if(!String(minBase||"").trim()&&r.baseBaseline?.version)setMinBase(resolvedMinBase);
@@ -244,6 +247,21 @@ function Index() {
     } finally { setBusy(""); }
   };
 
+  const changeReleaseChannel = (nextChannel:string) => {
+    const next=String(nextChannel||"stable").trim().toLowerCase()||"stable";
+    if(next===channel)return;
+    setChannel(next);
+    // Release channels have different authoritative baselines. Force a fresh
+    // inspection rather than leaving the previous channel's diff on screen.
+    setFiles([]);
+    setCommits([]);
+    setComponents([]);
+    setBaseline(null);
+    setReviewOpen(false);
+    setChangelogDraft("");
+    setNotice("");
+  };
+
   if (!session) return <Login email={email} password={password} setEmail={setEmail} setPassword={setPassword}
     busy={busy} error={error} onSubmit={async (e: any) => {
       e.preventDefault(); setBusy("login"); setError("");
@@ -273,12 +291,12 @@ function Index() {
               onBase={() => { resetComposer(); setTab("base"); }} onEngine={() => { resetComposer(); setTab("engine"); }}
               onActivity={() => setTab("activity")} onReleases={() => setTab("releases")} />}
             {tab === "releases" && <ReleasesPage releases={allReleases} session={session} onChanged={()=>load(session,true)} onBase={() => { resetComposer(); setTab("base"); }} onEngine={() => { resetComposer(); setTab("engine"); }} />}
-            {tab === "base" && <Composer type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel, version, setVersion, notes, setNotes, files, commits, baseline,
+            {tab === "base" && <Composer type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
               onInspect={() => inspect("base")} onStart={() => start("base")}
               run={runRepo === "lucaskerim123/Dev-panel" ? run : null} runRepo={runRepo} handoff={handoff} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
-            {tab === "engine" && <Composer type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel, version, setVersion, notes, setNotes, files, commits, baseline,
+            {tab === "engine" && <Composer type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
               onInspect={() => inspect("engine")} onStart={() => start("engine")}
