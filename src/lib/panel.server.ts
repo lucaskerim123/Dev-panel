@@ -25,6 +25,34 @@ const masterUrl=()=> {
  return url.toString().replace(/\/$/,"");
 };
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
+const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE_COMPATIBILITY_CHANNEL||"stable");
+function parseSemVer(value:string){
+ const match=String(value||"").trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
+ if(!match)return null;
+ return {core:[Number(match[1]),Number(match[2]),Number(match[3])],pre:match[4]?match[4].split("."):[]};
+}
+function compareSemVer(left:string,right:string){
+ const a=parseSemVer(left),b=parseSemVer(right);
+ if(!a||!b)return null;
+ for(let i=0;i<3;i++){if(a.core[i]!==b.core[i])return a.core[i]>b.core[i]?1:-1}
+ if(!a.pre.length&&!b.pre.length)return 0;
+ if(!a.pre.length)return 1;
+ if(!b.pre.length)return -1;
+ const length=Math.max(a.pre.length,b.pre.length);
+ for(let i=0;i<length;i++){
+  const av=a.pre[i],bv=b.pre[i];
+  if(av===undefined)return -1;if(bv===undefined)return 1;if(av===bv)continue;
+  const an=/^\d+$/.test(av),bn=/^\d+$/.test(bv);
+  if(an&&bn)return Number(av)>Number(bv)?1:-1;
+  if(an!==bn)return an?-1:1;
+  return av>bv?1:-1;
+ }
+ return 0;
+}
+function baseSnapshotSha(release:any){
+ const manifest=release?.manifest&&typeof release.manifest==="object"?release.manifest:{};
+ return String(manifest.databaseSchemaSha256||manifest.releaseInfo?.databaseSchemaSha256||manifest.database?.schemaSha256||manifest.database?.sha256||"").trim();
+}
 const allowedRepos=new Set([BASE_REPO,BASE_WORKER_REPO,ENGINE_REPO]);
 
 function detectUpdateComponents(files:any[]){
@@ -431,11 +459,18 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  if (data.type === "engine") {
   const minimumBaseVersion=String(data.minimumBaseVersion||"").trim();
   const protocol=Number(data.protocol||"");
-  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(minimumBaseVersion))throw new Error("Minimum Base version must be valid SemVer.");
+  if(!parseSemVer(minimumBaseVersion))throw new Error("Minimum Base version must be valid SemVer.");
   if(!Number.isInteger(protocol)||protocol<1||protocol>100)throw new Error("Minimum deployer protocol must be an integer from 1 to 100.");
-  const baseResult = await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=base&include_archived=false`);
-  const publishedBase = (baseResult?.releases || []).some((r:any) => r.status === "published" && r.review_status === "approved" && !r.archived_at && String(r.version)===minimumBaseVersion && String(r.channel||"stable")===channel);
-  if (!publishedBase) throw new Error(`Published, technically approved OrbitFS Base ${minimumBaseVersion} is required in channel ${channel} before creating this Update.`);
+  const baseChannel=ENGINE_BASE_COMPATIBILITY_CHANNEL;
+  const baseResult=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(baseChannel)}&type=base&include_archived=false`);
+  const publishedBases=(baseResult?.releases||[]).filter((r:any)=>{
+   const comparison=compareSemVer(String(r.version||""),minimumBaseVersion);
+   return r.status==="published"&&r.review_status==="approved"&&!r.archived_at&&String(r.channel||"stable").toLowerCase()===baseChannel&&comparison!==null&&comparison>=0&&/^[a-f0-9]{64}$/i.test(baseSnapshotSha(r));
+  }).sort((a:any,b:any)=>compareSemVer(String(b.version||""),String(a.version||""))??0);
+  if(!publishedBases.length){
+   const available=(baseResult?.releases||[]).filter((r:any)=>r.status==="published"&&r.review_status==="approved"&&!r.archived_at).map((r:any)=>String(r.version||"")).filter(Boolean);
+   throw new Error(`Minimum Base ${minimumBaseVersion} requires an approved published Base at or above that version in ${baseChannel} with a valid database snapshot.${available.length?` Available: ${available.join(", ")}.`:""}`);
+  }
  }
  const previousResult = data.type === "base"
   ? await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=base&include_archived=false`)
@@ -520,6 +555,7 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
   changedFilesTruncated: detectedFiles.length > dispatchFiles.length,
   components: selectedComponents,
   minimumBaseVersion: data.type === "engine" ? (data.minimumBaseVersion || "1.0.0") : null,
+  baseCompatibilityChannel: data.type === "engine" ? ENGINE_BASE_COMPATIBILITY_CHANNEL : null,
   minimumDeployerProtocol: data.type === "engine" ? (data.protocol || "1") : null,
   notes: data.notes.trim(),
   changelogTemplate: data.changelogTemplate,
@@ -535,7 +571,7 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
   previous_source_commit:previousSourceCommit,
  };
  if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head});
- if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",minimum_deployer_protocol:data.protocol||"1"});
+ if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_deployer_protocol:data.protocol||"1"});
  const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
  const dispatchBytes=Buffer.byteLength(dispatchPayload,"utf8");
  if(dispatchBytes>50000){
@@ -548,7 +584,7 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  const {data:existing,error:existingError}=await sb.from("panel_release_drafts").select("*").eq("release_type",releaseType).eq("version",version).eq("channel",channel).maybeSingle();
  if(existingError)throw new Error("Unable to resolve release draft: "+existingError.message);
  if(existing&&["archived","rejected"].includes(String(existing.status)))throw new Error("This release draft is closed. Use a new version instead of creating another attempt.");
- const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,detectedComponents};
+ const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,detectedComponents};
  let draft:any=existing;
  if(!draft){
    const {data:created,error:createError}=await sb.from("panel_release_drafts").insert({release_type:releaseType,version,channel,source_repo:repo,source_ref:ref,source_sha:head,status:"draft",inputs:inputSnapshot,created_by:actor.email||actor.id}).select("*").single();
