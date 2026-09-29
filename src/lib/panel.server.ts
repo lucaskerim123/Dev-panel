@@ -713,6 +713,60 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
   throw new Error("Release workflow run is not available yet");
 });
 
+export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine"}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to promote a release branch.");
+ const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
+ const releaseRef=data.type==="base"?BASE_REF:ENGINE_REF;
+ const workflow="sync-release-branch.yml";
+ const sourceRef="main";
+
+ const [sourceBranch,releaseBranch,runs]=await Promise.all([
+  github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(sourceRef)}`),
+  github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(releaseRef)}`).catch(()=>null),
+  github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`).catch(()=>({workflow_runs:[]})),
+ ]);
+ const sourceSha=String(sourceBranch?.object?.sha||"");
+ const releaseSha=String(releaseBranch?.object?.sha||"");
+ if(!/^[a-f0-9]{40}$/i.test(sourceSha))throw new Error(`Could not resolve ${repo}@main.`);
+
+ const active=(runs?.workflow_runs||[])
+  .filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()))
+  .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0];
+ if(active){
+  return {ok:true,alreadyRunning:true,repo,sourceRef,releaseRef,sourceSha,releaseSha,runId:active.id||null,runUrl:active.html_url||null,status:active.status||"in_progress"};
+ }
+
+ const dispatchedAt=Date.now();
+ await github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`,{
+  method:"POST",
+  body:JSON.stringify({ref:sourceRef,inputs:{confirmation:"PROMOTE"}})
+ });
+
+ let run:any=null;
+ for(let attempt=0;attempt<8&&!run;attempt++){
+  await new Promise(resolve=>setTimeout(resolve,700));
+  try{
+   const result=await github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`);
+   run=(result?.workflow_runs||[])
+    .filter((candidate:any)=>new Date(candidate.created_at||0).getTime()>=dispatchedAt-5000)
+    .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+  }catch{}
+ }
+ return {
+  ok:true,
+  alreadyRunning:false,
+  repo,
+  sourceRef,
+  releaseRef,
+  sourceSha,
+  releaseSha,
+  runId:run?.id||null,
+  runUrl:run?.html_url||null,
+  status:run?.status||"dispatched"
+ };
+});
+
 export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null}})=>{
  const actor=readSession(data.token);
  const version=data.version.trim();
