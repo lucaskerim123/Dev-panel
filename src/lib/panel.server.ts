@@ -40,7 +40,7 @@ async function officialMasterConnections(force=false){
    connections=(Array.isArray(body?.connections)?body.connections:[])
     .filter((row:any)=>row?.enabled!==false)
     .map((row:any)=>{
-      const role:String=String(row?.connection_role||"primary")==="fallback"?"fallback":"primary";
+      const role:string=String(row?.connection_role||"primary")==="fallback"?"fallback":"primary";
       const normalized=normalizeOfficialMasterUrl(String(row?.base_url||""),role as MasterConnectionRole);
       return normalized?{...row,connection_role:role,base_url:normalized}:null;
     }).filter(Boolean);
