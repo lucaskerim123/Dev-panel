@@ -392,6 +392,38 @@ export const updateAccessGroup=createServerFn({method:"POST"}).handler(async({da
  return {group};
 });
 
+export const getApiConnectionState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ readSession(data.token);
+ const [official,selectedUrl]=await Promise.all([officialMasterConnections(true),configuredMasterUrl()]);
+ let row:any=null;
+ try{const result=await authClient().from("panel_api_connections").select("*").eq("service_key","license_manager").maybeSingle();row=result.data||null;}catch{}
+ return {authority:"orbitfs-license-manager",bootstrapUrl:TRUSTED_MASTER_BOOTSTRAP_URL,selectedUrl,officialConnections:official,connection:row};
+});
+
+export const saveApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url:string}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required");
+ const requested=normalizeOfficialMasterUrl(data.url);
+ if(!requested)throw new Error("API URL must be an official HTTPS /api/v1 endpoint.");
+ const official=await officialMasterConnections(true);
+ if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
+ const now=new Date().toISOString();
+ const {error}=await authClient().from("panel_api_connections").upsert({service_key:"license_manager",selected_url:requested,updated_by:actor.email||actor.id,updated_at:now},{onConflict:"service_key"});
+ if(error)throw new Error("Unable to save Dev Panel API connection: "+error.message);
+ return {ok:true,selectedUrl:requested};
+});
+
+export const testApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url?:string}})=>{
+ readSession(data.token);
+ const requested=data.url?normalizeOfficialMasterUrl(data.url):await configuredMasterUrl();
+ if(!requested)throw new Error("API URL is invalid.");
+ const official=await officialMasterConnections(true);
+ if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
+ const started=Date.now();
+ const health=await requestJson(requested+"/license/health",{headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"});
+ return {ok:true,url:requested,latencyMs:Date.now()-started,health};
+});
+
 export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
  readSession(data.token);
  const releaseType=data.type==="base"?"base":"update",channel=normalizeChannel(data.channel),product="orbitfs_base";
