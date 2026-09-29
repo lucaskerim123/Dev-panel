@@ -45,7 +45,7 @@ function Index() {
   const [files, setFiles] = useState<any[]>([]);
   const [commits, setCommits] = useState<any[]>([]);
   const [components, setComponents] = useState<string[]>([]);
-  const [minBase, setMinBase] = useState("1.0.0");
+  const [minBase, setMinBase] = useState("");
   const [protocol, setProtocol] = useState("1");
 
   const [run, setRun] = useState<any>(null);
@@ -168,7 +168,7 @@ function Index() {
     try {
       const r = await inspectSource({ data: { token: session.token, type, channel } });
       const detectedComponents=type==="engine"&&Array.isArray(r.detectedComponents)?r.detectedComponents:[];
-      const resolvedMinBase=type==="engine"?(String(minBase||"").trim()||String(r.baseBaseline?.version||"").trim()||"1.0.0"):minBase;
+      const resolvedMinBase=type==="engine"?(String(minBase||"").trim()||String(r.baseBaseline?.version||"").trim()):minBase;
       setFiles(r.files || []);
       setCommits(r.commits || []);
       const bootstrapVersion=r.initialUpdate?String(r.baseline?.initialReleaseVersion||r.baseline?.version||"").trim():"";
@@ -195,7 +195,7 @@ function Index() {
         publishedBaselineSha:r.publishedBaselineSha??null,
       });
       if (type === "engine") {
-        if(!String(minBase||"").trim()&&r.baseBaseline?.version)setMinBase(resolvedMinBase);
+        if(!String(minBase||"").trim())setMinBase(resolvedMinBase);
         if(bootstrapVersion)setVersion(bootstrapVersion);
         setComponents(detectedComponents);
       }
