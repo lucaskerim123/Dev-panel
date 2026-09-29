@@ -494,8 +494,9 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  const grouped=new Map<string,any[]>();
  for(const attempt of attempts){const list=grouped.get(attempt.draft_id)||[];list.push(attempt);grouped.set(attempt.draft_id,list)}
  const releaseDrafts=(drafts||[]).map((draft:any)=>({...draft,attempts:grouped.get(draft.id)||[]}));
- const availableChannels=Array.isArray(channels?.channels)?channels.channels.filter((x:any)=>x?.enabled===true).map((x:any)=>String(x.channel).trim().toLowerCase()).filter(Boolean):[];
- return {releases:releases?.releases||[],drafts:releaseDrafts,channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
+ const authorityFallback=limpFallbackBody(releases)||limpFallbackBody(channels);
+ const availableChannels=authorityFallback?[]:Array.isArray(channels?.channels)?channels.channels.filter((x:any)=>x?.enabled===true).map((x:any)=>String(x.channel).trim().toLowerCase()).filter(Boolean):[];
+ return {releases:authorityFallback?[]:releases?.releases||[],drafts:releaseDrafts,channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),authorityMode:authorityFallback?'limp':'primary',restricted:authorityFallback,product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
 });
 
 
