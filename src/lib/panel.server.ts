@@ -901,11 +901,6 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
  }catch(error:any){
   billingWarning="Billing presentation cleanup could not be confirmed: "+String(error?.message||"unknown error")+".";
  }
- for(const release of historical){
-  if(!release.archived_at){
-   await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Preserved automatically by Dev Panel Start Fresh for rollback/history"})});
-  }
- }
  for(const release of disposable){
   const id=String(release.id);
   const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
