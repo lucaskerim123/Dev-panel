@@ -1070,13 +1070,16 @@ async function licenseMaster(path:string,init:RequestInit={}){
  const headers={authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`,...(init.headers||{})};
  const method=String(init.method||"GET").toUpperCase();
  let primaryError:any=null;
- try{
-   const result=await requestJson(`${connection.primaryUrl}${path}`,{...init,headers});
-   if(limpFallbackBody(result))throw Object.assign(new Error("Primary authority returned limp fallback mode"),{status:503,code:"PRIMARY_AUTHORITY_INVALID",transport:true});
-   return result;
- }catch(error:any){
-   if(!primaryInfrastructureFailure(error))throw error;
-   primaryError=error;
+ for(let attempt=0;attempt<2;attempt+=1){
+  try{
+    const result=await requestJson(`${connection.primaryUrl}${path}`,{...init,headers});
+    if(limpFallbackBody(result))throw Object.assign(new Error("Primary authority returned limp fallback mode"),{status:503,code:"PRIMARY_AUTHORITY_INVALID",transport:true});
+    return result;
+  }catch(error:any){
+    if(!primaryInfrastructureFailure(error))throw error;
+    primaryError=error;
+  }
+  if(attempt===0)await new Promise(resolve=>setTimeout(resolve,150));
  }
  if(!connection.failoverEnabled||!connection.fallbackUrl||!["GET","HEAD"].includes(method)){
    throw Object.assign(new Error("License Manager authority is unavailable. This Stage 1 operation requires the primary authority."),{status:503,code:"LICENSE_AUTHORITY_UNAVAILABLE",primaryError:String(primaryError?.message||primaryError)});
