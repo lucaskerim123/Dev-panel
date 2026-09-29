@@ -78,10 +78,6 @@ function compareSemVer(left:string,right:string){
  }
  return 0;
 }
-function baseSnapshotSha(release:any){
- const manifest=release?.manifest&&typeof release.manifest==="object"?release.manifest:{};
- return String(manifest.databaseSchemaSha256||manifest.releaseInfo?.databaseSchemaSha256||manifest.database?.schemaSha256||manifest.database?.sha256||"").trim();
-}
 const allowedRepos=new Set([BASE_REPO,BASE_WORKER_REPO,ENGINE_REPO]);
 
 function detectUpdateComponents(files:any[]){
@@ -541,8 +537,11 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
  try {
    const baseResult = await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(ENGINE_BASE_COMPATIBILITY_CHANNEL)}&type=base&include_archived=false`);
    baseBaseline=(baseResult?.releases||[])
-     .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&r.source_sha)
-     .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+     .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&!r.archived_at)
+     .sort((a:any,b:any)=>{
+      const compared=compareSemVer(String(b.version||""),String(a.version||""));
+      return compared??(new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime());
+     })[0]||null;
  } catch {}
  try {
    const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);
@@ -552,7 +551,7 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
  } catch {}
 
  const inspectedAt=new Date().toISOString();
- const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha,channel:ENGINE_BASE_COMPATIBILITY_CHANNEL}:null;
+ const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha||null,channel:ENGINE_BASE_COMPATIBILITY_CHANNEL}:null;
  const from=String(baseline?.source_sha||"");
  const baselineInfo:any=baseline?{id:baseline.id,version:baseline.version,sourceSha:baseline.source_sha,kind:data.type==="base"?"published_base":"published_update",channel}:null;
 
@@ -657,11 +656,11 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
   const baseResult=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(baseChannel)}&type=base&include_archived=false`);
   const publishedBases=(baseResult?.releases||[]).filter((r:any)=>{
    const comparison=compareSemVer(String(r.version||""),minimumBaseVersion);
-   return r.status==="published"&&r.review_status==="approved"&&!r.archived_at&&String(r.channel||"stable").toLowerCase()===baseChannel&&comparison!==null&&comparison>=0&&/^[a-f0-9]{64}$/i.test(baseSnapshotSha(r));
+   return r.status==="published"&&r.review_status==="approved"&&!r.archived_at&&String(r.channel||"stable").toLowerCase()===baseChannel&&comparison!==null&&comparison>=0;
   }).sort((a:any,b:any)=>compareSemVer(String(b.version||""),String(a.version||""))??0);
   if(!publishedBases.length){
    const available=(baseResult?.releases||[]).filter((r:any)=>r.status==="published"&&r.review_status==="approved"&&!r.archived_at).map((r:any)=>String(r.version||"")).filter(Boolean);
-   throw new Error(`Minimum Base ${minimumBaseVersion} requires an approved published Base at or above that version in ${baseChannel} with a valid database snapshot.${available.length?` Available: ${available.join(", ")}.`:""}`);
+   throw new Error(`Minimum Base ${minimumBaseVersion} requires an approved published Base at or above that version in ${baseChannel}.${available.length?` Available: ${available.join(", ")}.`:""}`);
   }
  }
  const previousResult = data.type === "base"
@@ -848,9 +847,10 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  const release=current?.release;
  if(!release)throw new Error("Release was not found in License Manager");
  const status=String(release.status||"").toLowerCase();
- if(status==="published")throw new Error("Currently published releases cannot be deleted.");
- const deletable=Boolean(release.archived_at)||(status==="draft"&&!release.published_at);
- if(!deletable)throw new Error("Only archived releases or never-published drafts can be permanently deleted.");
+ const everPublished=status==="published"||Boolean(release.published_at);
+ if(everPublished)throw new Error("Published release history cannot be permanently deleted.");
+ const deletable=!release.published_at;
+ if(!deletable)throw new Error("Only never-published releases can be permanently deleted.");
  const expected=`DELETE_RELEASE:${id}:${release.version}`;
 
  let billingWarning="";
@@ -893,8 +893,8 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
    }catch{}
   }
  }
- const disposable=releases.filter((release:any)=>String(release.status||"").toLowerCase()==="draft"&&!release.published_at);
- const historical=releases.filter((release:any)=>!disposable.some((candidate:any)=>String(candidate.id)===String(release.id)));
+ const disposable=releases.filter((release:any)=>String(release.status||"").toLowerCase()!=="published"&&!release.published_at);
+ const historical=releases.filter((release:any)=>String(release.status||"").toLowerCase()==="published"||Boolean(release.published_at));
  await billingStoreReset({releaseIds:disposable.map((r:any)=>String(r.id)),version,releaseType,channel});
  for(const release of historical){
   if(!release.archived_at){
