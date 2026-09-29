@@ -516,6 +516,53 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
  return {ok:true,id:data.draftId};
 });
 
+export const deleteReleaseAttempt=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;attemptId:string}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to delete release attempts.");
+ const id=String(data.attemptId||"").trim();
+ if(!id)throw new Error("Attempt ID is required.");
+ const sb=authClient();
+ const {data:attempt,error:attemptReadError}=await sb.from("panel_release_attempts").select("*").eq("id",id).single();
+ if(attemptReadError||!attempt)throw new Error("Release attempt was not found.");
+ const {data:draft,error:draftReadError}=await sb.from("panel_release_drafts").select("*").eq("id",attempt.draft_id).single();
+ if(draftReadError||!draft)throw new Error("Release draft for this attempt was not found.");
+
+ let status=String(attempt.status||"").toLowerCase();
+ if(["queued","in_progress"].includes(status)&&attempt.run_id){
+  const workerRepo=String(draft.release_type)==="base"?BASE_WORKER_REPO:ENGINE_REPO;
+  const run=await github(`/repos/${workerRepo}/actions/runs/${Number(attempt.run_id)}`);
+  if(String(run?.status||"").toLowerCase()!=="completed")throw new Error("A running release attempt cannot be deleted.");
+  status=String(run?.conclusion||"failure").toLowerCase();
+  await sb.from("panel_release_attempts").update({
+   status,
+   run_url:run?.html_url||attempt.run_url||null,
+   completed_at:attempt.completed_at||new Date().toISOString()
+  }).eq("id",id);
+ }
+ if(["queued","in_progress"].includes(status))throw new Error("A running release attempt cannot be deleted.");
+ if(status==="success"||String(draft.status||"").toLowerCase()==="handed_off")throw new Error("The successful handoff attempt is retained. Delete only stale failed, cancelled or skipped attempts.");
+
+ const {error:deleteError}=await sb.from("panel_release_attempts").delete().eq("id",id);
+ if(deleteError)throw new Error("Unable to delete release attempt: "+deleteError.message);
+
+ const {data:remaining,error:remainingError}=await sb.from("panel_release_attempts").select("*").eq("draft_id",draft.id).order("attempt_number",{ascending:false});
+ if(remainingError)throw new Error("Attempt was deleted, but the draft summary could not be refreshed: "+remainingError.message);
+ const latest=(remaining||[])[0]||null;
+ const latestStatus=String(latest?.status||"").toLowerCase();
+ const lastError=["failure","cancelled","skipped"].includes(latestStatus)?String(latest?.error_output||latest?.error_summary||"").trim()||null:null;
+ const nextStatus=draft.archived_at?"archived":"draft";
+ const {error:updateError}=await sb.from("panel_release_drafts").update({
+  status:nextStatus,
+  latest_attempt:Number(latest?.attempt_number||0),
+  last_error:lastError,
+  last_run_id:latest?.run_id||null,
+  last_run_url:latest?.run_url||null,
+  updated_at:new Date().toISOString()
+ }).eq("id",draft.id);
+ if(updateError)throw new Error("Attempt was deleted, but the draft summary could not be updated: "+updateError.message);
+ return {ok:true,id,draftId:draft.id,remaining:(remaining||[]).length};
+});
+
 export const getReleaseLifecycleEvents=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;limit?:number}})=>{
  readSession(data.token);
  const limit=Math.min(500,Math.max(1,Number(data.limit||200)));
@@ -619,8 +666,12 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
       const sb=authClient();
       const outcome=String(run.conclusion||"failure");
       const errorText=failure?.lines?.join("\n")||failure?.error||null;
+      const {data:attemptRow}=await sb.from("panel_release_attempts").select("id,draft_id").eq("run_id",data.runId).maybeSingle();
       await sb.from("panel_release_attempts").update({status:outcome,error_summary:failure?.error||null,error_output:errorText,completed_at:new Date().toISOString(),run_url:run.html_url||null}).eq("run_id",data.runId);
       await sb.from("panel_release_drafts").update({status:outcome==="success"?"handed_off":"draft",last_error:outcome==="success"?null:errorText,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("last_run_id",data.runId);
+      if(outcome==="success"&&attemptRow?.draft_id){
+       await sb.from("panel_release_attempts").delete().eq("draft_id",attemptRow.draft_id).in("status",["failure","cancelled","skipped"]).neq("id",attemptRow.id);
+      }
     }else{
       const sb=authClient();
       await sb.from("panel_release_attempts").update({status:"in_progress",run_url:run.html_url||null}).eq("run_id",data.runId);
