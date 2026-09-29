@@ -563,6 +563,37 @@ export const deleteReleaseAttempt=createServerFn({method:"POST"}).handler(async(
  return {ok:true,id,draftId:draft.id,remaining:(remaining||[]).length};
 });
 
+export const clearStaleReleaseAttempts=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;draftId:string}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to clear release attempts.");
+ const draftId=String(data.draftId||"").trim();
+ if(!draftId)throw new Error("Draft ID is required.");
+ const sb=authClient();
+ const {data:draft,error:draftReadError}=await sb.from("panel_release_drafts").select("*").eq("id",draftId).single();
+ if(draftReadError||!draft)throw new Error("Release draft was not found.");
+ const {data:attempts,error:attemptReadError}=await sb.from("panel_release_attempts").select("*").eq("draft_id",draftId).order("attempt_number",{ascending:false});
+ if(attemptReadError)throw new Error("Unable to load release attempts: "+attemptReadError.message);
+ const stale=(attempts||[]).filter((row:any)=>["failure","cancelled","skipped"].includes(String(row.status||"").toLowerCase()));
+ if(!stale.length)return {ok:true,draftId,deleted:0,remaining:(attempts||[]).length};
+ const ids=stale.map((row:any)=>String(row.id));
+ const {error:deleteError}=await sb.from("panel_release_attempts").delete().in("id",ids);
+ if(deleteError)throw new Error("Unable to clear stale release attempts: "+deleteError.message);
+ const remaining=(attempts||[]).filter((row:any)=>!ids.includes(String(row.id)));
+ const latest=remaining[0]||null;
+ const currentStatus=String(draft.status||"").toLowerCase();
+ const patch:any={
+  latest_attempt:Number(latest?.attempt_number||0),
+  last_run_id:latest?.run_id||null,
+  last_run_url:latest?.run_url||null,
+  last_error:null,
+  updated_at:new Date().toISOString()
+ };
+ if(!["building","handed_off","archived"].includes(currentStatus))patch.status="draft";
+ const {error:updateError}=await sb.from("panel_release_drafts").update(patch).eq("id",draftId);
+ if(updateError)throw new Error("Stale attempts were deleted, but the draft summary could not be updated: "+updateError.message);
+ return {ok:true,draftId,deleted:ids.length,remaining:remaining.length};
+});
+
 export const getReleaseLifecycleEvents=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;limit?:number}})=>{
  readSession(data.token);
  const limit=Math.min(500,Math.max(1,Number(data.limit||200)));
