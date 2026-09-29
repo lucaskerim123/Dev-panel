@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - design/orbitfs-control-redesign
+      - APIFallback
   workflow_dispatch:
 
 permissions:
