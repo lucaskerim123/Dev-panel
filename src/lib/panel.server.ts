@@ -895,7 +895,12 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
  }
  const disposable=releases.filter((release:any)=>String(release.status||"").toLowerCase()!=="published"&&!release.published_at);
  const historical=releases.filter((release:any)=>String(release.status||"").toLowerCase()==="published"||Boolean(release.published_at));
- await billingStoreReset({releaseIds:disposable.map((r:any)=>String(r.id)),version,releaseType,channel});
+ let billingWarning="";
+ try{
+  await billingStoreReset({releaseIds:disposable.map((r:any)=>String(r.id)),version,releaseType,channel});
+ }catch(error:any){
+  billingWarning="Billing presentation cleanup could not be confirmed: "+String(error?.message||"unknown error")+".";
+ }
  for(const release of historical){
   if(!release.archived_at){
    await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Preserved automatically by Dev Panel Start Fresh for rollback/history"})});
@@ -910,7 +915,7 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
  if(eventDeleteError)throw new Error("Release records were cleared, but Dev Panel lifecycle history could not be reset: "+eventDeleteError.message);
  const {error:draftDeleteError}=await sb.from("panel_release_drafts").delete().eq("release_type",releaseType).eq("version",version).eq("channel",channel);
  if(draftDeleteError)throw new Error("Release records were cleared, but the Stage 1 draft could not be reset: "+draftDeleteError.message);
- return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,preservedHistoricalReleases:historical.length,deletedDrafts:(drafts||[]).length};
+ return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,preservedHistoricalReleases:historical.length,deletedDrafts:(drafts||[]).length,warning:billingWarning||null};
 });
 
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"withdraw"}})=>{
