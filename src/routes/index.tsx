@@ -14,12 +14,13 @@ import {
   getReleaseHandoff, login, getAccessState, createPanelUser,
   updatePanelUser, createAccessGroup, updateAccessGroup, getControlState,
   controlRelease, deleteAuthoritativeRelease, getChannelsState,
-  getAuditState, getRepositoryStatus, getPortalMonitor, getReleaseLifecycleEvents
+  getAuditState, getRepositoryStatus, getPortalMonitor, getReleaseLifecycleEvents,
+  getApiConnectionState, saveApiConnection, testApiConnection
 } from "@/lib/panel.server";
 
 export const Route = createFileRoute("/")({ component: Index });
 
-type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "settings";
+type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "api-connections" | "settings";
 type ReleaseType = "base" | "engine";
 
 const EMPTY = { releases: [], channels: [] };
@@ -316,6 +317,7 @@ function Index() {
             {tab === "monitoring" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "audit" && <AuditPage releases={allReleases} run={run} session={session} />}
             {tab === "access" && <AccessPage session={session} />}
+            {tab === "api-connections" && <ApiConnectionsPage session={session} />}
             {tab === "settings" && <SettingsPage data={data} connected={masterConnected} />}
           </div>
         </main>
@@ -401,6 +403,7 @@ const NAV_GROUPS = [
   {label:"Govern",items:[
     ["audit","Audit History","Authority events",History],
     ["access","Users & Access","Panel permissions",Users],
+    ["api-connections","API Connections","Official OrbitFS APIs",KeyRound],
     ["settings","Configuration","Runtime & panel settings",Settings2],
   ]},
 ] as const;
@@ -861,6 +864,44 @@ function AccessPage({session}:any) {
   </section>;
 }
 
+
+function ApiConnectionsPage({session}:any){
+ const [state,setState]=useState<any>(null);
+ const [url,setUrl]=useState("");
+ const [busy,setBusy]=useState("");
+ const [message,setMessage]=useState("");
+ const [pageError,setPageError]=useState("");
+ const loadApiConnections=async()=>{setBusy("load");setPageError("");try{const next=await getApiConnectionState({data:{token:session.token}});setState(next);setUrl(next.selectedUrl||"")}catch(x:any){setPageError(x.message||"Unable to load API connections.")}finally{setBusy("")}};
+ useEffect(()=>{void loadApiConnections()},[session?.token]);
+ const official=Array.isArray(state?.officialConnections)?state.officialConnections:[];
+ const selected=official.find((row:any)=>String(row.base_url)===url);
+ const save=async()=>{setBusy("save");setMessage("");setPageError("");try{const result=await saveApiConnection({data:{token:session.token,url}});setUrl(result.selectedUrl);setMessage("Official License Manager API selected.");await loadApiConnections()}catch(x:any){setPageError(x.message||"Unable to save API connection.")}finally{setBusy("")}};
+ const test=async()=>{setBusy("test");setMessage("");setPageError("");try{const result=await testApiConnection({data:{token:session.token,url}});setMessage("Connected · "+result.latencyMs+"ms")}catch(x:any){setPageError(x.message||"API connection test failed.")}finally{setBusy("")}};
+ return <section className="space-y-4">
+  <PageHead title="API Connections" detail="Select the official OrbitFS API used by Dev Panel. License Manager controls the registry; arbitrary URLs are rejected server-side."/>
+  {pageError&&<Alert tone="error" onClose={()=>setPageError("")}>{pageError}</Alert>}
+  {message&&<Alert tone="success" onClose={()=>setMessage("")}>{message}</Alert>}
+  <section className="orbit-panel p-4">
+   <SectionHead icon={ShieldCheck} title="License Manager API" detail="Technical licensing, release and deployment authority. Dev Panel remains an operations frontend only."/>
+   <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+    <div>
+     <Field label="Official API URL"><input className="control mt-1" list="dev-official-master-apis" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://incendiarynetworks.cc/api/v1"/></Field>
+     <datalist id="dev-official-master-apis">{official.map((row:any)=><option key={row.base_url} value={row.base_url}>{row.label}</option>)}</datalist>
+     <p className="mt-2 text-[10px] leading-5 text-muted-foreground">You can paste/type a URL, but it only saves when it exactly matches an enabled <code>dev_panel</code> endpoint from License Manager's official registry.</p>
+     <div className="mt-3 flex flex-wrap gap-2"><button className="button-primary" disabled={Boolean(busy)||!url} onClick={()=>void save()}>{busy==="save"?"Saving…":"Save official API"}</button><button className="button-secondary" disabled={Boolean(busy)||!url} onClick={()=>void test()}>{busy==="test"?"Testing…":"Test connection"}</button><button className="button-secondary" disabled={!official.length||Boolean(busy)} onClick={()=>setUrl(String(official[0]?.base_url||""))}>Use recommended</button></div>
+    </div>
+    <div className="orbit-kv-list">
+     <div><span>Status</span><code>{selected?"Official":"Not approved"}</code></div>
+     <div><span>Bootstrap</span><code>{state?.bootstrapUrl||"—"}</code></div>
+     <div><span>Registry entries</span><code>{official.length}</code></div>
+     <div><span>Selected</span><code>{state?.selectedUrl||"—"}</code></div>
+    </div>
+   </div>
+  </section>
+  <section className="orbit-panel p-4"><SectionHead icon={KeyRound} title="Approved endpoints" detail="Read from License Manager /api/v1/api-connections."/><div className="mt-4 space-y-2">{official.map((row:any)=><div key={row.base_url} className="rounded-lg border bg-background/40 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="min-w-0"><p className="text-xs font-semibold">{row.label}</p><code className="mt-1 block break-all text-[10px]">{row.base_url}</code></div><StatusPill text={row.base_url===state?.selectedUrl?"selected":"available"}/></div><p className="mt-2 text-[10px] text-muted-foreground">Priority {Number(row.priority||100)} · {(row.allowed_clients||[]).join(", ")||"Dev Panel"}</p></div>)}{!official.length&&<EmptyInline text="No official License Manager endpoints are currently available."/>}</div></section>
+  <section className="orbit-panel p-4"><SectionHead icon={Settings2} title="Connection boundaries" detail="Only technical authority belongs here."/><div className="mt-4 grid gap-2 sm:grid-cols-3"><PipelineStep icon={ShieldCheck} title="License Manager" text="Required. Releases, licensing, channels and deployment authorization."/><PipelineStep icon={Globe2} title="Billing Store" text="Commerce/customer frontend. Its internal presentation cleanup URL remains operational config, not technical authority."/ ><PipelineStep icon={Server} title="Customer providers" text="Customer Supabase/Vercel URLs stay inside customer deployment execution and are never selected as authority APIs."/></div></section>
+ </section>;
+}
 
 function SettingsPage({ data, connected }: any) {
   const base = data.base?.repositories?.base;
