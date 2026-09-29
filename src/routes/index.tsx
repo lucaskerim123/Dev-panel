@@ -32,6 +32,7 @@ function Index() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [masterConnected, setMasterConnected] = useState(false);
+  const [authorityMode, setAuthorityMode] = useState<"primary"|"limp"|"unavailable">("primary");
   const [data, setData] = useState<any>({ base: EMPTY, engine: EMPTY });
   const [busy, setBusy] = useState("");
   const [email, setEmail] = useState("");
@@ -97,6 +98,26 @@ function Index() {
   useEffect(() => {
     if (session) load(session, true);
   }, [channel]);
+
+  useEffect(() => {
+    if (!session) return;
+    let live=true,t:any;
+    const poll=async()=>{
+      try{
+        const state=await getApiConnectionState({data:{token:session.token}});
+        if(live){
+          const mode=String(state?.mode||"primary");
+          setAuthorityMode(mode==="limp"?"limp":mode==="unavailable"?"unavailable":"primary");
+          setMasterConnected(mode==="primary");
+        }
+      }catch{
+        if(live){setAuthorityMode("unavailable");setMasterConnected(false)}
+      }
+      if(live)t=setTimeout(poll,30000);
+    };
+    void poll();
+    return()=>{live=false;if(t)clearTimeout(t)};
+  }, [session?.token]);
 
   useEffect(() => {
     if (!run?.id || !runRepo || !session) return;
@@ -287,7 +308,8 @@ function Index() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header connected={masterConnected} loading={loading} onRefresh={() => load()} onSignOut={signOut} user={session} />
+      <Header connected={masterConnected} authorityMode={authorityMode} loading={loading} onRefresh={() => load()} onSignOut={signOut} user={session} />
+      {authorityMode==="limp"&&<div className="sticky top-[72px] z-40 border-b border-amber-500/30 bg-amber-950/90 px-4 py-2 text-center text-[11px] font-medium text-amber-100">API FALLBACK / LIMP MODE · Primary License Manager authority is unavailable. Release creation, validation, publishing, deployment, updates and rollback authority are disabled.</div>}
       <MobileNav tab={tab} setTab={setTab} activeRun={!!run && !run.conclusion} />
       <div className="mx-auto flex min-h-[calc(100vh-66px)] max-w-[1680px]">
         <Sidebar tab={tab} setTab={setTab} activeRun={!!run && !run.conclusion} />
@@ -352,7 +374,7 @@ function Login(p: any) {
   </div>;
 }
 
-function Header({ connected, loading, onRefresh, onSignOut, user }: any) {
+function Header({ connected, authorityMode, loading, onRefresh, onSignOut, user }: any) {
   return <header className="orbit-topbar sticky top-0 z-40 border-b">
     <div className="flex h-[72px] items-center gap-4 px-4 sm:px-6">
       <div className="flex min-w-0 items-center gap-3 md:hidden">
@@ -368,7 +390,7 @@ function Header({ connected, loading, onRefresh, onSignOut, user }: any) {
         </div>
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <div className={`orbit-master-badge ${connected?"is-online":"is-offline"}`}><span></span>{connected?"License Master online":"License Master offline"}</div>
+        <div className={`orbit-master-badge ${authorityMode==="primary"&&connected?"is-online":"is-offline"}`}><span></span>{authorityMode==="limp"?"LIMP MODE":authorityMode==="unavailable"?"Authority unavailable":connected?"License Master online":"License Master offline"}</div>
         <button className="icon-button" title="Refresh" onClick={onRefresh}><RefreshCw className={loading ? "animate-spin" : ""} size={15}/></button>
         <div className="orbit-user-chip">
           <div className="orbit-avatar">{String(user.display_name || user.email || "O").slice(0,1).toUpperCase()}</div>
@@ -868,38 +890,51 @@ function AccessPage({session}:any) {
 function ApiConnectionsPage({session}:any){
  const [state,setState]=useState<any>(null);
  const [url,setUrl]=useState("");
+ const [fallbackUrl,setFallbackUrl]=useState("");
+ const [failoverEnabled,setFailoverEnabled]=useState(true);
  const [busy,setBusy]=useState("");
  const [message,setMessage]=useState("");
  const [pageError,setPageError]=useState("");
- const loadApiConnections=async()=>{setBusy("load");setPageError("");try{const next=await getApiConnectionState({data:{token:session.token}});setState(next);setUrl(next.selectedUrl||"")}catch(x:any){setPageError(x.message||"Unable to load API connections.")}finally{setBusy("")}};
+ const loadApiConnections=async()=>{setBusy("load");setPageError("");try{const next=await getApiConnectionState({data:{token:session.token}});setState(next);setUrl(next.selectedUrl||"");setFallbackUrl(next.fallbackUrl||"");setFailoverEnabled(next.failoverEnabled!==false)}catch(x:any){setPageError(x.message||"Unable to load API connections.")}finally{setBusy("")}};
  useEffect(()=>{void loadApiConnections()},[session?.token]);
  const official=Array.isArray(state?.officialConnections)?state.officialConnections:[];
- const selected=official.find((row:any)=>String(row.base_url)===url);
- const save=async()=>{setBusy("save");setMessage("");setPageError("");try{const result=await saveApiConnection({data:{token:session.token,url}});setUrl(result.selectedUrl);setMessage("Official License Manager API selected.");await loadApiConnections()}catch(x:any){setPageError(x.message||"Unable to save API connection.")}finally{setBusy("")}};
- const test=async()=>{setBusy("test");setMessage("");setPageError("");try{const result=await testApiConnection({data:{token:session.token,url}});setMessage("Connected · "+result.latencyMs+"ms")}catch(x:any){setPageError(x.message||"API connection test failed.")}finally{setBusy("")}};
+ const primary=official.filter((row:any)=>String(row.connection_role||"primary")==="primary");
+ const fallback=official.filter((row:any)=>String(row.connection_role||"primary")==="fallback");
+ const selected=primary.find((row:any)=>String(row.base_url)===url);
+ const selectedFallback=fallback.find((row:any)=>String(row.base_url)===fallbackUrl);
+ const save=async()=>{setBusy("save");setMessage("");setPageError("");try{const result=await saveApiConnection({data:{token:session.token,url,fallbackUrl,failoverEnabled}});setUrl(result.selectedUrl);setFallbackUrl(result.fallbackUrl||"");setFailoverEnabled(result.failoverEnabled!==false);setMessage("Primary and limp fallback API configuration saved.");await loadApiConnections()}catch(x:any){setPageError(x.message||"Unable to save API connection.")}finally{setBusy("")}};
+ const test=async(role:"primary"|"fallback")=>{const candidate=role==="primary"?url:fallbackUrl;if(!candidate)return;setBusy("test:"+role);setMessage("");setPageError("");try{const result=await testApiConnection({data:{token:session.token,url:candidate,role}});setMessage((role==="fallback"?"Fallback limp endpoint":"Primary authority")+" connected · "+result.latencyMs+"ms · "+String(result.mode||role))}catch(x:any){setPageError(x.message||"API connection test failed.")}finally{setBusy("")}};
  return <section className="space-y-4">
-  <PageHead title="API Connections" detail="Select the official OrbitFS API used by Dev Panel. License Manager controls the registry; arbitrary URLs are rejected server-side."/>
+  <PageHead title="API Connections" detail="Select the primary License Manager authority and the registered StubEngine limp-mode fallback. Fallback never becomes authority."/>
+  {state?.mode==="limp"&&<Alert tone="error">API FALLBACK / LIMP MODE is active. Stage 1 authority mutations and release workflow handoff are blocked until the primary License Manager returns.</Alert>}
   {pageError&&<Alert tone="error" onClose={()=>setPageError("")}>{pageError}</Alert>}
   {message&&<Alert tone="success" onClose={()=>setMessage("")}>{message}</Alert>}
   <section className="orbit-panel p-4">
-   <SectionHead icon={ShieldCheck} title="License Manager API" detail="Technical licensing, release and deployment authority. Dev Panel remains an operations frontend only."/>
-   <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+   <SectionHead icon={ShieldCheck} title="License authority routing" detail="Primary is authoritative. Fallback is availability-only and may answer health/read requests with restricted limp state."/>
+   <div className="mt-4 grid gap-4 lg:grid-cols-2">
     <div>
-     <Field label="Official API URL"><input className="control mt-1" list="dev-official-master-apis" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://incendiarynetworks.cc/api/v1"/></Field>
-     <datalist id="dev-official-master-apis">{official.map((row:any)=><option key={row.base_url} value={row.base_url}>{row.label}</option>)}</datalist>
-     <p className="mt-2 text-[10px] leading-5 text-muted-foreground">You can paste/type a URL, but it only saves when it exactly matches an enabled <code>dev_panel</code> endpoint from License Manager's official registry.</p>
-     <div className="mt-3 flex flex-wrap gap-2"><button className="button-primary" disabled={Boolean(busy)||!url} onClick={()=>void save()}>{busy==="save"?"Saving…":"Save official API"}</button><button className="button-secondary" disabled={Boolean(busy)||!url} onClick={()=>void test()}>{busy==="test"?"Testing…":"Test connection"}</button><button className="button-secondary" disabled={!official.length||Boolean(busy)} onClick={()=>setUrl(String(official[0]?.base_url||""))}>Use recommended</button></div>
+     <Field label="Primary License Manager API"><select className="control mt-1" value={url} onChange={e=>setUrl(e.target.value)}>{primary.map((row:any)=><option key={row.base_url} value={row.base_url}>{row.label} · {row.base_url}</option>)}</select></Field>
+     <div className="mt-3 flex flex-wrap gap-2"><button className="button-secondary" disabled={Boolean(busy)||!url} onClick={()=>void test("primary")}>{busy==="test:primary"?"Testing…":"Test primary"}</button></div>
     </div>
-    <div className="orbit-kv-list">
-     <div><span>Status</span><code>{selected?"Official":"Not approved"}</code></div>
-     <div><span>Bootstrap</span><code>{state?.bootstrapUrl||"—"}</code></div>
-     <div><span>Registry entries</span><code>{official.length}</code></div>
-     <div><span>Selected</span><code>{state?.selectedUrl||"—"}</code></div>
+    <div>
+     <Field label="Limp-mode fallback API"><select className="control mt-1" value={fallbackUrl} onChange={e=>setFallbackUrl(e.target.value)}><option value="">Disabled</option>{fallback.map((row:any)=><option key={row.base_url} value={row.base_url}>{row.label} · {row.base_url}</option>)}</select></Field>
+     <label className="mt-3 flex items-center gap-2 text-xs"><input type="checkbox" checked={failoverEnabled} disabled={!fallbackUrl} onChange={e=>setFailoverEnabled(e.target.checked)}/><span>Automatic failover for safe read/health requests only</span></label>
+     <div className="mt-3 flex flex-wrap gap-2"><button className="button-secondary" disabled={Boolean(busy)||!fallbackUrl} onClick={()=>void test("fallback")}>{busy==="test:fallback"?"Testing…":"Test fallback contract"}</button></div>
     </div>
    </div>
+   <div className="mt-4 flex flex-wrap gap-2"><button className="button-primary" disabled={Boolean(busy)||!url} onClick={()=>void save()}>{busy==="save"?"Saving…":"Save API routing"}</button><button className="button-secondary" disabled={Boolean(busy)} onClick={()=>void loadApiConnections()}>{busy==="load"?"Refreshing…":"Refresh"}</button></div>
+   <p className="mt-3 text-[10px] leading-5 text-muted-foreground">Only exact enabled endpoints from License Manager's API registry are accepted. Primary 4xx licensing/release decisions never trigger failover. Release creation, validation, publishing, deployment, update, rollback and other mutations fail closed in limp mode.</p>
   </section>
-  <section className="orbit-panel p-4"><SectionHead icon={KeyRound} title="Approved endpoints" detail="Read from License Manager /api/v1/api-connections."/><div className="mt-4 space-y-2">{official.map((row:any)=><div key={row.base_url} className="rounded-lg border bg-background/40 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="min-w-0"><p className="text-xs font-semibold">{row.label}</p><code className="mt-1 block break-all text-[10px]">{row.base_url}</code></div><StatusPill text={row.base_url===state?.selectedUrl?"selected":"available"}/></div><p className="mt-2 text-[10px] text-muted-foreground">Priority {Number(row.priority||100)} · {(row.allowed_clients||[]).join(", ")||"Dev Panel"}</p></div>)}{!official.length&&<EmptyInline text="No official License Manager endpoints are currently available."/>}</div></section>
-  <section className="orbit-panel p-4"><SectionHead icon={Settings2} title="Connection boundaries" detail="Only technical authority belongs here."/><div className="mt-4 grid gap-2 sm:grid-cols-3"><PipelineStep icon={ShieldCheck} title="License Manager" text="Required. Releases, licensing, channels and deployment authorization."/><PipelineStep icon={Globe2} title="Billing Store" text="Commerce/customer frontend. Its internal presentation cleanup URL remains operational config, not technical authority."/ ><PipelineStep icon={Server} title="Customer providers" text="Customer Supabase/Vercel URLs stay inside customer deployment execution and are never selected as authority APIs."/></div></section>
+  <section className="orbit-panel p-4">
+   <SectionHead icon={Activity} title="Current authority state" detail="Transport state does not change who owns authority."/>
+   <div className="mt-4 orbit-kv-list">
+    <div><span>Mode</span><code>{String(state?.mode||"unknown").toUpperCase()}</code></div>
+    <div><span>Primary</span><code>{selected?.label||state?.selectedUrl||"—"}</code></div>
+    <div><span>Fallback</span><code>{selectedFallback?.label||state?.fallbackUrl||"Disabled"}</code></div>
+    <div><span>Automatic failover</span><code>{state?.failoverEnabled?"Enabled":"Disabled"}</code></div>
+   </div>
+  </section>
+  <section className="orbit-panel p-4"><SectionHead icon={KeyRound} title="Approved endpoints" detail="Read from License Manager /api/v1/api-connections."/><div className="mt-4 space-y-2">{official.map((row:any)=><div key={row.base_url} className="rounded-lg border bg-background/40 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="min-w-0"><p className="text-xs font-semibold">{row.label}</p><code className="mt-1 block break-all text-[10px]">{row.base_url}</code></div><StatusPill text={String(row.connection_role||"primary")==="fallback"?"limp fallback":row.base_url===state?.selectedUrl?"selected primary":"primary"}/></div><p className="mt-2 text-[10px] text-muted-foreground">{String(row.connection_role||"primary").toUpperCase()} · Priority {Number(row.priority||100)} · {(row.allowed_clients||[]).join(", ")||"Dev Panel"}</p></div>)}{!official.length&&<EmptyInline text="No official License Manager endpoints are currently available."/>}</div></section>
  </section>;
 }
 
