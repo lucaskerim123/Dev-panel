@@ -865,7 +865,9 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  const sb=authClient();
  const {data:existing,error:existingError}=await sb.from("panel_release_drafts").select("*").eq("release_type",releaseType).eq("version",version).eq("channel",channel).maybeSingle();
  if(existingError)throw new Error("Unable to resolve release draft: "+existingError.message);
- if(existing&&["archived","rejected"].includes(String(existing.status)))throw new Error("This release draft is closed. Use a new version instead of creating another attempt.");
+ if(existing&&["archived","rejected"].includes(String(existing.status)))throw new Error("This release draft is closed. Use Start Fresh or a new version before creating another attempt.");
+ if(existing&&String(existing.status)==="building")throw new Error("This release already has a build attempt in progress.");
+ if(existing&&String(existing.status)==="handed_off")throw new Error("This release has already been handed off. Use Start Fresh if you need to rebuild this version.");
  const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents};
  let draft:any=existing;
  if(!draft){
@@ -873,8 +875,11 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
    if(createError)throw new Error("Unable to create release draft: "+createError.message);
    draft=created;
  }
- const attemptNumber=Number(draft.latest_attempt||0)+1;
- const {error:draftUpdateError}=await sb.from("panel_release_drafts").update({status:"building",latest_attempt:attemptNumber,last_error:null,source_sha:head,inputs:inputSnapshot,updated_at:new Date().toISOString()}).eq("id",draft.id);
+ await sb.from("panel_release_attempts").delete().eq("draft_id",draft.id).in("status",["failure","cancelled","skipped"]);
+ const {data:remainingAttempts,error:remainingAttemptsError}=await sb.from("panel_release_attempts").select("attempt_number").eq("draft_id",draft.id).order("attempt_number",{ascending:false}).limit(1);
+ if(remainingAttemptsError)throw new Error("Unable to clean stale release attempts: "+remainingAttemptsError.message);
+ const attemptNumber=Number(remainingAttempts?.[0]?.attempt_number||0)+1;
+ const {error:draftUpdateError}=await sb.from("panel_release_drafts").update({status:"building",latest_attempt:attemptNumber,last_error:null,last_run_id:null,last_run_url:null,source_sha:head,inputs:inputSnapshot,updated_at:new Date().toISOString()}).eq("id",draft.id);
  if(draftUpdateError)throw new Error("Unable to prepare release attempt: "+draftUpdateError.message);
  const {data:attemptRow,error:attemptCreateError}=await sb.from("panel_release_attempts").insert({draft_id:draft.id,attempt_number:attemptNumber,status:"queued"}).select("*").single();
  if(attemptCreateError)throw new Error("Unable to create release attempt: "+attemptCreateError.message);
