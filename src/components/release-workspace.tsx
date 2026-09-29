@@ -27,7 +27,7 @@ export function ReleaseWorkspace(p:any){
  const [error,setError]=useState("");
  useEffect(()=>{if(p.handoff)setReleaseState(p.handoff)},[p.handoff?.id,p.handoff?.status,p.handoff?.review_status,p.handoff?.manifest?.validation?.status]);
  const releases=useMemo(()=>[...(p.releases||[])].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()),[p.releases]);
- const drafts=useMemo(()=>[...(p.drafts||[])].filter((d:any)=>!d.archived_at).sort((a:any,b:any)=>new Date(b.updated_at||0).getTime()-new Date(a.updated_at||0).getTime()),[p.drafts]);
+ const drafts=useMemo(()=>[...(p.drafts||[])].filter((d:any)=>!d.archived_at&&String(d.status||"").toLowerCase()!=="handed_off").sort((a:any,b:any)=>new Date(b.updated_at||0).getTime()-new Date(a.updated_at||0).getTime()),[p.drafts]);
  const archivedDrafts=useMemo(()=>[...(p.drafts||[])].filter((d:any)=>Boolean(d.archived_at)).sort((a:any,b:any)=>new Date(b.updated_at||0).getTime()-new Date(a.updated_at||0).getTime()),[p.drafts]);
  const published=releases.filter((r:any)=>r.status==="published"&&!r.archived_at).length;
  const active=releases.filter((r:any)=>!r.archived_at&&!["published","disabled"].includes(String(r.status||""))).length;
