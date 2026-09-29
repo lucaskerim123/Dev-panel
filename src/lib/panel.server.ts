@@ -13,17 +13,46 @@ const BASE_WORKFLOW=process.env.BASE_RELEASE_WORKER_WORKFLOW||"package-base-rele
 const ENGINE_WORKFLOW=process.env.ENGINE_RELEASE_WORKFLOW||"publish-engine-release.yml";
 
 const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`Missing server environment variable: ${name}`);return v};
-const masterUrl=()=> {
- const configured=(process.env.LICENSE_MASTER_URL||"https://incendiarynetworks.cc/api/v1").trim();
- const url=new URL(configured);
- const path=url.pathname.replace(/\/+$/,"");
- if(/\/api\/v1(?:\/.*)?$/i.test(path))url.pathname=path.replace(/\/api\/v1(?:\/.*)?$/i,"/api/v1");
- else if(/\/api$/i.test(path))url.pathname=path+"/v1";
- else url.pathname=(path||"")+"/api/v1";
- url.search="";
- url.hash="";
- return url.toString().replace(/\/$/,"");
-};
+const TRUSTED_MASTER_BOOTSTRAP_URL="https://incendiarynetworks.cc/api/v1";
+function normalizeOfficialMasterUrl(value:string){
+ try{
+  const u=new URL(String(value||"").trim());
+  const host=u.hostname.toLowerCase(),path=u.pathname.replace(/\/+$/,"");
+  if(u.protocol!=="https:"||(host!=="incendiarynetworks.cc"&&!host.endsWith(".incendiarynetworks.cc"))||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
+  return u.origin+"/api/v1";
+ }catch{return null}
+}
+let officialApiRegistryCache:{expires:number;connections:any[]}|null=null;
+async function officialMasterConnections(force=false){
+ if(!force&&officialApiRegistryCache&&officialApiRegistryCache.expires>Date.now())return officialApiRegistryCache.connections;
+ let connections:any[]=[];
+ try{
+  const url=new URL(TRUSTED_MASTER_BOOTSTRAP_URL+"/api-connections");
+  url.searchParams.set("client","dev_panel");url.searchParams.set("service","license_manager");
+  const response=await fetch(url,{cache:"no-store",signal:AbortSignal.timeout(5000)});
+  if(response.ok){
+   const body=await response.json().catch(()=>({}));
+   connections=(Array.isArray(body?.connections)?body.connections:[])
+    .filter((row:any)=>row?.enabled!==false&&normalizeOfficialMasterUrl(String(row?.base_url||"")))
+    .map((row:any)=>({...row,base_url:normalizeOfficialMasterUrl(String(row.base_url))}));
+  }
+ }catch{}
+ if(!connections.length)connections=[{service_key:"license_manager",label:"Primary License Manager API",base_url:TRUSTED_MASTER_BOOTSTRAP_URL,enabled:true,priority:10,settings:{bootstrap:true}}];
+ connections.sort((a:any,b:any)=>Number(a.priority||100)-Number(b.priority||100));
+ officialApiRegistryCache={expires:Date.now()+30_000,connections};
+ return connections;
+}
+async function configuredMasterUrl(){
+ const official=await officialMasterConnections();
+ const allowed=new Set(official.map((row:any)=>String(row.base_url)));
+ let selected=allowed.has(TRUSTED_MASTER_BOOTSTRAP_URL)?TRUSTED_MASTER_BOOTSTRAP_URL:String(official[0]?.base_url||TRUSTED_MASTER_BOOTSTRAP_URL);
+ try{
+  const {data}=await authClient().from("panel_api_connections").select("selected_url").eq("service_key","license_manager").maybeSingle();
+  const saved=normalizeOfficialMasterUrl(String(data?.selected_url||""));
+  if(saved&&allowed.has(saved))selected=saved;
+ }catch{}
+ return selected;
+}
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
 const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE_COMPATIBILITY_CHANNEL||"stable");
 function parseSemVer(value:string){
@@ -384,7 +413,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  for(const attempt of attempts){const list=grouped.get(attempt.draft_id)||[];list.push(attempt);grouped.set(attempt.draft_id,list)}
  const releaseDrafts=(drafts||[]).map((draft:any)=>({...draft,attempts:grouped.get(draft.id)||[]}));
  const availableChannels=Array.isArray(channels?.channels)?channels.channels.filter((x:any)=>x?.enabled===true).map((x:any)=>String(x.channel).trim().toLowerCase()).filter(Boolean):[];
- return {releases:releases?.releases||[],drafts:releaseDrafts,channels:availableChannels,selectedChannel:channel,masterUrl:masterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
+ return {releases:releases?.releases||[],drafts:releaseDrafts,channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
 });
 
 
@@ -774,7 +803,7 @@ export const getControlState=createServerFn({method:"POST"}).handler(async({data
   channels:channels?.channels||[],
   audit:audit?.events||[],
   repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}},
-  masterUrl:masterUrl()
+  masterUrl:await configuredMasterUrl()
  };
 });
 
@@ -950,7 +979,8 @@ async function github(path:string,init:RequestInit={}){
  return requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${required("ORBITFS_RELEASE_DISPATCH_TOKEN")}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
 }
 async function licenseMaster(path:string,init:RequestInit={}){
- return requestJson(`${masterUrl()}${path}`,{...init,headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`,...(init.headers||{})}});
+ const base=await configuredMasterUrl();
+ return requestJson(`${base}${path}`,{...init,headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`,...(init.headers||{})}});
 }
 
 async function billingStoreReset(input:{releaseIds:string[];version:string;releaseType:"base"|"update";channel:string}){
