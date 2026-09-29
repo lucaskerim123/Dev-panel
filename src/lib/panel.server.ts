@@ -14,11 +14,16 @@ const ENGINE_WORKFLOW=process.env.ENGINE_RELEASE_WORKFLOW||"publish-engine-relea
 
 const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`Missing server environment variable: ${name}`);return v};
 const TRUSTED_MASTER_BOOTSTRAP_URL="https://incendiarynetworks.cc/api/v1";
-function normalizeOfficialMasterUrl(value:string){
+const TRUSTED_MASTER_FALLBACK_URL="https://orbitfs-fallback.stubengine.com/api/v1";
+type MasterConnectionRole="primary"|"fallback";
+function normalizeOfficialMasterUrl(value:string,role:MasterConnectionRole="primary"){
  try{
   const u=new URL(String(value||"").trim());
   const host=u.hostname.toLowerCase(),path=u.pathname.replace(/\/+$/,"");
-  if(u.protocol!=="https:"||(host!=="incendiarynetworks.cc"&&!host.endsWith(".incendiarynetworks.cc"))||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
+  const hostOk=role==="primary"
+   ? host==="incendiarynetworks.cc"||host.endsWith(".incendiarynetworks.cc")
+   : host==="orbitfs-fallback.stubengine.com";
+  if(u.protocol!=="https:"||!hostOk||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
   return u.origin+"/api/v1";
  }catch{return null}
 }
@@ -33,26 +38,55 @@ async function officialMasterConnections(force=false){
   if(response.ok){
    const body=await response.json().catch(()=>({}));
    connections=(Array.isArray(body?.connections)?body.connections:[])
-    .filter((row:any)=>row?.enabled!==false&&normalizeOfficialMasterUrl(String(row?.base_url||"")))
-    .map((row:any)=>({...row,base_url:normalizeOfficialMasterUrl(String(row.base_url))}));
+    .filter((row:any)=>row?.enabled!==false)
+    .map((row:any)=>{
+      const role:String=String(row?.connection_role||"primary")==="fallback"?"fallback":"primary";
+      const normalized=normalizeOfficialMasterUrl(String(row?.base_url||""),role as MasterConnectionRole);
+      return normalized?{...row,connection_role:role,base_url:normalized}:null;
+    }).filter(Boolean);
   }
  }catch{}
- if(!connections.length)connections=[{service_key:"license_manager",label:"Primary License Manager API",base_url:TRUSTED_MASTER_BOOTSTRAP_URL,enabled:true,priority:10,settings:{bootstrap:true}}];
- connections.sort((a:any,b:any)=>Number(a.priority||100)-Number(b.priority||100));
+ if(!connections.some((row:any)=>String(row.connection_role||"primary")==="primary"))connections.push({
+  service_key:"license_manager",label:"Primary License Manager API",base_url:TRUSTED_MASTER_BOOTSTRAP_URL,
+  enabled:true,priority:10,connection_role:"primary",failover_enabled:false,settings:{bootstrap:true}
+ });
+ if(!connections.some((row:any)=>String(row.connection_role||"primary")==="fallback"))connections.push({
+  service_key:"license_manager",label:"OrbitFS limp-mode fallback",base_url:TRUSTED_MASTER_FALLBACK_URL,
+  enabled:true,priority:900,connection_role:"fallback",failover_enabled:true,settings:{bootstrap:true,mode:"limp",restricted:true,authority:false}
+ });
+ connections.sort((a:any,b:any)=>{
+  const role=(String(a.connection_role)==="fallback"?1:0)-(String(b.connection_role)==="fallback"?1:0);
+  return role||Number(a.priority||100)-Number(b.priority||100);
+ });
  officialApiRegistryCache={expires:Date.now()+30_000,connections};
  return connections;
 }
-async function configuredMasterUrl(){
+async function configuredMasterConnection(){
  const official=await officialMasterConnections();
- const allowed=new Set(official.map((row:any)=>String(row.base_url)));
- let selected=allowed.has(TRUSTED_MASTER_BOOTSTRAP_URL)?TRUSTED_MASTER_BOOTSTRAP_URL:String(official[0]?.base_url||TRUSTED_MASTER_BOOTSTRAP_URL);
+ const primaries=official.filter((row:any)=>String(row.connection_role||"primary")==="primary");
+ const fallbacks=official.filter((row:any)=>String(row.connection_role||"primary")==="fallback"&&row.failover_enabled!==false);
+ const allowedPrimary=new Set(primaries.map((row:any)=>String(row.base_url)));
+ const allowedFallback=new Set(fallbacks.map((row:any)=>String(row.base_url)));
+ let primaryUrl=allowedPrimary.has(TRUSTED_MASTER_BOOTSTRAP_URL)?TRUSTED_MASTER_BOOTSTRAP_URL:String(primaries[0]?.base_url||TRUSTED_MASTER_BOOTSTRAP_URL);
+ let fallbackUrl=allowedFallback.has(TRUSTED_MASTER_FALLBACK_URL)?TRUSTED_MASTER_FALLBACK_URL:String(fallbacks[0]?.base_url||TRUSTED_MASTER_FALLBACK_URL);
+ let failoverEnabled=true;
  try{
-  const {data}=await authClient().from("panel_api_connections").select("selected_url").eq("service_key","license_manager").maybeSingle();
-  const saved=normalizeOfficialMasterUrl(String(data?.selected_url||""));
-  if(saved&&allowed.has(saved))selected=saved;
+  let data:any=null;
+  const modern=await authClient().from("panel_api_connections").select("selected_url,fallback_url,failover_enabled").eq("service_key","license_manager").maybeSingle();
+  if(!modern.error)data=modern.data;
+  else{
+   const legacy=await authClient().from("panel_api_connections").select("selected_url").eq("service_key","license_manager").maybeSingle();
+   if(!legacy.error)data=legacy.data;
+  }
+  const savedPrimary=normalizeOfficialMasterUrl(String(data?.selected_url||""),"primary");
+  const savedFallback=normalizeOfficialMasterUrl(String(data?.fallback_url||""),"fallback");
+  if(savedPrimary&&allowedPrimary.has(savedPrimary))primaryUrl=savedPrimary;
+  if(savedFallback&&allowedFallback.has(savedFallback))fallbackUrl=savedFallback;
+  if(data&&"failover_enabled" in data)failoverEnabled=data.failover_enabled!==false;
  }catch{}
- return selected;
+ return {primaryUrl,fallbackUrl:failoverEnabled?fallbackUrl:null,failoverEnabled};
 }
+async function configuredMasterUrl(){return (await configuredMasterConnection()).primaryUrl;}
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
 const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE_COMPATIBILITY_CHANNEL||"stable");
 function parseSemVer(value:string){
@@ -394,34 +428,50 @@ export const updateAccessGroup=createServerFn({method:"POST"}).handler(async({da
 
 export const getApiConnectionState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  readSession(data.token);
- const [official,selectedUrl]=await Promise.all([officialMasterConnections(true),configuredMasterUrl()]);
+ const [official,connection]=await Promise.all([officialMasterConnections(true),configuredMasterConnection()]);
  let row:any=null;
  try{const result=await authClient().from("panel_api_connections").select("*").eq("service_key","license_manager").maybeSingle();row=result.data||null;}catch{}
- return {authority:"orbitfs-license-manager",bootstrapUrl:TRUSTED_MASTER_BOOTSTRAP_URL,selectedUrl,officialConnections:official,connection:row};
+ let mode="primary",health:any=null;
+ try{
+  health=await requestJson(connection.primaryUrl+"/license/health",{headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"});
+ }catch{
+  if(connection.failoverEnabled&&connection.fallbackUrl){
+   try{
+    const fallback=await requestJson(connection.fallbackUrl+"/license/health",{headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"});
+    if(limpFallbackBody(fallback)){mode="limp";health=fallback;}
+   }catch{mode="unavailable"}
+  }else mode="unavailable";
+ }
+ return {authority:"orbitfs-license-manager",bootstrapUrl:TRUSTED_MASTER_BOOTSTRAP_URL,selectedUrl:connection.primaryUrl,fallbackUrl:connection.fallbackUrl,failoverEnabled:connection.failoverEnabled,mode,restricted:mode!=="primary",health,officialConnections:official,connection:row};
 });
 
-export const saveApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url:string}})=>{
+export const saveApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url:string;fallbackUrl?:string;failoverEnabled?:boolean}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required");
- const requested=normalizeOfficialMasterUrl(data.url);
- if(!requested)throw new Error("API URL must be an official HTTPS /api/v1 endpoint.");
+ const requested=normalizeOfficialMasterUrl(data.url,"primary");
+ const requestedFallback=data.fallbackUrl?normalizeOfficialMasterUrl(data.fallbackUrl,"fallback"):null;
+ if(!requested)throw new Error("Primary API URL must be an official HTTPS /api/v1 endpoint.");
  const official=await officialMasterConnections(true);
- if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
+ if(!official.some((row:any)=>String(row.connection_role||"primary")==="primary"&&String(row.base_url)===requested))throw new Error("That URL is not an enabled official primary OrbitFS API for Dev Panel.");
+ if(requestedFallback&&!official.some((row:any)=>String(row.connection_role||"primary")==="fallback"&&String(row.base_url)===requestedFallback))throw new Error("That URL is not an enabled official OrbitFS limp fallback.");
  const now=new Date().toISOString();
- const {error}=await authClient().from("panel_api_connections").upsert({service_key:"license_manager",selected_url:requested,updated_by:actor.email||actor.id,updated_at:now},{onConflict:"service_key"});
+ const {error}=await authClient().from("panel_api_connections").upsert({service_key:"license_manager",selected_url:requested,fallback_url:requestedFallback,failover_enabled:data.failoverEnabled!==false&&Boolean(requestedFallback),updated_by:actor.email||actor.id,updated_at:now},{onConflict:"service_key"});
  if(error)throw new Error("Unable to save Dev Panel API connection: "+error.message);
- return {ok:true,selectedUrl:requested};
+ return {ok:true,selectedUrl:requested,fallbackUrl:requestedFallback,failoverEnabled:data.failoverEnabled!==false&&Boolean(requestedFallback)};
 });
 
-export const testApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url?:string}})=>{
+export const testApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url?:string;role?:MasterConnectionRole}})=>{
  readSession(data.token);
- const requested=data.url?normalizeOfficialMasterUrl(data.url):await configuredMasterUrl();
+ const role=data.role==="fallback"?"fallback":"primary";
+ const connection=await configuredMasterConnection();
+ const requested=data.url?normalizeOfficialMasterUrl(data.url,role):(role==="fallback"?connection.fallbackUrl:connection.primaryUrl);
  if(!requested)throw new Error("API URL is invalid.");
  const official=await officialMasterConnections(true);
- if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
+ if(!official.some((row:any)=>String(row.connection_role||"primary")===role&&String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
  const started=Date.now();
  const health=await requestJson(requested+"/license/health",{headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"});
- return {ok:true,url:requested,latencyMs:Date.now()-started,health};
+ if(role==="fallback"&&!limpFallbackBody(health))throw new Error("Fallback endpoint did not return the OrbitFS limp-mode contract.");
+ return {ok:true,url:requested,role,latencyMs:Date.now()-started,health,mode:limpFallbackBody(health)?"limp":"primary"};
 });
 
 export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
@@ -769,7 +819,7 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  };
  if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head});
  if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_deployer_protocol:data.protocol||"1"});
- const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
+ await assertPrimaryLicenseAuthority();\n const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
  const dispatchBytes=Buffer.byteLength(dispatchPayload,"utf8");
  if(dispatchBytes>50000){
   const fieldBytes=Object.fromEntries(Object.entries(inputs).map(([key,value])=>[key,Buffer.byteLength(String(value??""),"utf8")]));
@@ -981,38 +1031,69 @@ export const getPortalMonitor=createServerFn({method:"POST"}).handler(async({dat
 
 async function requestJson(url:string,init:RequestInit={}){
  let r:Response;
- try {
+ try{
    r=await fetch(url,{...init,cache:"no-store",headers:{accept:"application/json",...(init.body?{"content-type":"application/json"}:{}),...(init.headers||{})}});
- } catch (error:any) {
-   throw new Error(`Network request failed: ${url} · ${error?.message || "fetch failed"}`);
+ }catch(error:any){
+   throw Object.assign(new Error(`Network request failed: ${url} · ${error?.message||"fetch failed"}`),{status:503,code:"API_TRANSPORT_ERROR",transport:true});
  }
  const text=await r.text();
  const contentType=(r.headers.get("content-type")||"").toLowerCase();
  let body:any=null;
  if(text){
-   try{ body=JSON.parse(text); }
+   try{body=JSON.parse(text);}
    catch{
-     const looksHtml=contentType.includes("text/html")||/^\\s*<!doctype html/i.test(text)||/^\\s*<html/i.test(text);
+     const looksHtml=contentType.includes("text/html")||/^\s*<!doctype html/i.test(text)||/^\s*<html/i.test(text);
      body={error:looksHtml?null:text.trim().slice(0,500)};
    }
  }
  if(!r.ok){
-   if(contentType.includes("text/html")||/^\\s*<!doctype html/i.test(text)||/^\\s*<html/i.test(text)){
-     throw new Error(`License Master API returned HTTP ${r.status} for ${new URL(url).pathname}. The configured LICENSE_MASTER_URL may point at a deployment that does not expose this API route.`);
-   }
-   throw new Error(body?.error||body?.message||`Request failed (${r.status}) at ${url}`);
+   const message=contentType.includes("text/html")||/^\s*<!doctype html/i.test(text)||/^\s*<html/i.test(text)
+    ?`API returned HTTP ${r.status} for ${new URL(url).pathname}.`
+    :String(body?.error||body?.message||`Request failed (${r.status}) at ${url}`);
+   throw Object.assign(new Error(message),{status:r.status,code:String(body?.code||"API_HTTP_ERROR"),body});
  }
- if(text&&!body){
-   throw new Error(`Expected JSON from ${url}, but the response could not be parsed.`);
- }
+ if(text&&!body)throw Object.assign(new Error(`Expected JSON from ${url}, but the response could not be parsed.`),{status:502,code:"API_INVALID_JSON"});
  return body;
 }
 async function github(path:string,init:RequestInit={}){
  return requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${required("ORBITFS_RELEASE_DISPATCH_TOKEN")}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
 }
+function limpFallbackBody(value:any){return value?.fallback===true&&String(value?.mode||"").toLowerCase()==="limp"&&value?.restricted===true;}
+function primaryInfrastructureFailure(error:any){
+ const status=Number(error?.status||0);
+ return error?.transport===true||[500,502,503,504].includes(status);
+}
 async function licenseMaster(path:string,init:RequestInit={}){
- const base=await configuredMasterUrl();
- return requestJson(`${base}${path}`,{...init,headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`,...(init.headers||{})}});
+ const connection=await configuredMasterConnection();
+ const headers={authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`,...(init.headers||{})};
+ const method=String(init.method||"GET").toUpperCase();
+ let primaryError:any=null;
+ try{
+   const result=await requestJson(`${connection.primaryUrl}${path}`,{...init,headers});
+   if(limpFallbackBody(result))throw Object.assign(new Error("Primary authority returned limp fallback mode"),{status:503,code:"PRIMARY_AUTHORITY_INVALID",transport:true});
+   return result;
+ }catch(error:any){
+   if(!primaryInfrastructureFailure(error))throw error;
+   primaryError=error;
+ }
+ if(!connection.failoverEnabled||!connection.fallbackUrl||!["GET","HEAD"].includes(method)){
+   throw Object.assign(new Error("License Manager authority is unavailable. This Stage 1 operation requires the primary authority."),{status:503,code:"LICENSE_AUTHORITY_UNAVAILABLE",primaryError:String(primaryError?.message||primaryError)});
+ }
+ const fallback=await requestJson(`${connection.fallbackUrl}${path}`,{...init,headers,cache:"no-store"}).catch((error:any)=>{
+   throw Object.assign(new Error("License Manager and the registered limp-mode fallback are unavailable."),{status:503,code:"LICENSE_AUTHORITY_UNAVAILABLE",primaryError:String(primaryError?.message||primaryError),fallbackError:String(error?.message||error)});
+ });
+ if(!limpFallbackBody(fallback))throw Object.assign(new Error("Fallback endpoint did not return the OrbitFS limp-mode contract."),{status:503,code:"FALLBACK_CONTRACT_INVALID"});
+ return {...fallback,fallback:true,mode:"limp",restricted:true,_authority_transport:{mode:"fallback",primary_url:connection.primaryUrl,fallback_url:connection.fallbackUrl,primary_error:String(primaryError?.message||primaryError)}};
+}
+async function assertPrimaryLicenseAuthority(){
+ const connection=await configuredMasterConnection();
+ try{
+  const health=await requestJson(connection.primaryUrl+"/license/health",{headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"});
+  if(limpFallbackBody(health))throw new Error("Primary authority is not available");
+  return health;
+ }catch(error:any){
+  throw Object.assign(new Error("License Manager primary authority is unavailable. Release creation and handoff are disabled while OrbitFS is in limp mode."),{status:503,code:"LICENSE_AUTHORITY_UNAVAILABLE",cause:error});
+ }
 }
 
 async function billingStoreReset(input:{releaseIds:string[];version:string;releaseType:"base"|"update";channel:string}){
