@@ -639,6 +639,10 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  const channel=normalizeChannel(data.channel);
  const expectedTemplate = data.type === "base" ? "base_deployment_log" : "update_changelog";
  if (data.changelogTemplate !== expectedTemplate) throw new Error(`Use the ${expectedTemplate === "base_deployment_log" ? "Base Deployment Log" : "Update Changelog"} template for this release type.`);
+ const changelogText=String(data.changelogDraft||"").trim();
+ const expectedHeading=`# OrbitFS ${data.type==="base"?"Base Deployment":"Update"} — v${version}`;
+ const firstChangelogLine=changelogText.split(/\r?\n/,1)[0]?.trim()||"";
+ if(firstChangelogLine!==expectedHeading)throw new Error(`Release document version is stale. Expected "${expectedHeading}". Re-inspect or update the release document before building.`);
  const channels=await licenseMaster(`/release-channels?include_disabled=false`);
  const channelEnabled=Array.isArray(channels?.channels)&&channels.channels.some((x:any)=>String(x.channel).trim().toLowerCase()===channel&&x.enabled===true);
  if(!channelEnabled)throw new Error("Release channel is not configured or is disabled in License Master: "+channel);
@@ -846,11 +850,13 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  const current=await licenseMaster(`/releases/${encodeURIComponent(id)}`);
  const release=current?.release;
  if(!release)throw new Error("Release was not found in License Manager");
- const status=String(release.status||"").toLowerCase();
+ let status=String(release.status||"").toLowerCase();
  const everPublished=status==="published"||Boolean(release.published_at);
  if(everPublished)throw new Error("Published release history cannot be permanently deleted.");
- const deletable=!release.published_at;
- if(!deletable)throw new Error("Only never-published releases can be permanently deleted.");
+ if(!release.published_at&&status!=="draft"&&!release.archived_at){
+  await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Archived automatically before permanent deletion by Dev Panel"})});
+  status="archived";
+ }
  const expected=`DELETE_RELEASE:${id}:${release.version}`;
 
  let billingWarning="";
@@ -879,8 +885,8 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
  const workerRepo=data.type==="base"?BASE_WORKER_REPO:ENGINE_REPO;
  const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
  const releases=(Array.isArray(result?.releases)?result.releases:[]).filter((r:any)=>String(r.version||"")===version&&String(r.channel||"stable").toLowerCase()===channel&&String(r.release_type||"").toLowerCase()===releaseType);
- const published=releases.find((r:any)=>String(r.status||"").toLowerCase()==="published");
- if(published)throw new Error(`v${version} is currently published. Withdraw or disable it first, then use Start Fresh.`);
+ const published=releases.find((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at);
+ if(published)throw new Error(`v${version} is currently published. Unpublish it first, then use Start Fresh. The published history will be preserved.`);
  const sb=authClient();
  const {data:drafts,error:draftReadError}=await sb.from("panel_release_drafts").select("id,status,last_run_id").eq("release_type",releaseType).eq("version",version).eq("channel",channel);
  if(draftReadError)throw new Error("Unable to inspect Stage 1 draft state: "+draftReadError.message);
@@ -893,16 +899,24 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
    }catch{}
   }
  }
- const disposable=releases.filter((release:any)=>String(release.status||"").toLowerCase()!=="published"&&!release.published_at);
- const historical=releases.filter((release:any)=>String(release.status||"").toLowerCase()==="published"||Boolean(release.published_at));
+ const disposable=releases.filter((release:any)=>!release.published_at);
+ const historical=releases.filter((release:any)=>Boolean(release.published_at));
+ const reusableHistorical=historical.filter((release:any)=>String(release.status||"").toLowerCase()!=="published"&&!release.archived_at);
  let billingWarning="";
  try{
   await billingStoreReset({releaseIds:disposable.map((r:any)=>String(r.id)),version,releaseType,channel});
  }catch(error:any){
   billingWarning="Billing presentation cleanup could not be confirmed: "+String(error?.message||"unknown error")+".";
  }
+ for(const release of reusableHistorical){
+  await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Preserved published history archived by Dev Panel Start Fresh so the version can be reused"})});
+ }
  for(const release of disposable){
   const id=String(release.id);
+  const status=String(release.status||"").toLowerCase();
+  if(status!=="draft"&&!release.archived_at){
+   await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Archived automatically before Dev Panel Start Fresh cleanup"})});
+  }
   const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
   await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
  }
@@ -910,7 +924,7 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
  if(eventDeleteError)throw new Error("Release records were cleared, but Dev Panel lifecycle history could not be reset: "+eventDeleteError.message);
  const {error:draftDeleteError}=await sb.from("panel_release_drafts").delete().eq("release_type",releaseType).eq("version",version).eq("channel",channel);
  if(draftDeleteError)throw new Error("Release records were cleared, but the Stage 1 draft could not be reset: "+draftDeleteError.message);
- return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,preservedHistoricalReleases:historical.length,deletedDrafts:(drafts||[]).length,warning:billingWarning||null};
+ return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,preservedHistoricalReleases:historical.length,archivedHistoricalReleases:reusableHistorical.length,deletedDrafts:(drafts||[]).length,warning:billingWarning||null};
 });
 
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"withdraw"}})=>{
