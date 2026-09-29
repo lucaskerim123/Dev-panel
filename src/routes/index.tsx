@@ -71,7 +71,9 @@ function Index() {
         getPanelState({ data: { token: s.token, type: "engine", channel } }),
       ]);
       setData({ base, engine });
-      setMasterConnected(true);
+      const resolvedMode=String(base?.authorityMode||engine?.authorityMode||"primary");
+      setAuthorityMode(resolvedMode==="limp"?"limp":"primary");
+      setMasterConnected(resolvedMode!=="limp");
       if (!channel && base.selectedChannel) setChannel(base.selectedChannel);
     } catch (x: any) {
       setMasterConnected(false);
