@@ -819,7 +819,8 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  };
  if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head});
  if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_deployer_protocol:data.protocol||"1"});
- await assertPrimaryLicenseAuthority();\n const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
+ await assertPrimaryLicenseAuthority();
+ const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
  const dispatchBytes=Buffer.byteLength(dispatchPayload,"utf8");
  if(dispatchBytes>50000){
   const fieldBytes=Object.fromEntries(Object.entries(inputs).map(([key,value])=>[key,Buffer.byteLength(String(value??""),"utf8")]));
