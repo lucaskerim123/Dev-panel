@@ -27,21 +27,9 @@ export function ReleaseWorkspace(p:any){
  const [error,setError]=useState("");
  const [promotionRun,setPromotionRun]=useState<any>(null);
  useEffect(()=>{if(p.handoff){setReleaseState(p.handoff);if(p.run?.id&&String(p.handoff.version)===String(p.version))setStage(3)}},[p.handoff?.id,p.handoff?.status,p.handoff?.review_status,p.handoff?.manifest?.validation?.status]);
- // Open a restored run in the appropriate stage without re-inspection or re-submission.
- useEffect(()=>{
-  if(!p.run?.id || !p.run?.draftId)return;
-  const draft=(p.drafts||[]).find((d:any)=>d.id===p.run.draftId);
-  if(!draft)return;
-  setActiveDraft(draft);setSelected(null);
-  p.setVersion?.(draft.version);p.setChannel?.(draft.channel);
-  const input=draft.inputs||{};
-  p.setNotes?.(input.notes||"");p.setComponents?.(Array.isArray(input.components)?input.components:[]);
-  p.setMinBase?.(String(input.minimumBaseVersion||""));
-  p.setProtocol?.(String(input.protocol||"1"));
-  p.setChangelogDraft?.(String(input.changelogDraft||""));
-  setWorkspace(true);
-  setStage(p.handoff?.id?3:2);
- },[p.run?.id,p.run?.draftId,p.drafts?.length]);
+ // Opening the Base/Update tab always starts at its overview.
+ // The latest run remains in parent state and is accessible by explicitly
+ // opening its matching Stage 1 draft; it must not navigate on every mount.
  const releases=useMemo(()=>[...(p.releases||[])].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()),[p.releases]);
  const drafts=useMemo(()=>[...(p.drafts||[])].filter((d:any)=>!d.archived_at&&String(d.status||"").toLowerCase()!=="handed_off").sort((a:any,b:any)=>new Date(b.updated_at||0).getTime()-new Date(a.updated_at||0).getTime()),[p.drafts]);
  const archivedDrafts=useMemo(()=>[...(p.drafts||[])].filter((d:any)=>Boolean(d.archived_at)).sort((a:any,b:any)=>new Date(b.updated_at||0).getTime()-new Date(a.updated_at||0).getTime()),[p.drafts]);
