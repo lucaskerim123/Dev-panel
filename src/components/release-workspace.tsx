@@ -89,7 +89,7 @@ export function ReleaseWorkspace(p:any){
   setError("");
   setStage(3);
  },[publishedHandoff?.id,publishedHandoff?.status,p.run?.id,activeDraft?.id,workspace,selected?.id]);
- const target=currentHandoff||selected;
+ const target=selected||currentHandoff;
  const handoffReceived=Boolean(currentHandoff?.id);
  const handoffFailed=Boolean(!handoffReceived&&runDone&&!runGood);
  const handoffPending=Boolean(!handoffReceived&&!handoffFailed);
