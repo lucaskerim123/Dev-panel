@@ -198,6 +198,26 @@ function Index() {
     setRun(null); setRunRepo(""); setHandoff(null); setBaseline(null);
   };
 
+  const resumeReleaseRun = (type: ReleaseType, draft: any, attempt: any) => {
+    const repo = type === "base"
+      ? (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel")
+      : (data.engine.repositories?.engine?.repo || "lucaskerim123/V1-vercel-engine");
+    setRun({
+      id: Number(attempt.run_id),
+      status: String(attempt.status || "queued"),
+      conclusion: ["success","failure","cancelled","skipped"].includes(String(attempt.status || "")) ? attempt.status : null,
+      html_url: attempt.run_url || draft.last_run_url || null,
+      draftId: draft.id,
+      attemptNumber: attempt.attempt_number,
+      name: (type === "base" ? "Base" : "Update") + " release",
+      failure: null
+    });
+    setRunRepo(repo);
+    setRunVersion(String(draft.version || ""));
+    setRunChannel(String(draft.channel || "stable"));
+    setHandoff(null);
+  };
+
   const inspect = async (type: ReleaseType) => {
     setBusy("inspect");
     setError(""); setNotice("");
@@ -338,12 +358,12 @@ function Index() {
             {tab === "base" && <Composer type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
-              onInspect={() => inspect("base")} onStart={() => start("base")}
+              onInspect={() => inspect("base")} onStart={() => start("base")} onResumeRun={(draft:any,attempt:any)=>resumeReleaseRun("base",draft,attempt)} runVersion={runVersion} runChannel={runChannel}
               run={runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? run : null} runRepo={runRepo} handoff={handoff} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "engine" && <Composer type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
-              onInspect={() => inspect("engine")} onStart={() => start("engine")}
+              onInspect={() => inspect("engine")} onStart={() => start("engine")} onResumeRun={(draft:any,attempt:any)=>resumeReleaseRun("engine",draft,attempt)} runVersion={runVersion} runChannel={runChannel}
               run={runRepo === "lucaskerim123/V1-vercel-engine" ? run : null} runRepo={runRepo} handoff={handoff} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "activity" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "operations" && <OperationsWorkspace session={session} />}
