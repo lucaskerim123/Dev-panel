@@ -67,11 +67,28 @@ export function ReleaseWorkspace(p:any){
  // when the browser missed the original handoff response.
  const pendingVersion=String(activeDraft?.version||p.version||"").trim();
  const pendingChannel=String(activeDraft?.channel||p.channel||"stable").trim().toLowerCase();
+ const publishedHandoff=!selected&&pendingVersion?(p.releases||[]).find((r:any)=>
+  !r.archived_at&&String(r.status||"").toLowerCase()==="published"&&
+  String(r.version||"")===pendingVersion&&String(r.channel||"").toLowerCase()===pendingChannel
+ ):null;
  const authoritativeHandoff=!selected&&pendingVersion?(p.releases||[]).find((r:any)=>
   !r.archived_at&&String(r.version||"")===pendingVersion&&String(r.channel||"").toLowerCase()===pendingChannel&&
   (!activeDraft?.source_sha||!r.source_sha||String(r.source_sha)===String(activeDraft.source_sha))
  ):null;
- const currentHandoff=releaseState&&String(releaseState.version||"")===pendingVersion&&String(releaseState.channel||"").toLowerCase()===pendingChannel?releaseState:authoritativeHandoff||null;
+ // A published License Manager record outranks an old, in-memory handoff
+ // snapshot. Do not make publication depend on matching local source SHA:
+ // the worker can package a different commit from the original draft snapshot.
+ const currentHandoff=publishedHandoff||authoritativeHandoff||
+  (releaseState&&String(releaseState.version||"")===pendingVersion&&String(releaseState.channel||"").toLowerCase()===pendingChannel?releaseState:null);
+ useEffect(()=>{
+  if(!publishedHandoff||!workspace||selected?.id===publishedHandoff.id)return;
+  if(!p.run?.id&&!activeDraft)return;
+  setReleaseState(publishedHandoff);
+  setSelected(publishedHandoff);
+  setActiveDraft(null);
+  setError("");
+  setStage(3);
+ },[publishedHandoff?.id,publishedHandoff?.status,p.run?.id,activeDraft?.id,workspace,selected?.id]);
  const target=currentHandoff||selected;
  const handoffReceived=Boolean(currentHandoff?.id);
  const handoffFailed=Boolean(!handoffReceived&&runDone&&!runGood);
@@ -164,7 +181,7 @@ export function ReleaseWorkspace(p:any){
            <h3 className="mt-1 text-base font-semibold">{handoffReceived?"Successfully handed off to License Manager":handoffFailed?"The candidate was not handed off to License Manager":"Waiting for License Manager to receive the candidate…"}</h3>
            <p className="mt-1 text-xs text-muted-foreground">
              {handoffReceived
-               ? `License Manager candidate ${releaseState.id} has been created. Stage 1 is complete; technical validation and approval continue in License Manager.`
+               ? (String(currentHandoff?.status||"").toLowerCase()==="published"?`Release v${currentHandoff.version} is already published in License Manager. No additional handoff is required.`:`License Manager candidate ${currentHandoff?.id} has been created. Stage 1 is complete; technical validation and approval continue in License Manager.`)
                : handoffFailed
                  ? (failureText||"The release worker ended before License Manager confirmed the candidate.")
                  : "The package is being built/sent. This page will update automatically when License Manager confirms receipt."}
