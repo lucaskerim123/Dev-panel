@@ -91,7 +91,10 @@ export function ReleaseWorkspace(p:any){
   setError("");
   setStage(3);
  },[publishedHandoff?.id,publishedHandoff?.status,currentRun?.id,activeDraft?.id,workspace,selected?.id]);
- const target=selected||currentHandoff;
+ // Lifecycle details must refresh from License Manager after approval or
+ // publication even when the release detail page stays open.
+ const refreshedSelection=selected?(p.releases||[]).find((r:any)=>String(r.id)===String(selected.id)):null;
+ const target=refreshedSelection||selected||currentHandoff;
  const handoffReceived=Boolean(currentHandoff?.id);
  const handoffFailed=Boolean(!handoffReceived&&runDone&&!runGood);
  const handoffPending=Boolean(!handoffReceived&&!handoffFailed);
