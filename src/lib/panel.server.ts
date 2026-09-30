@@ -921,9 +921,22 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  if(existingError)throw new Error("Unable to resolve release draft: "+existingError.message);
  if(existing&&["archived","rejected"].includes(String(existing.status)))throw new Error("This release draft is closed. Use Start Fresh or a new version before creating another attempt.");
  if(existing&&String(existing.status)==="building")throw new Error("This release already has a build attempt in progress.");
- if(existing&&String(existing.status)==="handed_off")throw new Error("This release has already been handed off. Use Start Fresh if you need to rebuild this version.");
+ if(existing&&String(existing.status)==="handed_off"){
+  // The authoritative release may have been cleared since the previous successful handoff.
+  // Reconcile only on an explicit new build, never while merely reading the release list.
+  const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
+  const matching=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>String(r.version||"")===version);
+  if(matching.length)throw new Error("This release still exists in License Manager. Open its authoritative record or use Start Fresh before rebuilding.");
+  if(existing.last_run_id){
+    const previousRun=await github(`/repos/${workerRepo}/actions/runs/${Number(existing.last_run_id)}`);
+    if(previousRun?.status!=="completed")throw new Error("The previous release workflow is still active. Wait for it to finish before starting fresh.");
+  }
+  const {error:staleDeleteError}=await sb.from("panel_release_drafts").delete().eq("id",existing.id).eq("status","handed_off");
+  if(staleDeleteError)throw new Error("License Manager has no release, but the old Stage 1 draft could not be cleared: "+staleDeleteError.message);
+ }
+
  const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents};
- let draft:any=existing;
+ let draft:any=existing?.status==="handed_off"?null:existing;
  if(!draft){
    const {data:created,error:createError}=await sb.from("panel_release_drafts").insert({release_type:releaseType,version,channel,source_repo:repo,source_ref:ref,source_sha:head,status:"draft",inputs:inputSnapshot,created_by:actor.email||actor.id}).select("*").single();
    if(createError)throw new Error("Unable to create release draft: "+createError.message);
