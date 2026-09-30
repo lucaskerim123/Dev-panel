@@ -2,7 +2,7 @@ import {useEffect,useMemo,useState} from "react";
 import {Activity,CheckCircle2,ChevronRight,Clock3,Copy,FileCode2,GitCommit,Github,History,Layers3,Loader2,PackageCheck,RefreshCw,RotateCcw,Rocket,ScrollText,Settings2,ShieldCheck,Terminal,Trash2,XCircle} from "lucide-react";
 import {clearStaleReleaseAttempts,deleteAuthoritativeRelease,deleteReleaseAttempt,deleteReleaseDraft,getPromotionRunStatus,promoteReleaseBranch,saveReleaseDraft,setReleaseDraftArchived,startFreshRelease} from "@/lib/panel.server";
 
-function statusTone(text:any){const s=String(text||"").toLowerCase();if(["failed","failure","rejected","error","offline","unavailable","disabled","unpublished","deleted","removed"].some(x=>s.includes(x)))return "danger";if(["pending","queued","running","draft","waiting","review","request","assigned","next","modified","renamed"].some(x=>s.includes(x)))return "warning";if(["published","approved","passed","success","connected","enabled","ready","active","received","open","added"].some(x=>s.includes(x)))return "success";if(["archived","idle","closed","not run","not validated","snapshot"].some(x=>s.includes(x)))return "neutral";return "info"}
+function statusTone(text:any){const s=String(text||"").toLowerCase();if(["failed","failure","rejected","error","offline","unavailable","disabled","unpublished","deleted","removed"].some(x=>s.includes(x)))return "danger";if(["pending","queued","running","draft","waiting","review","request","assigned","next","modified","renamed"].some(x=>s.includes(x)))return "warning";if(["published","approved","passed","success","complete","completed","connected","enabled","ready","active","received","open","added"].some(x=>s.includes(x)))return "success";if(["archived","idle","closed","not run","not validated","snapshot"].some(x=>s.includes(x)))return "neutral";return "info"}
 function StatusPill({text}:{text:string}){return <span className={`orbit-status-pill release-status-pill orbit-status-tone-${statusTone(text)}`}>{text}</span>}
 function fileStatusLabel(value:any){const s=String(value||"modified").toLowerCase();if(s==="removed"||s==="deleted")return "deleted";if(s==="changed")return "modified";return s}
 function semverAtLeast(actual:any,minimum:any){const parse=(value:any)=>{const m=String(value||"").trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);return m?[Number(m[1]),Number(m[2]),Number(m[3])]:null};const a=parse(actual),b=parse(minimum);if(!a||!b)return false;for(let i=0;i<3;i++){if(a[i]!==b[i])return a[i]>b[i]}return true}
@@ -27,7 +27,7 @@ export function ReleaseWorkspace(p:any){
  const [error,setError]=useState("");
  const [promotionRun,setPromotionRun]=useState<any>(null);
  useEffect(()=>{
-  if(!promotionRun?.runId)return;
+  if(!promotionRun?.runId&&!promotionRun?.sourceSha)return;
   const terminal=promotionRun?.completed===true||["success","failure","cancelled","skipped","timed_out","action_required","neutral","stale"].includes(String(promotionRun?.conclusion||"").toLowerCase());
   if(terminal)return;
   let cancelled=false;
@@ -35,7 +35,7 @@ export function ReleaseWorkspace(p:any){
   const destination=base?"base-release":"UPDATE_RELEASE";
   const poll=async()=>{
    try{
-    const status:any=await getPromotionRunStatus({data:{token:p.session.token,type:p.type,runId:promotionRun.runId,sourceSha:promotionRun.sourceSha}});
+    const status:any=await getPromotionRunStatus({data:{token:p.session.token,type:p.type,runId:promotionRun.runId||null,sourceSha:promotionRun.sourceSha}});
     if(cancelled)return;
     setPromotionRun((current:any)=>current?.runId===status.runId?{...current,...status}:current);
     if(status.completed){
