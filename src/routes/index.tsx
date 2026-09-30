@@ -131,7 +131,7 @@ function Index() {
       try {
         const r = await getReleaseRun({ data: { token: session.token, repo: runRepo, runId: run.id } });
         if (stopped) return;
-        setRun({ ...r.run, jobs: r.jobs || [], failure: r.failure || null });
+        setRun((previous:any) => ({ ...previous, ...r.run, jobs: r.jobs || [], failure: r.failure || null }));
         const conclusion=String(r.run?.conclusion || "");
         if (["failure","cancelled"].includes(conclusion)) {
           const detail=String(r.failure?.error || r.failure?.lines?.join("\n") || `Release workflow ${conclusion}.`).trim();
