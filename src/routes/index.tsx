@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ReleaseWorkspace } from "@/components/release-workspace";
 import { OperationsWorkspace } from "@/components/operations-workspace";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertCircle, ArrowRight, CheckCircle2, ChevronRight, CircleDot,
   Clock3, FileCode2, GitBranch, Github, Layers3, Loader2, PackageCheck,
@@ -52,7 +52,7 @@ function Index() {
   const [runRepo, setRunRepo] = useState("");
   const [runVersion, setRunVersion] = useState("");
   const [runChannel, setRunChannel] = useState("stable");
-  const [restoredRun, setRestoredRun] = useState(false);
+  const restoredRunRef = useRef(false);
   const [handoff, setHandoff] = useState<any>(null);
   const [releasePageEpoch,setReleasePageEpoch] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -74,7 +74,10 @@ function Index() {
       setData({ base, engine });
       // Rehydrate release progress from durable attempts, not browser-only state.
       // A completed GitHub run is still restored so its result and console survive refresh.
-      if (!restoredRun) {
+      if (!restoredRunRef.current) {
+        // Claim restoration synchronously so overlapping initial loads cannot
+        // overwrite a newly selected release with an older run.
+        restoredRunRef.current = true;
         const candidates = [
           ...(base.drafts || []).map((draft:any) => ({draft, type:"base", repo:base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel"})),
           ...(engine.drafts || []).map((draft:any) => ({draft, type:"engine", repo:engine.repositories?.engine?.repo || "lucaskerim123/V1-vercel-engine"}))
@@ -95,7 +98,7 @@ function Index() {
           // Keep the restored run available without hijacking the selected tab.
           // The operator opens its draft or release history explicitly.
         }
-        setRestoredRun(true);
+
       }
       setMasterConnected(true);
       if (!channel && base.selectedChannel) setChannel(base.selectedChannel);
@@ -196,7 +199,8 @@ function Index() {
     localStorage.removeItem("orbitfs_panel_user");
     setSession(null);
     setData({ base: EMPTY, engine: EMPTY });
-    setRun(null); setRunRepo(""); setHandoff(null); setBaseline(null);
+    restoredRunRef.current = false;
+    setRun(null); setRunRepo(""); setRunVersion(""); setHandoff(null); setBaseline(null);
   };
 
   const resumeReleaseRun = (type: ReleaseType, draft: any, attempt: any) => {
@@ -288,6 +292,7 @@ function Index() {
   };
 
   const start = async (type: ReleaseType) => {
+    restoredRunRef.current = true;
     setBusy("start"); setError(""); setNotice("");
     try {
       const r = await startRelease({
