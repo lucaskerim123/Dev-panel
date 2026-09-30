@@ -786,6 +786,26 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
   throw new Error("Release workflow run is not available yet");
 });
 
+export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";runId:number|string;sourceSha?:string}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to inspect a release branch promotion.");
+ const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
+ const releaseRef=data.type==="base"?BASE_REF:ENGINE_REF;
+ const run=await github(`/repos/${repo}/actions/runs/${encodeURIComponent(String(data.runId))}`);
+ const conclusion=String(run?.conclusion||"").toLowerCase();
+ const status=String(run?.status||"").toLowerCase();
+ const completed=status==="completed"||["success","failure","cancelled","skipped","timed_out","action_required","neutral","stale"].includes(conclusion);
+ let releaseSha:string|null=null;
+ let branchMatches=false;
+ if(completed&&conclusion==="success"){
+  const ref=await github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(releaseRef)}`).catch(()=>null);
+  releaseSha=String(ref?.object?.sha||"")||null;
+  const expected=String(data.sourceSha||"").trim();
+  branchMatches=Boolean(expected&&releaseSha===expected);
+ }
+ return {ok:true,repo,releaseRef,runId:run?.id||data.runId,runUrl:run?.html_url||null,status:status||"unknown",conclusion:conclusion||null,completed,releaseSha,branchMatches};
+});
+
 export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine"}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to promote a release branch.");
