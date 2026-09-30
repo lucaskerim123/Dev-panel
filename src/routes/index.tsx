@@ -153,25 +153,30 @@ function Index() {
   useEffect(() => {
     if (!run?.id || !runRepo || !session || !runVersion) return;
     let stopped = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       try {
         const type: ReleaseType = runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? "base" : "engine";
         const r = await getReleaseHandoff({
           data: { token: session.token, type, version: runVersion, channel: runChannel }
         });
-        if (!stopped && r.release) setHandoff(r.release);
-        // Also reload authoritative release history so the workspace can
-        // recover when the handoff record predates this browser session.
-        if (!stopped && r.release) await load(session, true);
+        if (stopped) return;
+        if (r.release) {
+          setHandoff(r.release);
+          await load(session, true);
+          // A published release has completed its handoff. Stop polling the
+          // obsolete candidate, but preserve GitHub run details for inspection.
+          if (String(r.release.status || "").toLowerCase() === "published" && timer) {
+            clearInterval(timer); timer = null;
+          }
+        }
       } catch (x:any) {
         if (!stopped) setError(x?.message || "Unable to read the License Manager handoff state.");
       }
     };
+    timer = setInterval(poll, 5000);
     void poll();
-    // A successful GitHub workflow and a License Manager receipt are separate
-    // milestones. Keep checking after build completion until receipt is visible.
-    const timer = setInterval(poll, 5000);
-    return () => { stopped = true; clearInterval(timer); };
+    return () => { stopped = true; if (timer) clearInterval(timer); };
   }, [run?.id, runRepo, session?.token, runVersion, runChannel]);
 
   const stats = useMemo(() => {
