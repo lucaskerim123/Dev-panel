@@ -369,7 +369,7 @@ function Index() {
             {notice && <Alert tone="success" onClose={() => setNotice("")}>{notice}</Alert>}
             {tab === "overview" && <Dashboard stats={stats} releases={allReleases} connected={masterConnected} run={run} channels={availableChannels}
               onBase={() => navigateTab("base")} onEngine={() => navigateTab("engine")}
-              onActivity={() => setTab("activity")} onReleases={() => setTab("releases")} />}
+              onActivity={() => setTab("monitoring")} onReleases={() => setTab("releases")} />}
             {tab === "releases" && <ReleasesPage releases={allReleases} session={session} onChanged={()=>load(session,true)} onBase={() => navigateTab("base")} onEngine={() => navigateTab("engine")} />}
             {tab === "base" && <Composer key={"base-"+releasePageEpoch} type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
@@ -462,13 +462,7 @@ const NAV_GROUPS = [
   ]},
   {label:"Monitor",items:[
     ["releases","Release Registry","Lifecycle state",PackageCheck],
-    ["activity","Release Runs","Workflow execution",Activity],
-    ["monitoring","Monitoring","System health",BarChart3],
-  ]},
-  {label:"Control",items:[
-    ["channels","Channels","Read only",Server],
-    ["portal","Customer Portal","Publication state",Globe2],
-    ["repositories","Repositories","Sources & workers",Boxes],
+    ["monitoring","Monitoring","Workflow execution & system health",BarChart3],
   ]},
   {label:"Govern",items:[
     ["audit","Audit History","Authority events",History],
