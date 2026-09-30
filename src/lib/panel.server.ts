@@ -442,7 +442,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // A handed-off Stage 1 snapshot is not authoritative. When its License Manager
  // record has been cleared, do not display it as a current release or draft.
  // An explicit new build reconciles and removes the orphan after checking its run.
- const authoritativeKeys=new Set((Array.isArray(releases?.releases)?releases.releases:[]).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ const authoritativeKeys=new Set((Array.isArray(releases?.releases)?releases.releases:[]).filter((r:any)=>!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
  const publishedKeys=new Set((releases?.releases||[]).filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
@@ -450,13 +450,22 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // Refresh persisted in-flight attempts from GitHub, rather than assuming
  // that the browser stayed open long enough to save the completion event.
  for(const draft of visibleDrafts){
+  const draftKey=String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase();
+  if(draft.status==="awaiting_receipt"){
+   if(authoritativeKeys.has(draftKey)){
+    const {error:receiptError}=await sb.from("panel_release_drafts").update({status:"handed_off",last_error:null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","awaiting_receipt");
+    if(receiptError)throw new Error("Unable to reconcile License Manager receipt: "+receiptError.message);
+    draft.status="handed_off";
+   }
+   continue;
+  }
   if(draft.status!=="building"||!draft.last_run_id)continue;
   const workerRepo=draft.release_type==="base"?BASE_WORKER_REPO:ENGINE_REPO;
   try{
    const run=await github("/repos/"+workerRepo+"/actions/runs/"+Number(draft.last_run_id));
    const outcome=String(run?.conclusion||"").toLowerCase();
    if(!["success","failure","cancelled","skipped"].includes(outcome))continue;
-   const nextStatus=outcome==="success"?"handed_off":"draft";
+   const nextStatus=outcome==="success"?(authoritativeKeys.has(draftKey)?"handed_off":"awaiting_receipt"):"draft";
    const err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
    const {error:attemptError}=await sb.from("panel_release_attempts").update({status:outcome,completed_at:run.updated_at||new Date().toISOString(),run_url:run.html_url||null,error_summary:err}).eq("draft_id",draft.id).eq("run_id",draft.last_run_id);
    if(attemptError)throw attemptError;
@@ -497,7 +506,7 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
  if(data.draftId){
    const {data:existing,error:readError}=await sb.from("panel_release_drafts").select("*").eq("id",data.draftId).single();
    if(readError||!existing)throw new Error("Release draft was not found.");
-   if(["building","handed_off"].includes(String(existing.status)))throw new Error("This Stage 1 draft is locked because it is building or has already been handed off.");
+   if(["building","handed_off","awaiting_receipt"].includes(String(existing.status)))throw new Error("This Stage 1 draft is locked because it is building or has already been handed off.");
    if(existing.archived_at)throw new Error("Restore the draft before editing it.");
    const {data:draft,error}=await sb.from("panel_release_drafts").update({
      version,channel,source_repo:repo,source_ref:ref,source_sha:data.sourceSha||existing.source_sha||null,
@@ -519,7 +528,7 @@ export const setReleaseDraftArchived=createServerFn({method:"POST"}).handler(asy
  const sb=authClient();
  const {data:existing,error:readError}=await sb.from("panel_release_drafts").select("*").eq("id",data.draftId).single();
  if(readError||!existing)throw new Error("Release draft was not found.");
- if(existing.status==="building")throw new Error("A running build draft cannot be archived.");
+ if(["building","awaiting_receipt"].includes(String(existing.status)))throw new Error("A build awaiting License Manager receipt cannot be archived.");
  if(existing.status==="handed_off")throw new Error("A handed-off Stage 1 draft is retained as immutable workflow history.");
  const archived=Boolean(data.archived);
  const {data:draft,error}=await sb.from("panel_release_drafts").update({
@@ -537,7 +546,7 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
  const sb=authClient();
  const {data:existing,error:readError}=await sb.from("panel_release_drafts").select("*").eq("id",data.draftId).single();
  if(readError||!existing)throw new Error("Release draft was not found.");
- if(["building","handed_off"].includes(String(existing.status)))throw new Error("Building or handed-off drafts cannot be deleted.");
+ if(["building","awaiting_receipt","handed_off"].includes(String(existing.status)))throw new Error("Building or handed-off drafts cannot be deleted.");
  const {error}=await sb.from("panel_release_drafts").delete().eq("id",data.draftId);
  if(error)throw new Error("Unable to delete release draft: "+error.message);
  return {ok:true,id:data.draftId};
@@ -729,7 +738,7 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
       const errorText=failure?.lines?.join("\n")||failure?.error||null;
       const {data:attemptRow}=await sb.from("panel_release_attempts").select("id,draft_id").eq("run_id",data.runId).maybeSingle();
       await sb.from("panel_release_attempts").update({status:outcome,error_summary:failure?.error||null,error_output:errorText,completed_at:new Date().toISOString(),run_url:run.html_url||null}).eq("run_id",data.runId);
-      await sb.from("panel_release_drafts").update({status:outcome==="success"?"handed_off":"draft",last_error:outcome==="success"?null:errorText,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("last_run_id",data.runId);
+      await sb.from("panel_release_drafts").update({status:outcome==="success"?"awaiting_receipt":"draft",last_error:outcome==="success"?null:errorText,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("last_run_id",data.runId);
       if(outcome==="success"&&attemptRow?.draft_id){
        await sb.from("panel_release_attempts").delete().eq("draft_id",attemptRow.draft_id).in("status",["failure","cancelled","skipped"]).neq("id",attemptRow.id);
       }
@@ -950,7 +959,7 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
  const {data:existing,error:existingError}=await sb.from("panel_release_drafts").select("*").eq("release_type",releaseType).eq("version",version).eq("channel",channel).maybeSingle();
  if(existingError)throw new Error("Unable to resolve release draft: "+existingError.message);
  if(existing&&["archived","rejected"].includes(String(existing.status)))throw new Error("This release draft is closed. Use Start Fresh or a new version before creating another attempt.");
- if(existing&&String(existing.status)==="building")throw new Error("This release already has a build attempt in progress.");
+ if(existing&&["building","awaiting_receipt"].includes(String(existing.status)))throw new Error("This release has a build awaiting completion or License Manager receipt.");
  if(existing&&String(existing.status)==="handed_off"){
   // The authoritative release may have been cleared since the previous successful handoff.
   // Reconcile only on an explicit new build, never while merely reading the release list.
