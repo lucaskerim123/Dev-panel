@@ -52,6 +52,7 @@ function Index() {
   const [runRepo, setRunRepo] = useState("");
   const [runVersion, setRunVersion] = useState("");
   const [runChannel, setRunChannel] = useState("stable");
+  const [restoredRun, setRestoredRun] = useState(false);
   const [handoff, setHandoff] = useState<any>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [baseline, setBaseline] = useState<any>(null);
@@ -70,6 +71,30 @@ function Index() {
         getPanelState({ data: { token: s.token, type: "engine", channel } }),
       ]);
       setData({ base, engine });
+      // Rehydrate release progress from durable attempts, not browser-only state.
+      // A completed GitHub run is still restored so its result and console survive refresh.
+      if (!restoredRun) {
+        const candidates = [
+          ...(base.drafts || []).map((draft:any) => ({draft, type:"base", repo:base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel"})),
+          ...(engine.drafts || []).map((draft:any) => ({draft, type:"engine", repo:engine.repositories?.engine?.repo || "lucaskerim123/V1-vercel-engine"}))
+        ].flatMap(({draft,type,repo}:any) => (draft.attempts || [])
+          .filter((attempt:any) => Number(attempt.run_id)>0 && !draft.archived_at)
+          .map((attempt:any) => ({draft,type,repo,attempt})))
+          .sort((a:any,b:any) => new Date(b.attempt.created_at || b.draft.updated_at || 0).getTime()-new Date(a.attempt.created_at || a.draft.updated_at || 0).getTime());
+        const candidate = candidates.find((x:any) => ["queued","in_progress"].includes(x.attempt.status))
+          || candidates.find((x:any) => x.attempt.status==="success" || x.draft.status==="handed_off")
+          || candidates[0];
+        if (candidate) {
+          const {draft,type,repo,attempt}=candidate;
+          setRun({id:Number(attempt.run_id),status:attempt.status==="success"?"completed":attempt.status,
+            conclusion:["success","failure","cancelled","skipped"].includes(attempt.status)?attempt.status:null,
+            html_url:attempt.run_url || draft.last_run_url || null,draftId:draft.id,
+            attemptNumber:attempt.attempt_number,name:(type==="base"?"Base":"Update")+" release"});
+          setRunRepo(repo);setRunVersion(draft.version);setRunChannel(draft.channel);
+          setTab(type);
+        }
+        setRestoredRun(true);
+      }
       setMasterConnected(true);
       if (!channel && base.selectedChannel) setChannel(base.selectedChannel);
     } catch (x: any) {
