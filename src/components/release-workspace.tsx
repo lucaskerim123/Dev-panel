@@ -37,7 +37,7 @@ export function ReleaseWorkspace(p:any){
    try{
     const status:any=await getPromotionRunStatus({data:{token:p.session.token,type:p.type,runId:promotionRun.runId||null,sourceSha:promotionRun.sourceSha}});
     if(cancelled)return;
-    setPromotionRun((current:any)=>current?.runId===status.runId?{...current,...status}:current);
+    setPromotionRun((current:any)=>(!current?.runId||current.runId===status.runId)?{...current,...status}:current);
     if(status.completed){
      if(status.conclusion==="success"&&status.branchMatches){
       setError("");
