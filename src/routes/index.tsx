@@ -125,7 +125,7 @@ function Index() {
 
   useEffect(() => {
     if (!run?.id || !runRepo || !session) return;
-    if (["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""))) return;
+    const completedAlready=["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""));
     let stopped = false;
     const poll = async () => {
       try {
@@ -144,14 +144,15 @@ function Index() {
         if (!stopped) setError(x?.message || "Unable to read the release workflow state.");
       }
     };
-    poll();
-    const timer = setInterval(poll, 3000);
-    return () => { stopped = true; clearInterval(timer); };
+    // Even completed runs need one fetch after refresh to restore jobs and final logs.
+    void poll();
+    const timer = completedAlready ? null : setInterval(poll, 3000);
+    return () => { stopped = true; if(timer)clearInterval(timer); };
   }, [run?.id, runRepo, session?.token]);
 
   useEffect(() => {
     if (!run?.id || !runRepo || !session || !runVersion) return;
-    if (["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""))) return;
+    const completedAlready=["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""));
     let stopped = false;
     const poll = async () => {
       try {
@@ -164,9 +165,9 @@ function Index() {
         if (!stopped) setError(x?.message || "Unable to read the License Manager handoff state.");
       }
     };
-    poll();
-    const timer = setInterval(poll, 5000);
-    return () => { stopped = true; clearInterval(timer); };
+    void poll();
+    const timer = completedAlready ? null : setInterval(poll, 5000);
+    return () => { stopped = true; if(timer)clearInterval(timer); };
   }, [run?.id, runRepo, session?.token, runVersion, runChannel]);
 
   const stats = useMemo(() => {
