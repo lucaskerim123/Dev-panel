@@ -624,7 +624,7 @@ export const clearStaleReleaseAttempts=createServerFn({method:"POST"}).handler(a
   last_error:null,
   updated_at:new Date().toISOString()
  };
- if(!["building","handed_off","archived"].includes(currentStatus))patch.status="draft";
+ if(!["building","awaiting_receipt","handed_off","archived"].includes(currentStatus))patch.status="draft";
  const {error:updateError}=await sb.from("panel_release_drafts").update(patch).eq("id",draftId);
  if(updateError)throw new Error("Stale attempts were deleted, but the draft summary could not be updated: "+updateError.message);
  return {ok:true,draftId,deleted:ids.length,remaining:remaining.length};
