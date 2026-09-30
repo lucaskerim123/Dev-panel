@@ -26,7 +26,7 @@ export function ReleaseWorkspace(p:any){
  const [message,setMessage]=useState("");
  const [error,setError]=useState("");
  const [promotionRun,setPromotionRun]=useState<any>(null);
- useEffect(()=>{if(p.handoff)setReleaseState(p.handoff)},[p.handoff?.id,p.handoff?.status,p.handoff?.review_status,p.handoff?.manifest?.validation?.status]);
+ useEffect(()=>{if(p.handoff){setReleaseState(p.handoff);if(p.run?.id&&String(p.handoff.version)===String(p.version))setStage(3)}},[p.handoff?.id,p.handoff?.status,p.handoff?.review_status,p.handoff?.manifest?.validation?.status]);
  // Open a restored run in the appropriate stage without re-inspection or re-submission.
  useEffect(()=>{
   if(!p.run?.id || !p.run?.draftId)return;
