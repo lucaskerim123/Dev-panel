@@ -41,7 +41,7 @@ export function ReleaseWorkspace(p:any){
     if(status.completed){
      if(status.conclusion==="success"&&status.branchMatches){
       setError("");
-      setMessage(label+" source preparation complete · "+destination+" now matches validated main "+String(status.releaseSha||promotionRun.sourceSha||"").slice(0,8)+".");
+      setMessage(label+" source preparation complete.");
       await p.onChanged?.();
      }else if(status.conclusion==="success"){
       setMessage("");
