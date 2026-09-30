@@ -41,7 +41,7 @@ export function ReleaseWorkspace(p:any){
   if(!matchingHandoff||!workspace||selected)return;
   setReleaseState(matchingHandoff);
   if(stage===2)setStage(3);
- },[matchingHandoff?.id,matchingHandoff?.status,workspace,selected?.id,stage]);
+ },[matchingHandoff?.id,matchingHandoff?.status,workspace,selected?.id]);
  // Resume is explicit from the draft list. Merely navigating to Base/Update
  // must always show its overview, even if a worker is still running.
  const releases=useMemo(()=>[...(p.releases||[])].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()),[p.releases]);
