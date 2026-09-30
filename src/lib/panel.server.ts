@@ -443,7 +443,30 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // record has been cleared, do not display it as a current release or draft.
  // An explicit new build reconciles and removes the orphan after checking its run.
  const authoritativeKeys=new Set((Array.isArray(releases?.releases)?releases.releases:[]).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
- const releaseDrafts=(drafts||[]).filter((draft:any)=>String(draft.status||"")!=="handed_off"||authoritativeKeys.has(String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase())||Boolean((grouped.get(draft.id)||[]).some((a:any)=>a.status==="success"&&a.run_id))).map((draft:any)=>({...draft,attempts:grouped.get(draft.id)||[]}));
+ // Published state belongs to License Manager; never present that version/channel
+ // as an editable Stage 1 draft even when GitHub completion polling was missed.
+ const publishedKeys=new Set((releases?.releases||[]).filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ const visibleDrafts=(drafts||[]).filter((d:any)=>!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
+ // Refresh persisted in-flight attempts from GitHub, rather than assuming
+ // that the browser stayed open long enough to save the completion event.
+ for(const draft of visibleDrafts){
+  if(draft.status!=="building"||!draft.last_run_id)continue;
+  const workerRepo=draft.release_type==="base"?BASE_WORKER_REPO:ENGINE_REPO;
+  try{
+   const run=await github("/repos/"+workerRepo+"/actions/runs/"+Number(draft.last_run_id));
+   const outcome=String(run?.conclusion||"").toLowerCase();
+   if(!["success","failure","cancelled","skipped"].includes(outcome))continue;
+   const nextStatus=outcome==="success"?"handed_off":"draft";
+   const err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
+   const {error:attemptError}=await sb.from("panel_release_attempts").update({status:outcome,completed_at:run.updated_at||new Date().toISOString(),run_url:run.html_url||null,error_summary:err}).eq("draft_id",draft.id).eq("run_id",draft.last_run_id);
+   if(attemptError)throw attemptError;
+   const {error:draftError}=await sb.from("panel_release_drafts").update({status:nextStatus,last_error:err,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","building").eq("last_run_id",draft.last_run_id);
+   if(draftError)throw draftError;
+   draft.status=nextStatus;draft.last_error=err;draft.last_run_url=run.html_url||null;
+   for(const attempt of grouped.get(draft.id)||[]){if(String(attempt.run_id)===String(draft.last_run_id)){attempt.status=outcome;attempt.error_summary=err;attempt.run_url=run.html_url||null}}
+  }catch(error){console.error("Unable to reconcile saved release run",draft.id,error)}
+ }
+ const releaseDrafts=visibleDrafts.filter((draft:any)=>String(draft.status||"")!=="handed_off"||authoritativeKeys.has(String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase())||Boolean((grouped.get(draft.id)||[]).some((a:any)=>a.status==="success"&&a.run_id))).map((draft:any)=>({...draft,attempts:grouped.get(draft.id)||[]}));
  const availableChannels=Array.isArray(channels?.channels)?channels.channels.filter((x:any)=>x?.enabled===true).map((x:any)=>String(x.channel).trim().toLowerCase()).filter(Boolean):[];
  return {releases:releases?.releases||[],drafts:releaseDrafts,channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
 });
