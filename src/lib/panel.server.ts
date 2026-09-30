@@ -684,15 +684,18 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
     const jobsResult=await github("/repos/"+repo+"/actions/runs/"+data.runId+"/jobs?per_page=100");
     const jobs=await Promise.all((jobsResult?.jobs||[]).map(async(job:any)=>{
       let failure:any=null;
-      if(job.conclusion==="failure"){
-        try{
-          const logs=await operationsGithubText("/repos/"+repo+"/actions/jobs/"+job.id+"/logs");
-          failure=extractOperationFailure(logs)||fallbackOperationFailure(job,logs);
-        }catch(error:any){
-          failure={error:error?.message||"Workflow job failed.",preceding:[],lines:["Unable to retrieve GitHub job logs.",error?.message||"Unknown log error"]};
-        }
+      let logTail="";
+      let logError="";
+      try {
+        // Logs may not be exposed while running; job/step status remains visible.
+        const logs=await operationsGithubText("/repos/"+repo+"/actions/jobs/"+job.id+"/logs");
+        logTail=String(logs||"").split(/\\r?\\n/).slice(-160).join("\\n").slice(-24000);
+        if(job.conclusion==="failure") failure=extractOperationFailure(logs)||fallbackOperationFailure(job,logs);
+      } catch(error:any) {
+        logError=error?.message||"GitHub job logs are temporarily unavailable.";
+        if(job.conclusion==="failure") failure={error:logError,preceding:[],lines:["Unable to retrieve GitHub job logs.",logError]};
       }
-      return {...job,failure};
+      return {...job,failure,logTail,logError};
     }));
     const failedJob=jobs.find((job:any)=>job.conclusion==="failure");
     const failure=failedJob?.failure||null;
