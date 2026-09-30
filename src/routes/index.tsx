@@ -54,6 +54,7 @@ function Index() {
   const [runChannel, setRunChannel] = useState("stable");
   const [restoredRun, setRestoredRun] = useState(false);
   const [handoff, setHandoff] = useState<any>(null);
+  const [releasePageEpoch,setReleasePageEpoch] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [baseline, setBaseline] = useState<any>(null);
 
@@ -339,6 +340,16 @@ function Index() {
     setNotice("");
   };
 
+  // A deliberate click on Base/Update always opens that page's overview.
+  // Live work is persisted in drafts and can be resumed from the overview.
+  const navigateTab=(next:Tab)=>{
+    if(next==="base"||next==="engine"){
+      resetComposer();
+      setReleasePageEpoch(value=>value+1);
+    }
+    setTab(next);
+  };
+
   if (!session) return <Login email={email} password={password} setEmail={setEmail} setPassword={setPassword}
     busy={busy} error={error} onSubmit={async (e: any) => {
       e.preventDefault(); setBusy("login"); setError("");
@@ -357,23 +368,23 @@ function Index() {
   return (
     <div className="min-h-screen bg-background">
       <Header connected={masterConnected} loading={loading} onRefresh={() => load()} onSignOut={signOut} user={session} />
-      <MobileNav tab={tab} setTab={setTab} activeRun={!!run && !run.conclusion} />
+      <MobileNav tab={tab} setTab={navigateTab} activeRun={!!run && !run.conclusion} />
       <div className="mx-auto flex min-h-[calc(100vh-66px)] max-w-[1680px]">
-        <Sidebar tab={tab} setTab={setTab} activeRun={!!run && !run.conclusion} />
+        <Sidebar tab={tab} setTab={navigateTab} activeRun={!!run && !run.conclusion} />
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 xl:px-8">
           <div className="mx-auto max-w-[1440px] space-y-4">
             {error && <div className="sticky top-[80px] z-30"><Alert tone="error" onClose={() => setError("")}>{error}</Alert></div>}
             {notice && <Alert tone="success" onClose={() => setNotice("")}>{notice}</Alert>}
             {tab === "overview" && <Dashboard stats={stats} releases={allReleases} connected={masterConnected} run={run} channels={availableChannels}
-              onBase={() => { resetComposer(); setTab("base"); }} onEngine={() => { resetComposer(); setTab("engine"); }}
+              onBase={() => navigateTab("base")} onEngine={() => navigateTab("engine")}
               onActivity={() => setTab("activity")} onReleases={() => setTab("releases")} />}
-            {tab === "releases" && <ReleasesPage releases={allReleases} session={session} onChanged={()=>load(session,true)} onBase={() => { resetComposer(); setTab("base"); }} onEngine={() => { resetComposer(); setTab("engine"); }} />}
-            {tab === "base" && <Composer type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
+            {tab === "releases" && <ReleasesPage releases={allReleases} session={session} onChanged={()=>load(session,true)} onBase={() => navigateTab("base")} onEngine={() => navigateTab("engine")} />}
+            {tab === "base" && <Composer key={"base-"+releasePageEpoch} type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
               onInspect={() => inspect("base")} onStart={() => start("base")} onResumeRun={(draft:any,attempt:any)=>resumeReleaseRun("base",draft,attempt)} runVersion={runVersion} runChannel={runChannel}
               run={runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun(d,a,"base")} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
-            {tab === "engine" && <Composer type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
+            {tab === "engine" && <Composer key={"engine-"+releasePageEpoch} type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
               onInspect={() => inspect("engine")} onStart={() => start("engine")} onResumeRun={(draft:any,attempt:any)=>resumeReleaseRun("engine",draft,attempt)} runVersion={runVersion} runChannel={runChannel}
