@@ -443,7 +443,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // record has been cleared, do not display it as a current release or draft.
  // An explicit new build reconciles and removes the orphan after checking its run.
  const authoritativeKeys=new Set((Array.isArray(releases?.releases)?releases.releases:[]).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
- const releaseDrafts=(drafts||[]).filter((draft:any)=>String(draft.status||"")!=="handed_off"||authoritativeKeys.has(String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase())).map((draft:any)=>({...draft,attempts:grouped.get(draft.id)||[]}));
+ const releaseDrafts=(drafts||[]).filter((draft:any)=>String(draft.status||"")!=="handed_off"||authoritativeKeys.has(String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase())||Boolean((grouped.get(draft.id)||[]).some((a:any)=>a.status==="success"&&a.run_id))).map((draft:any)=>({...draft,attempts:grouped.get(draft.id)||[]}));
  const availableChannels=Array.isArray(channels?.channels)?channels.channels.filter((x:any)=>x?.enabled===true).map((x:any)=>String(x.channel).trim().toLowerCase()).filter(Boolean):[];
  return {releases:releases?.releases||[],drafts:releaseDrafts,channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
 });
@@ -689,7 +689,7 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
       try {
         // Logs may not be exposed while running; job/step status remains visible.
         const logs=await operationsGithubText("/repos/"+repo+"/actions/jobs/"+job.id+"/logs");
-        logTail=String(logs||"").split(/\\r?\\n/).slice(-160).join("\\n").slice(-24000);
+        logTail=String(logs||"").split(/\r?\n/).slice(-160).join("\n").slice(-24000);
         if(job.conclusion==="failure") failure=extractOperationFailure(logs)||fallbackOperationFailure(job,logs);
       } catch(error:any) {
         logError=error?.message||"GitHub job logs are temporarily unavailable.";
