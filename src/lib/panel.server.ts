@@ -573,6 +573,13 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
   const run=await github(`/repos/${workerRepo}/actions/runs/${Number(attempt.run_id)}`);
   if(String(run?.status||"").toLowerCase()!=="completed")
    throw new Error("GitHub run #"+attempt.run_id+" is still active. Local draft deletion is blocked.");
+  // Give a successful handoff time to appear in the authoritative registry.
+  // Never mistake a brief ingestion delay for an orphaned local draft.
+  if(String(run?.conclusion||"").toLowerCase()==="success"){
+   const finishedAt=Date.parse(String(run.updated_at||run.run_started_at||""));
+   if(!Number.isFinite(finishedAt)||Date.now()-finishedAt<10*60*1000)
+    throw new Error("GitHub succeeded recently. Wait 10 minutes for License Manager intake, refresh, then retry local orphan cleanup if the release still has not appeared.");
+  }
  }
  const {error}=await sb.from("panel_release_drafts").delete().eq("id",data.draftId);
  if(error)throw new Error("Unable to delete release draft: "+error.message);
