@@ -152,7 +152,6 @@ function Index() {
 
   useEffect(() => {
     if (!run?.id || !runRepo || !session || !runVersion) return;
-    const completedAlready=["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""));
     let stopped = false;
     const poll = async () => {
       try {
