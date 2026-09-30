@@ -451,12 +451,17 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // that the browser stayed open long enough to save the completion event.
  for(const draft of visibleDrafts){
   const draftKey=String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase();
-  if(draft.status==="awaiting_receipt"){
+  // Keep the persisted status inside the existing database constraint.
+  // "awaiting_receipt" is a read-only display state derived from a successful
+  // recorded GitHub attempt until License Manager returns the actual release.
+  const completedAttempt=(grouped.get(draft.id)||[]).find((a:any)=>
+   String(a.run_id||"")===String(draft.last_run_id||"")&&a.status==="success");
+  if(draft.status==="building"&&completedAttempt){
    if(authoritativeKeys.has(draftKey)){
-    const {error:receiptError}=await sb.from("panel_release_drafts").update({status:"handed_off",last_error:null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","awaiting_receipt");
+    const {error:receiptError}=await sb.from("panel_release_drafts").update({status:"handed_off",last_error:null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","building");
     if(receiptError)throw new Error("Unable to reconcile License Manager receipt: "+receiptError.message);
     draft.status="handed_off";
-   }
+   }else draft.status="awaiting_receipt";
    continue;
   }
   if(draft.status!=="building"||!draft.last_run_id)continue;
@@ -465,13 +470,14 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
    const run=await github("/repos/"+workerRepo+"/actions/runs/"+Number(draft.last_run_id));
    const outcome=String(run?.conclusion||"").toLowerCase();
    if(!["success","failure","cancelled","skipped"].includes(outcome))continue;
-   const nextStatus=outcome==="success"?(authoritativeKeys.has(draftKey)?"handed_off":"awaiting_receipt"):"draft";
+   const nextStatus=outcome==="success"?(authoritativeKeys.has(draftKey)?"handed_off":"building"):"draft";
+   const displayStatus=outcome==="success"&&!authoritativeKeys.has(draftKey)?"awaiting_receipt":nextStatus;
    const err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
    const {error:attemptError}=await sb.from("panel_release_attempts").update({status:outcome,completed_at:run.updated_at||new Date().toISOString(),run_url:run.html_url||null,error_summary:err}).eq("draft_id",draft.id).eq("run_id",draft.last_run_id);
    if(attemptError)throw attemptError;
    const {error:draftError}=await sb.from("panel_release_drafts").update({status:nextStatus,last_error:err,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","building").eq("last_run_id",draft.last_run_id);
    if(draftError)throw draftError;
-   draft.status=nextStatus;draft.last_error=err;draft.last_run_url=run.html_url||null;
+   draft.status=displayStatus;draft.last_error=err;draft.last_run_url=run.html_url||null;
    for(const attempt of grouped.get(draft.id)||[]){if(String(attempt.run_id)===String(draft.last_run_id)){attempt.status=outcome;attempt.error_summary=err;attempt.run_url=run.html_url||null}}
   }catch(error){console.error("Unable to reconcile saved release run",draft.id,error)}
  }
@@ -738,14 +744,14 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
       const errorText=failure?.lines?.join("\n")||failure?.error||null;
       const {data:attemptRow}=await sb.from("panel_release_attempts").select("id,draft_id").eq("run_id",data.runId).maybeSingle();
       await sb.from("panel_release_attempts").update({status:outcome,error_summary:failure?.error||null,error_output:errorText,completed_at:new Date().toISOString(),run_url:run.html_url||null}).eq("run_id",data.runId);
-      await sb.from("panel_release_drafts").update({status:outcome==="success"?"awaiting_receipt":"draft",last_error:outcome==="success"?null:errorText,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("last_run_id",data.runId);
+      await sb.from("panel_release_drafts").update({status:outcome==="success"?"building":"draft",last_error:outcome==="success"?null:errorText,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("last_run_id",data.runId).eq("status","building");
       if(outcome==="success"&&attemptRow?.draft_id){
        await sb.from("panel_release_attempts").delete().eq("draft_id",attemptRow.draft_id).in("status",["failure","cancelled","skipped"]).neq("id",attemptRow.id);
       }
     }else{
       const sb=authClient();
       await sb.from("panel_release_attempts").update({status:"in_progress",run_url:run.html_url||null}).eq("run_id",data.runId);
-      await sb.from("panel_release_drafts").update({status:"building",last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("last_run_id",data.runId);
+      await sb.from("panel_release_drafts").update({status:"building",last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("last_run_id",data.runId).eq("status","building");
     }
     return {run,jobs,failure};
   }
