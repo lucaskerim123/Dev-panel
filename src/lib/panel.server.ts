@@ -786,12 +786,20 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
   throw new Error("Release workflow run is not available yet");
 });
 
-export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";runId:number|string;sourceSha?:string}})=>{
+export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";runId?:number|string|null;sourceSha?:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to inspect a release branch promotion.");
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
  const releaseRef=data.type==="base"?BASE_REF:ENGINE_REF;
- const run=await github(`/repos/${repo}/actions/runs/${encodeURIComponent(String(data.runId))}`);
+ const sourceSha=String(data.sourceSha||"").trim();
+ let run:any=null;
+ if(data.runId){
+  run=await github(`/repos/${repo}/actions/runs/${encodeURIComponent(String(data.runId))}`);
+ }else{
+  const result=await github(`/repos/${repo}/actions/workflows/sync-release-branch.yml/runs?event=workflow_dispatch&branch=main&per_page=20`);
+  run=(result?.workflow_runs||[]).find((candidate:any)=>!sourceSha||String(candidate?.head_sha||"")===sourceSha)||null;
+  if(!run)return {ok:true,repo,releaseRef,runId:null,runUrl:null,status:"dispatched",conclusion:null,completed:false,releaseSha:null,branchMatches:false};
+ }
  const conclusion=String(run?.conclusion||"").toLowerCase();
  const status=String(run?.status||"").toLowerCase();
  const completed=status==="completed"||["success","failure","cancelled","skipped","timed_out","action_required","neutral","stale"].includes(conclusion);
@@ -800,10 +808,10 @@ export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async
  if(completed&&conclusion==="success"){
   const ref=await github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(releaseRef)}`).catch(()=>null);
   releaseSha=String(ref?.object?.sha||"")||null;
-  const expected=String(data.sourceSha||"").trim();
+  const expected=sourceSha||String(run?.head_sha||"").trim();
   branchMatches=Boolean(expected&&releaseSha===expected);
  }
- return {ok:true,repo,releaseRef,runId:run?.id||data.runId,runUrl:run?.html_url||null,status:status||"unknown",conclusion:conclusion||null,completed,releaseSha,branchMatches};
+ return {ok:true,repo,releaseRef,runId:run?.id||null,runUrl:run?.html_url||null,status:status||"unknown",conclusion:conclusion||null,completed,releaseSha,branchMatches,sourceSha:sourceSha||String(run?.head_sha||"")||null};
 });
 
 export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine"}})=>{
@@ -827,7 +835,7 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
   .filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()))
   .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0];
  if(active){
-  return {ok:true,alreadyRunning:true,repo,sourceRef,releaseRef,sourceSha,releaseSha,runId:active.id||null,runUrl:active.html_url||null,status:active.status||"in_progress"};
+  return {ok:true,alreadyRunning:true,repo,sourceRef,releaseRef,sourceSha:String(active.head_sha||sourceSha),releaseSha,runId:active.id||null,runUrl:active.html_url||null,status:active.status||"in_progress"};
  }
 
  const dispatchedAt=Date.now();
