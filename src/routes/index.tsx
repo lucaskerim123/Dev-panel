@@ -311,6 +311,19 @@ function Index() {
     } finally { setBusy(""); }
   };
 
+  // Selecting a saved draft must select its own persisted GitHub attempt.
+  // Do not reuse the last Base/Update run from an unrelated release.
+  const resumeReleaseRun = (draft:any, attempt:any, type:ReleaseType) => {
+    const repo=type==="base"
+      ?data.base.repositories?.base?.workerRepo||"lucaskerim123/Dev-panel"
+      :data.engine.repositories?.engine?.repo||"lucaskerim123/V1-vercel-engine";
+    setRun({id:Number(attempt.run_id),status:attempt.status==="success"?"completed":attempt.status,
+      conclusion:["success","failure","cancelled","skipped"].includes(String(attempt.status))?attempt.status:null,
+      html_url:attempt.run_url||draft.last_run_url||null,draftId:draft.id,
+      attemptNumber:attempt.attempt_number,name:(type==="base"?"Base":"Update")+" release"});
+    setRunRepo(repo);setRunVersion(draft.version);setRunChannel(draft.channel);setHandoff(null);
+  };
+
   const changeReleaseChannel = (nextChannel:string) => {
     const next=String(nextChannel||"stable").trim().toLowerCase()||"stable";
     if(next===channel)return;
@@ -359,12 +372,12 @@ function Index() {
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
               onInspect={() => inspect("base")} onStart={() => start("base")} onResumeRun={(draft:any,attempt:any)=>resumeReleaseRun("base",draft,attempt)} runVersion={runVersion} runChannel={runChannel}
-              run={runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? run : null} runRepo={runRepo} handoff={handoff} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
+              run={runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun(d,a,"base")} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "engine" && <Composer type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
               onInspect={() => inspect("engine")} onStart={() => start("engine")} onResumeRun={(draft:any,attempt:any)=>resumeReleaseRun("engine",draft,attempt)} runVersion={runVersion} runChannel={runChannel}
-              run={runRepo === "lucaskerim123/V1-vercel-engine" ? run : null} runRepo={runRepo} handoff={handoff} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
+              run={runRepo === "lucaskerim123/V1-vercel-engine" ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun(d,a,"engine")} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "activity" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "operations" && <OperationsWorkspace session={session} />}
             {tab === "repositories" && <RepositoriesPage data={data} session={session} onBase={() => { resetComposer(); setTab("base"); }} onEngine={() => { resetComposer(); setTab("engine"); }} />}
