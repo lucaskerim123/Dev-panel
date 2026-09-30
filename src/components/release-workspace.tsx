@@ -63,8 +63,17 @@ export function ReleaseWorkspace(p:any){
  const runFailed=["failure","cancelled","skipped"].includes(String(runState));
  const runFailure=p.run?.failure;
  const failureText=String(runFailure?.lines?.join("\n")||runFailure?.error||"").trim();
- const target=releaseState||selected;
- const handoffReceived=Boolean(releaseState?.id);
+ // Restore handoff from License Manager's authoritative release list even
+ // when the browser missed the original handoff response.
+ const pendingVersion=String(activeDraft?.version||p.version||"").trim();
+ const pendingChannel=String(activeDraft?.channel||p.channel||"stable").trim().toLowerCase();
+ const authoritativeHandoff=!selected&&pendingVersion?(p.releases||[]).find((r:any)=>
+  !r.archived_at&&String(r.version||"")===pendingVersion&&String(r.channel||"").toLowerCase()===pendingChannel&&
+  (!activeDraft?.source_sha||!r.source_sha||String(r.source_sha)===String(activeDraft.source_sha))
+ ):null;
+ const currentHandoff=releaseState&&String(releaseState.version||"")===pendingVersion&&String(releaseState.channel||"").toLowerCase()===pendingChannel?releaseState:authoritativeHandoff||null;
+ const target=currentHandoff||selected;
+ const handoffReceived=Boolean(currentHandoff?.id);
  const handoffFailed=Boolean(!handoffReceived&&runDone&&!runGood);
  const handoffPending=Boolean(!handoffReceived&&!handoffFailed);
  const validation=target?.manifest?.validation?.status||"";
