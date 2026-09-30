@@ -552,7 +552,28 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
  const sb=authClient();
  const {data:existing,error:readError}=await sb.from("panel_release_drafts").select("*").eq("id",data.draftId).single();
  if(readError||!existing)throw new Error("Release draft was not found.");
- if(["building","awaiting_receipt","handed_off"].includes(String(existing.status)))throw new Error("Building or handed-off drafts cannot be deleted.");
+ // Only local orphan cleanup: never delete a draft backed by a
+ // License Manager release, and never delete any unfinished GitHub run.
+ const releaseType=String(existing.release_type||"")==="base"?"base":"update";
+ const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(String(existing.channel||"stable"))}&type=${releaseType}&include_archived=true`);
+ const matches=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>
+  String(r.version||"")===String(existing.version||"")&&
+  String(r.channel||"").toLowerCase()===String(existing.channel||"").toLowerCase()&&
+  String(r.release_type||releaseType).toLowerCase()===releaseType);
+ if(matches.length)throw new Error("License Manager already has this release. Local draft deletion is blocked; open the authoritative release record instead.");
+ const {data:attempts,error:attemptError}=await sb.from("panel_release_attempts").select("run_id,status").eq("draft_id",existing.id);
+ if(attemptError)throw new Error("Unable to verify release attempts: "+attemptError.message);
+ const workerRepo=releaseType==="base"?BASE_WORKER_REPO:ENGINE_REPO;
+ for(const attempt of attempts||[]){
+  if(!attempt.run_id){
+   if(["queued","in_progress"].includes(String(attempt.status||"").toLowerCase()))
+    throw new Error("A release attempt has no GitHub run ID yet. Wait for it to resolve before deleting.");
+   continue;
+  }
+  const run=await github(`/repos/${workerRepo}/actions/runs/${Number(attempt.run_id)}`);
+  if(String(run?.status||"").toLowerCase()!=="completed")
+   throw new Error("GitHub run #"+attempt.run_id+" is still active. Local draft deletion is blocked.");
+ }
  const {error}=await sb.from("panel_release_drafts").delete().eq("id",data.draftId);
  if(error)throw new Error("Unable to delete release draft: "+error.message);
  return {ok:true,id:data.draftId};
