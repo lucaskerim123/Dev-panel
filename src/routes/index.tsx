@@ -91,7 +91,8 @@ function Index() {
             html_url:attempt.run_url || draft.last_run_url || null,draftId:draft.id,
             attemptNumber:attempt.attempt_number,name:(type==="base"?"Base":"Update")+" release"});
           setRunRepo(repo);setRunVersion(draft.version);setRunChannel(draft.channel);
-          setTab(type);
+          // Keep the restored run available without hijacking the selected tab.
+          // The operator opens its draft or release history explicitly.
         }
         setRestoredRun(true);
       }
