@@ -786,6 +786,35 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
   throw new Error("Release workflow run is not available yet");
 });
 
+export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine"}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to inspect release branch state.");
+ const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
+ const releaseRef=data.type==="base"?BASE_REF:ENGINE_REF;
+ const sourceRef="main";
+ const workflow="sync-release-branch.yml";
+ const [sourceBranch,releaseBranch,runs]=await Promise.all([
+  github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(sourceRef)}`),
+  github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(releaseRef)}`).catch(()=>null),
+  github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`).catch(()=>({workflow_runs:[]}))
+ ]);
+ const sourceSha=String(sourceBranch?.object?.sha||"");
+ const releaseSha=String(releaseBranch?.object?.sha||"");
+ if(!/^[a-f0-9]{40}$/i.test(sourceSha))throw new Error(`Could not resolve ${repo}@main.`);
+ const allRuns=Array.isArray(runs?.workflow_runs)?runs.workflow_runs:[];
+ const activeRun=allRuns
+  .filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()))
+  .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+ const latestRun=[...allRuns].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+ return {
+  ok:true,repo,sourceRef,releaseRef,sourceSha,releaseSha,
+  upToDate:Boolean(releaseSha&&releaseSha===sourceSha),
+  active:Boolean(activeRun),
+  activeRun:activeRun?{id:activeRun.id||null,url:activeRun.html_url||null,status:activeRun.status||"in_progress",headSha:activeRun.head_sha||null}:null,
+  latestRun:latestRun?{id:latestRun.id||null,url:latestRun.html_url||null,status:latestRun.status||null,conclusion:latestRun.conclusion||null,headSha:latestRun.head_sha||null,updatedAt:latestRun.updated_at||latestRun.created_at||null}:null
+ };
+});
+
 export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";runId?:number|string|null;sourceSha?:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to inspect a release branch promotion.");
