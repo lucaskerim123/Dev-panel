@@ -155,6 +155,10 @@ async function audit(actor:any,action:string,target:string,jobId:string|null,det
  await sb().from("dev_control_audit").insert({actor_id:actor.id,actor_email:actor.email,action,target,job_id:jobId,detail});
 }
 
+export async function recordDevControlAudit(actor:any,action:string,target:string|null,detail:any={}){
+ return audit(actor,action,target,null,detail);
+}
+
 async function createJob(actor:any,input:{action:string;target:string;sourceRef?:string|null;sourceSha?:string|null;workflow?:string|null;detail?:any}){
  const settings=await getDevControlSettings();
  if(!settings.storageReady)return {id:crypto.randomUUID(),ephemeral:true};
