@@ -8,10 +8,9 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
 <title>Dev Panel</title>
 <style>
 :root{color-scheme:light dark;--bg:transparent;--surface:color-mix(in srgb,Canvas 94%,CanvasText 6%);--surface2:color-mix(in srgb,Canvas 88%,CanvasText 12%);--border:color-mix(in srgb,CanvasText 18%,transparent);--text:CanvasText;--muted:color-mix(in srgb,CanvasText 58%,transparent);--good:#22a06b;--warn:#b7791f;--bad:#c93756}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-body{padding:10px}.shell{max-width:760px;margin:0 auto}.card{border:1px solid var(--border);background:var(--surface);border-radius:18px;overflow:hidden}.head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--border)}.mark{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--surface2);font-weight:800}.grow{flex:1}.title{font-weight:800}.sub{font-size:11px;color:var(--muted)}.pill{font-size:10px;font-weight:800;border:1px solid var(--border);border-radius:999px;padding:5px 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}.stat{border:1px solid var(--border);background:var(--surface2);border-radius:13px;padding:11px;min-height:76px}.stat b{display:block;margin-top:6px;font-size:13px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:5px}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
-.section{border-top:1px solid var(--border);padding:12px}.section h2{font-size:12px;margin:0 0 9px}.row{display:flex;gap:7px;flex-wrap:wrap}.btn{appearance:none;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 11px;font-weight:700;font-size:11px;cursor:pointer}.btn.primary{background:var(--text);color:Canvas;border-color:var(--text)}.btn.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));color:var(--bad)}.btn:disabled{opacity:.55;cursor:not-allowed}.field{display:flex;gap:7px}.field input{min-width:0;flex:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 10px;outline:none}.result{margin-top:9px;border:1px solid var(--border);background:color-mix(in srgb,var(--surface2) 75%,transparent);border-radius:11px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:230px;overflow:auto}.hidden{display:none}.full-only{display:none}.fullscreen .full-only{display:block}.fullscreen .grid{grid-template-columns:repeat(4,1fr)}.fullscreen .shell{max-width:980px}.customerActions{margin-top:8px}.busy{opacity:.7;pointer-events:none}.pip .grid,.pip .section{display:none}.pip #liveSection{display:block}.pip .card{border-radius:16px}.pip #liveResult{max-height:180px}
-@media(max-width:520px){body{padding:0}.card{border-radius:0;border-left:0;border-right:0}.grid{grid-template-columns:1fr 1fr}.fullscreen .grid{grid-template-columns:1fr 1fr}}
+*{box-sizing:border-box}html{height:100%;overflow:hidden}body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:10px 10px calc(110px + env(safe-area-inset-bottom))}.shell{max-width:760px;margin:0 auto;min-height:100%}.card{border:1px solid var(--border);background:var(--surface);border-radius:18px;overflow:hidden}.head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--border)}.mark{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--surface2);font-weight:800}.grow{flex:1}.title{font-weight:800}.sub{font-size:11px;color:var(--muted)}.pill{font-size:10px;font-weight:800;border:1px solid var(--border);border-radius:999px;padding:5px 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}.stat{border:1px solid var(--border);background:var(--surface2);border-radius:13px;padding:11px;min-height:76px}.stat b{display:block;margin-top:6px;font-size:13px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:5px}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.section{border-top:1px solid var(--border);padding:12px}.section h2{font-size:12px;margin:0 0 9px}.sectionLead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.sectionLead h2{margin:0}.miniState{font-size:9px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}.row{display:flex;gap:7px;flex-wrap:wrap}.opsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.opsGrid .btn{width:100%;padding:10px 7px}.btn{appearance:none;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 11px;font-weight:700;font-size:11px;cursor:pointer}.btn.primary{background:var(--text);color:Canvas;border-color:var(--text)}.btn.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));color:var(--bad)}.btn:disabled{opacity:.55;cursor:not-allowed}.field{display:flex;gap:7px}.field input{min-width:0;flex:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 10px;outline:none}.result{margin-top:9px;border:1px solid var(--border);background:color-mix(in srgb,var(--surface2) 75%,transparent);border-radius:11px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:230px;overflow:auto}.hidden{display:none}.full-only{display:none}.fullscreen .full-only{display:block}.fullscreen .grid{grid-template-columns:repeat(4,1fr)}.fullscreen .shell{max-width:980px}.fullscreen{padding-bottom:calc(150px + env(safe-area-inset-bottom))}.customerActions{margin-top:8px}.busy{opacity:.7;pointer-events:none}.pip .grid,.pip .section{display:none}.pip #liveSection{display:block}.pip .card{border-radius:16px}.pip #liveResult{max-height:180px}
+@media(max-width:520px){body{padding:0 0 calc(120px + env(safe-area-inset-bottom))}.card{border-radius:0;border-left:0;border-right:0}.grid{grid-template-columns:1fr 1fr}.fullscreen .grid{grid-template-columns:1fr 1fr}.opsGrid{grid-template-columns:repeat(3,minmax(0,1fr))}.opsGrid .btn{font-size:10px;padding:9px 5px}}
 </style>
 </head>
 <body>
@@ -30,8 +29,8 @@ body{padding:10px}.shell{max-width:760px;margin:0 auto}.card{border:1px solid va
    <div class="stat"><span class="sub">Billing Store</span><b id="bsState">—</b><span class="sub" id="bsDetail"></span></div>
   </div>
   <div class="section">
-   <h2>Prepare release branches</h2>
-   <div class="row">
+   <div class="sectionLead"><h2>Prepare release branches</h2><span class="miniState" id="releaseFreshness">Checking releases</span></div>
+   <div class="opsGrid">
     <button class="btn" data-call="prepare" data-target="base">Prepare Base</button>
     <button class="btn" data-call="prepare" data-target="engine">Prepare Engine</button>
     <button class="btn primary" data-call="prepare" data-target="both">Prepare Both</button>
@@ -39,6 +38,23 @@ body{padding:10px}.shell{max-width:760px;margin:0 auto}.card{border:1px solid va
    <div class="result hidden" id="prepareResult"></div>
   </div>
   <div class="section">
+   <div class="sectionLead"><h2>Licence Manager</h2><span class="miniState" id="lmDeployState">Checking</span></div>
+   <div class="opsGrid">
+    <button class="btn" data-deploy="license_manager:scan">Scan</button>
+    <button class="btn primary" data-deploy="license_manager:deploy">Deploy</button>
+    <button class="btn" data-deploy="license_manager:quick_deploy">Quick Deploy</button>
+   </div>
+  </div>
+  <div class="section">
+   <div class="sectionLead"><h2>Billing Store</h2><span class="miniState" id="bsDeployState">Checking</span></div>
+   <div class="opsGrid">
+    <button class="btn" data-deploy="billing_store:scan">Scan</button>
+    <button class="btn primary" data-deploy="billing_store:deploy">Deploy</button>
+    <button class="btn" data-deploy="billing_store:quick_deploy">Quick Deploy</button>
+   </div>
+   <div class="result hidden" id="serviceResult"></div>
+  </div>
+  <div class="section full-only">
    <h2>Customer / licence</h2>
    <div class="field"><input id="identity" type="email" placeholder="Customer email or ID"><button class="btn primary" id="lookup">Check</button></div>
    <div class="result hidden" id="licenseResult"></div>
@@ -71,18 +87,6 @@ body{padding:10px}.shell{max-width:760px;margin:0 auto}.card{border:1px solid va
    </div>
    <div class="result hidden" id="releaseResult"></div>
   </div>
-  <div class="section full-only">
-   <h2>Service operations</h2>
-   <div class="row">
-    <button class="btn" data-deploy="license_manager:scan">Scan Licence Manager</button>
-    <button class="btn" data-deploy="license_manager:deploy">Deploy Licence Manager</button>
-    <button class="btn" data-deploy="license_manager:quick_deploy">Quick Deploy Licence Manager</button>
-    <button class="btn" data-deploy="billing_store:scan">Scan Billing Store</button>
-    <button class="btn" data-deploy="billing_store:deploy">Deploy Billing Store</button>
-    <button class="btn" data-deploy="billing_store:quick_deploy">Quick Deploy Billing Store</button>
-   </div>
-   <div class="result hidden" id="serviceResult"></div>
-  </div>
   <div class="section hidden" id="liveSection">
    <h2>Live job</h2>
    <div class="result" id="liveResult">Waiting for workflow state…</div>
@@ -106,10 +110,15 @@ function unpack(result){return result?.structuredContent||result?.content?.find?
 function render(data){
  current=data||{};
  const base=data?.base||{},engine=data?.engine||{},lm=data?.licenseManager||{},bs=data?.billingStore||{};
- text("baseState",base.disabled?"Disabled":base.preparedCurrent?"Ready":"Changes available");text("baseDetail",base.disabled?"":(base.preparedCurrent?short(base.currentSha):(base.commitsAhead||0)+" commits ahead"));
- text("engineState",engine.disabled?"Disabled":engine.preparedCurrent?"Ready":"Changes available");text("engineDetail",engine.disabled?"":(engine.preparedCurrent?short(engine.currentSha):(engine.commitsAhead||0)+" commits ahead"));
- const lmHealth=lm?.health; text("lmState",lm?.disabled?"Disabled":lmHealth?.ok===false?"Issue":"Online");text("lmDetail",lm?.service?.productionCurrent?"Production current":short(lm?.service?.currentSha));
- text("bsState",bs?.disabled?"Disabled":bs?.ok===false?"Issue":bs?.productionCurrent?"Current":"Update pending");text("bsDetail",short(bs?.currentSha));
+ const baseAhead=Number(base.commitsAhead||0),engineAhead=Number(engine.commitsAhead||0);
+ text("baseState",base.disabled?"Disabled":base.preparedCurrent?"Release current":"Release behind");text("baseDetail",base.disabled?"":(base.preparedCurrent?short(base.releaseSha||base.currentSha):(baseAhead+" commit"+(baseAhead===1?"":"s")+" to prepare")));
+ text("engineState",engine.disabled?"Disabled":engine.preparedCurrent?"Update current":"Update behind");text("engineDetail",engine.disabled?"":(engine.preparedCurrent?short(engine.releaseSha||engine.currentSha):(engineAhead+" commit"+(engineAhead===1?"":"s")+" to prepare")));
+ const lmHealth=lm?.health,lmCurrent=Boolean(lm?.service?.productionCurrent),bsCurrent=Boolean(bs?.productionCurrent);
+ text("lmState",lm?.disabled?"Disabled":lmHealth?.ok===false?"Issue":lmCurrent?"Deploy current":"Deploy pending");text("lmDetail",lm?.disabled?"":short(lm?.service?.currentSha));
+ text("bsState",bs?.disabled?"Disabled":bs?.ok===false?"Issue":bsCurrent?"Deploy current":"Deploy pending");text("bsDetail",bs?.disabled?"":short(bs?.currentSha));
+ text("releaseFreshness",base.preparedCurrent&&engine.preparedCurrent?"Releases current":(baseAhead+engineAhead)+" commits to prepare");
+ text("lmDeployState",lm?.disabled?"Disabled":lmHealth?.ok===false?"Issue":lmCurrent?"Current":"Deploy pending");
+ text("bsDeployState",bs?.disabled?"Disabled":bs?.ok===false?"Issue":bsCurrent?"Current":"Deploy pending");
  const healthy=!base?.error&&!engine?.error&&lmHealth?.ok!==false&&bs?.ok!==false;text("overall",healthy?"Ready":"Check systems");
 }
 async function call(name,args={}){
@@ -127,13 +136,14 @@ async function call(name,args={}){
   return value;
  }finally{document.body.classList.remove("busy")}
 }
-document.querySelectorAll("[data-call=prepare]").forEach(btn=>btn.addEventListener("click",async()=>{try{showResult("prepareResult",await call("prepare",{target:btn.dataset.target}))}catch(e){showResult("prepareResult",{error:e.message})}}));
+async function refreshStatus(){try{const r=await call("status",{scope:"all"});render(r);return r}catch(e){return null}}
+document.querySelectorAll("[data-call=prepare]").forEach(btn=>btn.addEventListener("click",async()=>{try{showResult("prepareResult",await call("prepare",{target:btn.dataset.target}));await refreshStatus()}catch(e){showResult("prepareResult",{error:e.message})}}));
 $("lookup").addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return;try{const r=await call("license",{identity,view:"summary"});showResult("licenseResult",r);$("customerActions").classList.remove("hidden")}catch(e){showResult("licenseResult",{error:e.message})}});
 document.querySelectorAll("[data-license-action]").forEach(btn=>btn.addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return;try{const r=await call("license_change",{identity,action:btn.dataset.licenseAction});showResult("licenseResult",r)}catch(e){showResult("licenseResult",{error:e.message})}}));
-document.querySelectorAll("[data-deploy]").forEach(btn=>btn.addEventListener("click",async()=>{const [target,action]=btn.dataset.deploy.split(":");try{showResult("serviceResult",await call("deploy",{target,action}))}catch(e){showResult("serviceResult",{error:e.message})}}));
+document.querySelectorAll("[data-deploy]").forEach(btn=>btn.addEventListener("click",async()=>{const [target,action]=btn.dataset.deploy.split(":");try{showResult("serviceResult",await call("deploy",{target,action}));await refreshStatus()}catch(e){showResult("serviceResult",{error:e.message})}}));
 document.querySelectorAll("[data-update-action]").forEach(btn=>btn.addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return showResult("updateResult",{error:"Enter a customer email or ID above first."});try{showResult("updateResult",await call("update",{identity,action:btn.dataset.updateAction}))}catch(e){showResult("updateResult",{error:e.message})}}));
 document.querySelectorAll("[data-release-action]").forEach(btn=>btn.addEventListener("click",async()=>{const release_id=$("releaseId").value.trim();if(!release_id)return showResult("releaseResult",{error:"Enter a release ID first."});try{showResult("releaseResult",await call("release",{release_id,action:btn.dataset.releaseAction}))}catch(e){showResult("releaseResult",{error:e.message})}}));
-$("refresh").addEventListener("click",async()=>{try{const r=await call("status",{scope:"all"});render(r)}catch(e){showResult("prepareResult",{error:e.message})}});
+$("refresh").addEventListener("click",async()=>{const r=await refreshStatus();if(!r)showResult("prepareResult",{error:"Status refresh failed"})});
 $("fullscreen").addEventListener("click",async()=>{if(window.openai?.requestDisplayMode)await window.openai.requestDisplayMode({mode:"fullscreen"})});
 async function refreshLive(){
  if(!lastRun?.id||!lastRunTarget||!window.openai?.callTool)return;
