@@ -9,7 +9,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
 <style>
 :root{color-scheme:light dark;--bg:transparent;--surface:color-mix(in srgb,Canvas 94%,CanvasText 6%);--surface2:color-mix(in srgb,Canvas 88%,CanvasText 12%);--border:color-mix(in srgb,CanvasText 18%,transparent);--text:CanvasText;--muted:color-mix(in srgb,CanvasText 58%,transparent);--good:#22a06b;--info:#3b82f6;--ready:#f59e0b;--bad:#ef476f}
 *{box-sizing:border-box}html{height:100%;overflow:hidden}body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:10px 10px calc(110px + env(safe-area-inset-bottom))}.shell{max-width:760px;margin:0 auto;min-height:100%}.card{border:1px solid var(--border);background:var(--surface);border-radius:18px;overflow:hidden}.head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--border)}.mark{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--surface2);font-weight:800}.grow{flex:1}.title{font-weight:800}.sub{font-size:11px;color:var(--muted)}.pill{font-size:10px;font-weight:800;border:1px solid var(--border);border-radius:999px;padding:5px 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}.stat{border:1px solid var(--border);background:var(--surface2);border-radius:13px;padding:11px;min-height:82px;transition:border-color .18s,background .18s,box-shadow .18s}.stat b{display:block;margin-top:6px;font-size:13px}.stat.state-red{border-color:color-mix(in srgb,var(--bad) 58%,var(--border));background:color-mix(in srgb,var(--bad) 10%,var(--surface2));box-shadow:inset 3px 0 0 var(--bad)}.stat.state-blue{border-color:color-mix(in srgb,var(--info) 58%,var(--border));background:color-mix(in srgb,var(--info) 10%,var(--surface2));box-shadow:inset 3px 0 0 var(--info)}.stat.state-orange{border-color:color-mix(in srgb,var(--ready) 58%,var(--border));background:color-mix(in srgb,var(--ready) 10%,var(--surface2));box-shadow:inset 3px 0 0 var(--ready)}.stat.state-green{border-color:color-mix(in srgb,var(--good) 58%,var(--border));background:color-mix(in srgb,var(--good) 10%,var(--surface2));box-shadow:inset 3px 0 0 var(--good)}.miniState.state-red{color:var(--bad)}.miniState.state-blue{color:var(--info)}.miniState.state-orange{color:var(--ready)}.miniState.state-green{color:var(--good)}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:5px}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
-.legend{display:flex;gap:10px;flex-wrap:wrap;padding:0 12px 10px;font-size:9px;color:var(--muted);font-weight:700}.legend span{display:flex;align-items:center;gap:5px}.legend i{width:7px;height:7px;border-radius:50%;display:inline-block}.legend .red{background:var(--bad)}.legend .blue{background:var(--info)}.legend .orange{background:var(--ready)}.legend .green{background:var(--good)}.section{border-top:1px solid var(--border);padding:12px}.section h2{font-size:12px;margin:0 0 9px}.sectionLead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.sectionLead h2{margin:0}.miniState{font-size:9px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}.row{display:flex;gap:7px;flex-wrap:wrap}.opsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.opsGrid .btn{width:100%;padding:10px 7px}.btn{appearance:none;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 11px;font-weight:700;font-size:11px;cursor:pointer}.btn.primary{background:var(--text);color:Canvas;border-color:var(--text)}.btn.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));color:var(--bad)}.btn:disabled{opacity:.55;cursor:not-allowed}.field{display:flex;gap:7px}.field input{min-width:0;flex:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 10px;outline:none}.result{margin-top:9px;border:1px solid var(--border);background:color-mix(in srgb,var(--surface2) 75%,transparent);border-radius:11px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:230px;overflow:auto}.hidden{display:none}.full-only{display:none}.fullscreen .full-only{display:block}.fullscreen .grid{grid-template-columns:repeat(4,1fr)}.fullscreen .shell{max-width:980px}.fullscreen{padding-bottom:calc(150px + env(safe-area-inset-bottom))}.customerActions{margin-top:8px}.busy{opacity:.7;pointer-events:none}.pip .grid,.pip .section{display:none}.pip #liveSection{display:block}.pip .card{border-radius:16px}.pip #liveResult{max-height:180px}.pageNav{display:flex;gap:6px;padding:9px 10px;border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 96%,transparent);backdrop-filter:blur(12px)}.pageNav::-webkit-scrollbar{display:none}.pageNav .btn{flex:0 0 auto;white-space:nowrap}.pageNav .btn.active{background:var(--text);color:Canvas;border-color:var(--text)}.pageHidden{display:none!important}.refreshMeta{padding:0 12px 10px;font-size:10px;color:var(--muted);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.statusPulse{display:inline-flex;align-items:center;gap:5px}.statusPulse i{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block}.statusPulse.busy i{background:var(--ready)}
+.legend{display:flex;gap:10px;flex-wrap:wrap;padding:0 12px 10px;font-size:9px;color:var(--muted);font-weight:700}.legend span{display:flex;align-items:center;gap:5px}.legend i{width:7px;height:7px;border-radius:50%;display:inline-block}.legend .red{background:var(--bad)}.legend .blue{background:var(--info)}.legend .orange{background:var(--ready)}.legend .green{background:var(--good)}.section{border-top:1px solid var(--border);padding:12px}.section h2{font-size:12px;margin:0 0 9px}.sectionLead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.sectionLead h2{margin:0}.miniState{font-size:9px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}.row{display:flex;gap:7px;flex-wrap:wrap}.opsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.opsGrid .btn{width:100%;padding:10px 7px}.btn{appearance:none;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 11px;font-weight:700;font-size:11px;cursor:pointer}.btn.primary{background:var(--text);color:Canvas;border-color:var(--text)}.btn.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));color:var(--bad)}.btn:disabled{opacity:.55;cursor:not-allowed}.field{display:flex;gap:7px}.field input{min-width:0;flex:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 10px;outline:none}.result{margin-top:9px;border:1px solid var(--border);background:color-mix(in srgb,var(--surface2) 75%,transparent);border-radius:11px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:230px;overflow:auto}.hidden{display:none}.full-only{display:block}.fullscreen .full-only{display:block}.fullscreen .grid{grid-template-columns:repeat(4,1fr)}.fullscreen .shell{max-width:980px}.fullscreen{padding-bottom:calc(150px + env(safe-area-inset-bottom))}.customerActions{margin-top:8px}.busy{opacity:.7;pointer-events:none}.pip .grid,.pip .section{display:none}.pip #liveSection{display:block}.pip .card{border-radius:16px}.pip #liveResult{max-height:180px}.pageNav{display:flex;gap:6px;padding:9px 10px;border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 96%,transparent);backdrop-filter:blur(12px)}.pageNav::-webkit-scrollbar{display:none}.pageNav .btn{flex:0 0 auto;white-space:nowrap}.pageNav .btn.active{background:var(--text);color:Canvas;border-color:var(--text)}.pageHidden{display:none!important}.refreshMeta{padding:0 12px 10px;font-size:10px;color:var(--muted);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.statusPulse{display:inline-flex;align-items:center;gap:5px}.statusPulse i{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block}.statusPulse.busy i{background:var(--ready)}
 @media(max-width:520px){body{padding:0 0 calc(120px + env(safe-area-inset-bottom))}.card{border-radius:0;border-left:0;border-right:0}.grid{grid-template-columns:1fr 1fr}.fullscreen .grid{grid-template-columns:1fr 1fr}.opsGrid{grid-template-columns:repeat(3,minmax(0,1fr))}.opsGrid .btn{font-size:10px;padding:9px 5px}}
 </style>
 </head>
@@ -23,7 +23,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
    <span class="pill" id="overall">Loading</span>
    <button class="btn" id="closePanel" aria-label="Close Dev Panel">Close</button>
   </div>
-  <nav class="pageNav" id="pageNav"><button class="btn active" data-page-btn="overview">Overview</button><button class="btn" data-page-btn="releases">Releases</button><button class="btn" data-page-btn="services">Services</button><button class="btn full-only" data-page-btn="customers">Customers</button><button class="btn full-only" data-page-btn="logs">Logs</button></nav>
+  <nav class="pageNav" id="pageNav"><button class="btn active" data-page-btn="overview">Overview</button><button class="btn" data-page-btn="releases">Releases</button><button class="btn" data-page-btn="services">Services</button><button class="btn" data-page-btn="customers">Customers</button><button class="btn" data-page-btn="logs">Logs</button></nav>
   <div class="refreshMeta"><span class="statusPulse" id="statusPulse"><i></i><span id="refreshState">Live status</span></span><span id="lastChecked">Not refreshed yet</span></div>
   <div class="grid" data-page="overview">
    <div class="stat" id="baseCard"><span class="sub">Base release</span><b id="baseState">—</b><span class="sub" id="baseDetail"></span></div>
@@ -59,7 +59,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
    </div>
    <div class="result hidden" id="bsServiceResult"></div>
   </div>
-  <div class="section full-only" data-page="customers">
+  <div class="section" data-page="customers">
    <h2>Customer / licence</h2>
    <div class="field"><input id="identity" type="email" placeholder="Customer email or ID"><button class="btn primary" id="lookup">Check</button></div>
    <div class="result hidden" id="licenseResult"></div>
@@ -72,7 +72,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
     <button class="btn" data-license-action="link">Auto-link</button>
    </div>
   </div>
-  <div class="section full-only" data-page="customers">
+  <div class="section" data-page="customers">
    <h2>Customer update</h2>
    <div class="sub">Uses the customer identity above and resolves the linked installation through Billing Store.</div>
    <div class="row" style="margin-top:8px">
@@ -82,7 +82,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
    </div>
    <div class="result hidden" id="updateResult"></div>
   </div>
-  <div class="section full-only" data-page="releases">
+  <div class="section" data-page="releases">
    <h2>Release management</h2>
    <div class="field"><input id="releaseId" placeholder="Release ID"><button class="btn" data-release-action="get">Open</button></div>
    <div class="row" style="margin-top:8px">
@@ -92,9 +92,15 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
    </div>
    <div class="result hidden" id="releaseResult"></div>
   </div>
-  <div class="section hidden" id="liveSection" data-page="logs">
-   <h2>Live job</h2>
-   <div class="result" id="liveResult">Waiting for workflow state…</div>
+  <div class="section" id="liveSection" data-page="logs">
+   <div class="sectionLead"><h2>Workflow logs</h2><span class="miniState">Latest or active run</span></div>
+   <div class="opsGrid">
+    <button class="btn" data-log-target="base">Base</button>
+    <button class="btn" data-log-target="engine">Engine</button>
+    <button class="btn" data-log-target="license_manager">Licence Manager</button>
+   </div>
+   <div class="row" style="margin-top:7px"><button class="btn" data-log-target="billing_store">Billing Store</button></div>
+   <div class="result" id="liveResult">Choose a service to load its latest workflow, or run an action and the active workflow will appear here automatically.</div>
   </div>
   <div class="section">
    <div class="row">
@@ -131,7 +137,7 @@ function render(data){
  text("engineDetail",engine.disabled?"":(engine.preparedCurrent?("release "+short(engine.preparedSha)):enginePrepareFailed?"Last prepare workflow failed":(engineAhead+" commit"+(engineAhead===1?"":"s")+" ahead")));
  stateClass("baseCard",baseColor);stateClass("engineCard",engineColor);
 
- const lmService=lm?.service||{},lmHealth=lm?.health,lmLocked=Boolean(lm?.lockdown?.locked),lmCurrent=Boolean(lmService.productionCurrent),bsCurrent=Boolean(bs?.productionCurrent);
+ const lmService=lm?.service||{},lmHealth=lm?.health,lmLockKnown=lm?.lockdown?.ok===true,lmLocked=lmLockKnown&&lm?.lockdown?.locked===true,lmLockUnavailable=lm?.lockdown?.ok===false,lmCurrent=Boolean(lmService.productionCurrent),bsCurrent=Boolean(bs?.productionCurrent);
  const lmAttempt=newestRun(lmService.latestDeploy,lmService.latestQuickDeploy),bsAttempt=newestRun(bs?.latestDeploy,bs?.latestQuickDeploy);
  const lmFailed=lmAttempt?.status==="completed"&&lmAttempt?.conclusion==="failure";
  const bsFailed=bsAttempt?.status==="completed"&&bsAttempt?.conclusion==="failure";
@@ -139,7 +145,7 @@ function render(data){
  const lmColor=lm?.disabled?null:lmLocked?"red":lmFailed?"red":lmCurrent?"green":"blue";
  const bsColor=bs?.disabled?null:bsFailed?"red":bsCurrent?"green":"blue";
  text("lmState",lm?.disabled?"Disabled":lmLocked?"LOCKED DOWN":lmFailed?"Deploy failed":lmCurrent?"Latest deployed":"Update available");
- text("lmDetail",lm?.disabled?"":lmLocked?(lm?.lockdown?.message||"Emergency authority lockdown active"):(lmFailed?("failed "+short(lmAttempt?.head_sha)):("main "+short(lmMain)+" · prod "+short(lmProd))));
+ text("lmDetail",lm?.disabled?"":lmLocked?(lm?.lockdown?.message||"Emergency authority lockdown active"):(lmFailed?("failed "+short(lmAttempt?.head_sha)):("main "+short(lmMain)+" · prod "+short(lmProd)+(lmLockUnavailable?" · lockdown check unavailable":""))));
  text("bsState",bs?.disabled?"Disabled":bsFailed?"Deploy failed":bsCurrent?"Latest deployed":"Update available");
  text("bsDetail",bs?.disabled?"":(bsFailed?("failed "+short(bsAttempt?.head_sha)):("main "+short(bsMain)+" · prod "+short(bsProd))));
  stateClass("lmCard",lmColor);stateClass("bsCard",bsColor);
@@ -148,7 +154,7 @@ function render(data){
  const releaseFailed=basePrepareFailed||enginePrepareFailed;
  text("releaseFreshness",releaseFailed?"Prepare failed":releasesReady?"Ready to package":(baseAhead+engineAhead)+" commits to prepare");
  stateClass("releaseFreshness",releaseFailed?"red":releasesReady?"orange":"blue");
- text("lmDeployState",lm?.disabled?"Disabled":lmLocked?"LOCKED":lmFailed?"Failed":lmCurrent?"Latest":"Update available");stateClass("lmDeployState",lmColor);
+ text("lmDeployState",lm?.disabled?"Disabled":lmLocked?"LOCKED":lmFailed?"Failed":lmCurrent?(lmLockUnavailable?"Latest · check unavailable":"Latest"):"Update available");stateClass("lmDeployState",lmColor);
  text("bsDeployState",bs?.disabled?"Disabled":bsFailed?"Failed":bsCurrent?"Latest":"Update available");stateClass("bsDeployState",bsColor);
  const anyFailure=basePrepareFailed||enginePrepareFailed||lmLocked||lmFailed||bsFailed;
  const anyAction=!base.preparedCurrent||!engine.preparedCurrent||!lmCurrent||!bsCurrent;
@@ -179,6 +185,7 @@ document.querySelectorAll("[data-update-action]").forEach(btn=>btn.addEventListe
 document.querySelectorAll("[data-release-action]").forEach(btn=>btn.addEventListener("click",async()=>{const release_id=$("releaseId").value.trim();if(!release_id)return showResult("releaseResult",{error:"Enter a release ID first."});try{showResult("releaseResult",await call("release",{release_id,action:btn.dataset.releaseAction}))}catch(e){showResult("releaseResult",{error:e.message})}}));
 $("refresh").addEventListener("click",async()=>{const r=await refreshStatus();if(!r)showResult("prepareResult",{error:"Status refresh failed"})});
 document.querySelectorAll("[data-page-btn]").forEach(btn=>btn.addEventListener("click",()=>showPage(btn.dataset.pageBtn)));
+document.querySelectorAll("[data-log-target]").forEach(btn=>btn.addEventListener("click",async()=>{try{lastRunTarget=btn.dataset.logTarget;const value=await call("logs",{target:lastRunTarget});const run=value?.run||{},jobs=value?.jobs||[];if(run?.id)lastRun=run;const lines=[lastRunTarget+" · run #"+(run.run_number||run.id||"latest")+" · "+(run.status||"unknown")+(run.conclusion?" / "+run.conclusion:"")];for(const job of jobs)lines.push((job.conclusion==="success"?"✓":job.conclusion==="failure"?"✕":"…")+" "+job.name+" · "+job.status+(job.conclusion?" / "+job.conclusion:""));$("liveResult").textContent=lines.join("\n");if(run?.status!=="completed"&&run?.id)startLive();}catch(e){$("liveResult").textContent="Workflow read failed: "+e.message}}));
 $("fullscreen").addEventListener("click",async()=>{if(window.openai?.requestDisplayMode)await window.openai.requestDisplayMode({mode:"fullscreen"})});
 $("closePanel").addEventListener("click",async()=>{try{if(window.openai?.requestClose){await window.openai.requestClose();return}if(window.openai?.requestDisplayMode&&window.openai?.displayMode!=="inline"){await window.openai.requestDisplayMode({mode:"inline"});return}}catch{}$("card").classList.add("hidden")});
 async function refreshLive(){
