@@ -40,8 +40,15 @@ const scopesByTool:Record<string,string[]>={
  license_change:["dev.write","authority.write"]
 };
 
+function toolEnabled(settings:any,name:string){
+ if(settings?.["tool_"+name]===false)return false;
+ if(name==="show_dev"&&settings?.ui_enabled===false)return false;
+ return true;
+}
+function visibleTools(settings:any){return tools.filter(tool=>toolEnabled(settings,tool.name))}
 async function callTool(name:string,args:any,auth:any){
  const settings=await getMcpSettings();if(settings.enabled===false)throw new Error("Dev MCP is disabled");
+ if(!toolEnabled(settings,name))throw new Error(name+" tool is disabled");
  const required=scopesByTool[name]||["dev.read"];if(required.some(scope=>!auth.scopes.includes(scope)))return authToolError(required);
  if(name==="show_dev")return toolResult(await systemOverview(),"Dev Panel ready.");
  if(name==="status"){
@@ -70,17 +77,19 @@ async function handlePost(request:Request){
  if(body.method==="initialize")return rpc(id,{protocolVersion:"2025-11-25",capabilities:{tools:{listChanged:false},resources:{subscribe:false,listChanged:false}},serverInfo:{name:"private-dev-panel",title:"Private Dev Panel",version:"1.0.0"},instructions:"Private owner-only developer controls. Use show_dev when the user asks to open the Dev Panel. Use prepare for base/engine release branch preparation. Customer licence commands should accept email identities when possible."});
  if(body.method==="notifications/initialized"||body.method==="notifications/cancelled")return new Response(null,{status:202,headers:cors()});
  if(body.method==="ping")return rpc(id,{});
- if(body.method==="tools/list")return rpc(id,{tools});
+ if(body.method==="tools/list"){const settings=await getMcpSettings();return rpc(id,{tools:visibleTools(settings)});}
  if(body.method==="tools/call"){
   try{return rpc(id,await callTool(String(body.params?.name||""),body.params?.arguments||{},auth))}
   catch(error:any){const extra=error?.matches||error?.installations?{matches:error?.matches,installations:error?.installations}:undefined;return rpc(id,{content:[{type:"text",text:error instanceof Error?error.message:"Tool failed"}],structuredContent:extra?{error:error?.message||"Tool failed",...extra}:{error:error?.message||"Tool failed"},isError:true})}
  }
  if(body.method==="resources/list"){
-  const resource=devPanelUiResource();return rpc(id,{resources:[{uri:resource.uri,name:resource.name,description:resource.description,mimeType:resource.mimeType}]});
+  const settings=await getMcpSettings();if(settings.ui_enabled===false)return rpc(id,{resources:[]});
+  const resource=devPanelUiResource(settings);return rpc(id,{resources:[{uri:resource.uri,name:resource.name,description:resource.description,mimeType:resource.mimeType}]});
  }
  if(body.method==="resources/read"){
-  const uri=String(body.params?.uri||"");if(uri!==DEV_PANEL_UI_URI)return rpcError(id,-32002,"Resource not found");
-  return rpc(id,{contents:[devPanelUiResource()]});
+  const settings=await getMcpSettings(),uri=String(body.params?.uri||"");
+  if(settings.ui_enabled===false||uri!==DEV_PANEL_UI_URI)return rpcError(id,-32002,"Resource not found");
+  return rpc(id,{contents:[devPanelUiResource(settings)]});
  }
  return rpcError(id,-32601,"Method not found");
 }
@@ -90,7 +99,8 @@ export const Route=createFileRoute("/devmcp")({server:{handlers:{
  GET:async({request})=>{
   if(!originAllowed(request))return Response.json({ok:false,error:"ORIGIN_NOT_ALLOWED"},{status:403});
   const auth=await authenticateMcpOAuth(request);if(!auth||auth.valid!==true)return new Response(JSON.stringify({ok:false,error:"OAUTH_REQUIRED"}),{status:401,headers:{"content-type":"application/json","www-authenticate":oauthChallenge(["dev.read"]),"cache-control":"no-store"}});
-  return Response.json({ok:true,service:"private-dev-panel",endpoint:"/devmcp",transport:"streamable-http",authentication:"oauth2.1",ownerOnly:true,ui:DEV_PANEL_UI_URI},{headers:{"cache-control":"no-store"}});
+  const settings=await getMcpSettings();
+  return Response.json({ok:true,service:"private-dev-panel",endpoint:"/devmcp",transport:"streamable-http",authentication:"oauth2.1",ownerOnly:true,ui:settings.ui_enabled===false?null:DEV_PANEL_UI_URI,tools:visibleTools(settings).map((x:any)=>x.name)},{headers:{"cache-control":"no-store"}});
  },
  POST:async({request})=>handlePost(request),
  DELETE:async()=>new Response(null,{status:204,headers:cors()})
