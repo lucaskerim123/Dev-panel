@@ -449,6 +449,18 @@ ${base?"Base deployment compatibility is validated by the Base worker.":`Minimum
 ${String(input.notes||"").trim()||"No additional operator notes."}
 `;
 }
+async function latestPublishedReleaseVersion(target:ReleaseTarget,channel:string){
+ const type=target==="base"?"base":"update";
+ const result=await licenseManagerRequest("/releases?product=orbitfs_base&type="+type+"&channel="+encodeURIComponent(channel)+"&include_archived=false").catch(()=>({releases:[]}));
+ const rows=(Array.isArray(result?.releases)?result.releases:[])
+  .filter((row:any)=>String(row?.status||"").toLowerCase()==="published"&&String(row?.review_status||"").toLowerCase()==="approved"&&!row?.archived_at)
+  .sort((a:any,b:any)=>{
+   const versionCompare=compareVersions(String(b?.version||""),String(a?.version||""));
+   if(versionCompare!==0)return versionCompare;
+   return new Date(b?.published_at||b?.created_at||0).getTime()-new Date(a?.published_at||a?.created_at||0).getTime();
+  });
+ return rows[0]||null;
+}
 export async function releaseBuildCommand(input:{action:string;target:ReleaseTarget;channel?:string;version?:string;minimum_base_version?:string;protocol?:string;notes?:string},actor?:any){
  const target=input.target;
  await assertTargetEnabled(target);
@@ -457,14 +469,18 @@ export async function releaseBuildCommand(input:{action:string;target:ReleaseTar
  const branch=await releaseBranchState(target);
  const type=target==="base"?"base":"engine";
  if(action==="status"){
+  const [published,latestBase]=await Promise.all([
+   latestPublishedReleaseVersion(target,channel),
+   target==="engine"?latestPublishedReleaseVersion("base",channel):Promise.resolve(null)
+  ]);
   let inspection:any=null;
   if(branch.preparedCurrent)inspection=await inspectSourceCore({type,channel});
-  const currentVersion=inspection?.baseline?.version||null;
+  const currentVersion=inspection?.baseline?.version||published?.version||null;
   const suggestedVersion=inspection?.initialUpdate
    ?String(inspection?.baseline?.initialReleaseVersion||"1.0.0")
    :inspection?.initialRelease?"1.0.0":nextPatchVersion(currentVersion);
   const migrations=branch.preparedCurrent&&inspection?await releaseDatabaseInspection(target,inspection):null;
-  return {ok:true,target,channel,preparedCurrent:branch.preparedCurrent,commitsAhead:branch.commitsAhead,currentVersion,suggestedVersion,sourceSha:inspection?.head||branch.preparedSha||null,components:inspection?.detectedComponents||[],minimumBaseVersion:target==="engine"?(inspection?.baseBaseline?.version||null):null,database:migrations,message:branch.preparedCurrent?(target==="base"?"Base":"Update")+" release source is ready. Suggested version v"+suggestedVersion+".":"Prepare "+(target==="base"?"Base":"Engine")+" source first; "+branch.commitsAhead+" commit"+(branch.commitsAhead===1?" is":"s are")+" still ahead."};
+  return {ok:true,target,channel,preparedCurrent:branch.preparedCurrent,commitsAhead:branch.commitsAhead,currentVersion,suggestedVersion,sourceSha:inspection?.head||branch.preparedSha||null,components:inspection?.detectedComponents||[],minimumBaseVersion:target==="engine"?(inspection?.baseBaseline?.version||latestBase?.version||null):null,database:migrations,message:branch.preparedCurrent?(target==="base"?"Base":"Update")+" release source is ready. Suggested version v"+suggestedVersion+".":"Prepare "+(target==="base"?"Base":"Engine")+" source first; "+branch.commitsAhead+" commit"+(branch.commitsAhead===1?" is":"s are")+" still ahead."};
  }
  if(!branch.preparedCurrent)throw new Error("Prepare "+(target==="base"?"Base":"Engine")+" source before "+action+". The release branch is "+branch.commitsAhead+" commit"+(branch.commitsAhead===1?"":"s")+" behind main.");
  const inspection=await inspectSourceCore({type,channel});
