@@ -125,15 +125,15 @@ function render(data){
  text("engineDetail",engine.disabled?"":(engine.preparedCurrent?("release "+short(engine.preparedSha)):enginePrepareFailed?"Last prepare workflow failed":(engineAhead+" commit"+(engineAhead===1?"":"s")+" ahead")));
  stateClass("baseCard",baseColor);stateClass("engineCard",engineColor);
 
- const lmService=lm?.service||{},lmHealth=lm?.health,lmCurrent=Boolean(lmService.productionCurrent),bsCurrent=Boolean(bs?.productionCurrent);
+ const lmService=lm?.service||{},lmHealth=lm?.health,lmLocked=Boolean(lm?.lockdown?.locked),lmCurrent=Boolean(lmService.productionCurrent),bsCurrent=Boolean(bs?.productionCurrent);
  const lmAttempt=newestRun(lmService.latestDeploy,lmService.latestQuickDeploy),bsAttempt=newestRun(bs?.latestDeploy,bs?.latestQuickDeploy);
  const lmFailed=lmAttempt?.status==="completed"&&lmAttempt?.conclusion==="failure";
  const bsFailed=bsAttempt?.status==="completed"&&bsAttempt?.conclusion==="failure";
  const lmMain=lmService.currentSha,lmProd=lmService.lastSuccessful?.head_sha,bsMain=bs?.currentSha,bsProd=bs?.lastSuccessful?.head_sha;
- const lmColor=lm?.disabled?null:lmFailed?"red":lmCurrent?"green":"blue";
+ const lmColor=lm?.disabled?null:lmLocked?"red":lmFailed?"red":lmCurrent?"green":"blue";
  const bsColor=bs?.disabled?null:bsFailed?"red":bsCurrent?"green":"blue";
- text("lmState",lm?.disabled?"Disabled":lmFailed?"Deploy failed":lmCurrent?"Latest deployed":"Update available");
- text("lmDetail",lm?.disabled?"":(lmFailed?("failed "+short(lmAttempt?.head_sha)):("main "+short(lmMain)+" · prod "+short(lmProd))));
+ text("lmState",lm?.disabled?"Disabled":lmLocked?"LOCKED DOWN":lmFailed?"Deploy failed":lmCurrent?"Latest deployed":"Update available");
+ text("lmDetail",lm?.disabled?"":lmLocked?(lm?.lockdown?.message||"Emergency authority lockdown active"):(lmFailed?("failed "+short(lmAttempt?.head_sha)):("main "+short(lmMain)+" · prod "+short(lmProd))));
  text("bsState",bs?.disabled?"Disabled":bsFailed?"Deploy failed":bsCurrent?"Latest deployed":"Update available");
  text("bsDetail",bs?.disabled?"":(bsFailed?("failed "+short(bsAttempt?.head_sha)):("main "+short(bsMain)+" · prod "+short(bsProd))));
  stateClass("lmCard",lmColor);stateClass("bsCard",bsColor);
@@ -142,9 +142,9 @@ function render(data){
  const releaseFailed=basePrepareFailed||enginePrepareFailed;
  text("releaseFreshness",releaseFailed?"Prepare failed":releasesReady?"Ready to package":(baseAhead+engineAhead)+" commits to prepare");
  stateClass("releaseFreshness",releaseFailed?"red":releasesReady?"orange":"blue");
- text("lmDeployState",lm?.disabled?"Disabled":lmFailed?"Failed":lmCurrent?"Latest":"Update available");stateClass("lmDeployState",lmColor);
+ text("lmDeployState",lm?.disabled?"Disabled":lmLocked?"LOCKED":lmFailed?"Failed":lmCurrent?"Latest":"Update available");stateClass("lmDeployState",lmColor);
  text("bsDeployState",bs?.disabled?"Disabled":bsFailed?"Failed":bsCurrent?"Latest":"Update available");stateClass("bsDeployState",bsColor);
- const anyFailure=basePrepareFailed||enginePrepareFailed||lmFailed||bsFailed;
+ const anyFailure=basePrepareFailed||enginePrepareFailed||lmLocked||lmFailed||bsFailed;
  const anyAction=!base.preparedCurrent||!engine.preparedCurrent||!lmCurrent||!bsCurrent;
  text("overall",anyFailure?"Failure":anyAction?"Action needed":"Latest");stateClass("overall",anyFailure?"red":anyAction?"blue":"green");
 }
