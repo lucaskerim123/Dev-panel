@@ -17,7 +17,7 @@ const SERVICE_TARGETS={
 export const DEFAULT_MCP_SETTINGS={
  enabled:true,read_only_mode:false,allow_mutations:true,
  expose_base:true,expose_engine:true,expose_license_manager:true,expose_billing_store:true,
- tool_show_dev:true,tool_status:true,tool_prepare:true,tool_engine:true,tool_deploy:true,tool_release:true,tool_update:true,tool_license:true,tool_license_change:true,tool_diagnose:true,tool_logs:true,
+ tool_show_dev:true,tool_status:true,tool_prepare:true,tool_deploy:true,tool_release:true,tool_update:true,tool_license:true,tool_license_change:true,tool_diagnose:true,tool_logs:true,
  allow_prepare:true,allow_service_scan:true,allow_service_deploy:true,allow_quick_deploy:true,allow_workflow_control:true,
  allow_release_review:true,allow_release_publish:true,allow_release_rollback:true,
  allow_update_apply:true,allow_update_rollback:true,
@@ -202,44 +202,6 @@ export async function licenseManagerRequest(path:string,init:RequestInit={}){
  if(!response.ok)throw Object.assign(new Error(body?.error||body?.message||body?.code||("License Manager returned HTTP "+response.status)),{status:response.status,body});
  return body;
 }
-export async function engineAuthorityState(){
- const settings=await getMcpSettings();
- if(settings.enabled===false)throw new Error("Dev MCP is disabled");
- if(settings.expose_engine===false)throw new Error("Engine tools are disabled");
- if(settings.expose_license_manager===false)throw new Error("License Manager tools are disabled");
- const result=await licenseManagerRequest("/authority-control");
- const authority=result?.settings||{};
- return {
-  running:authority.update_deployment_enabled!==false,
-  updateDeploymentEnabled:authority.update_deployment_enabled!==false,
-  deploymentEnabled:authority.deployment_enabled!==false,
-  systemEnabled:authority.system_enabled!==false,
-  licensingEnabled:authority.licensing_enabled!==false,
-  maintenanceMode:Boolean(authority.maintenance_mode),
-  releaseSystemEnabled:authority.release_system_enabled!==false,
-  authority
- };
-}
-export async function setEngineAuthority(action:"start"|"stop"){
- const settings=await assertMutation("engine");
- if(settings.expose_license_manager===false)throw new Error("License Manager tools are disabled");
- const enable=action==="start";
- const result=await licenseManagerRequest("/authority-control",{method:"PATCH",body:JSON.stringify({update_deployment_enabled:enable})});
- const authority=result?.settings||{};
- return {
-  ok:true,action,
-  running:authority.update_deployment_enabled!==false,
-  updateDeploymentEnabled:authority.update_deployment_enabled!==false,
-  authority,
-  message:enable?"Engine update/deployment authority started.":"Engine update/deployment authority stopped."
- };
-}
-export const getEngineAuthorityForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
- requireOwner(data.token);return engineAuthorityState();
-});
-export const setEngineAuthorityForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;action:"start"|"stop"}})=>{
- requireOwner(data.token);return setEngineAuthority(data.action);
-});
 function billingOrigin(){
  const configured=String(process.env.BILLING_STORE_URL||process.env.CUSTOMER_PORTAL_URL||"").trim();if(!configured)throw new Error("Billing Store URL is not configured");
  const u=new URL(configured);if(u.protocol!=="https:")throw new Error("Billing Store URL must use HTTPS");return u.origin;
