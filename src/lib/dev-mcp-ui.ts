@@ -151,22 +151,27 @@ function startLive(){void refreshLive();if(liveTimer)clearInterval(liveTimer);li
 $("pin").addEventListener("click",async()=>{if(window.openai?.requestDisplayMode)await window.openai.requestDisplayMode({mode:"pip"});startLive()});
 function applyMode(){const mode=window.openai?.displayMode;document.body.classList.toggle("fullscreen",mode==="fullscreen");document.body.classList.toggle("pip",mode==="pip");if(mode==="pip"&&lastRun&&!liveTimer)startLive()}
 window.addEventListener("openai:set_globals",()=>{applyMode();if(window.openai?.toolOutput)render(window.openai.toolOutput)});
+if(!MCP_UI_POLICY.fullscreen)$("fullscreen").classList.add("hidden");
+if(!MCP_UI_POLICY.pip)$("pin").classList.add("hidden");
 applyMode();render(current);
 </script>
 </body>
 </html>`;
 
-export function devPanelUiResource(){
+export function devPanelUiResource(settings:any={}){
  const origin=String(process.env.DEV_MCP_PUBLIC_ORIGIN||process.env.APP_URL||"https://dev.incendiarynetworks.cc").replace(/\/+$/,"");
+ const policy={fullscreen:settings.ui_fullscreen_enabled!==false,pip:settings.ui_pip_enabled!==false};
+ const modes=["inline",...(policy.fullscreen?["fullscreen"]:[]),...(policy.pip?["pip"]:[])];
+ const html=DEV_PANEL_UI_HTML.replace("<script>\nconst $=", "<script>\nconst MCP_UI_POLICY="+JSON.stringify(policy)+";\nconst $=");
  return {
   uri:DEV_PANEL_UI_URI,
   name:"Private Dev Panel",
   description:"Mobile-first private developer controls for Base, Engine, deployments and customer licensing.",
   mimeType:"text/html;profile=mcp-app",
-  text:DEV_PANEL_UI_HTML,
+  text:html,
   _meta:{
    ui:{prefersBorder:true,domain:origin,csp:{connectDomains:[origin],resourceDomains:[]}},
-   "openai/ui":{availableDisplayModes:["inline","fullscreen","pip"]},
+   "openai/ui":{availableDisplayModes:modes},
    "openai/widgetDescription":"Private Dev Panel controls for release preparation, deployments, updates and customer licence management."
   }
  };
