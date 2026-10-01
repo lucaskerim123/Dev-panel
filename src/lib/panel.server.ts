@@ -684,8 +684,7 @@ export const getReleaseLifecycleEvents=createServerFn({method:"POST"}).handler(a
  return {events:events||[]};
 });
 
-export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
- readSession(data.token);
+export async function inspectSourceCore(data:{type:"base"|"engine";channel?:string}){
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO,ref=data.type==="base"?BASE_REF:ENGINE_REF;
  const releaseType=data.type==="base"?"base":"update";
  const channel=normalizeChannel(data.channel||"stable");
@@ -750,6 +749,10 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
   baselineFileCount:diff.baselineFileCount,currentFileCount:diff.currentFileCount,
   compareMetadataFiles:diff.compareMetadataFiles,hasSourceChanges:diff.files.length>0,inspectedAt,publishedBaselineSha:from||null
  };
+}
+export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
+ readSession(data.token);
+ return inspectSourceCore(data);
 });
 
 export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{  readSession(data.token);  const product="orbitfs_base";  const releaseType=data.type==="base"?"base":"update";  const channel=normalizeChannel(data.channel);  const result=await licenseMaster(`/releases?product=${product}&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);  const release=(result?.releases||[]).find((r:any)=>String(r.version)===String(data.version)&&!r.archived_at);  return {release:release||null,product,releaseType,channel};});export const getReleaseRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId?:number}})=>{
@@ -908,8 +911,7 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  };
 });
 
-export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null}})=>{
- const actor=readSession(data.token);
+export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null},actor:any){
  const version=data.version.trim();
  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("Version must be valid SemVer, e.g. 1.2.3");
  if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Apex, MCP, or Studio).");
@@ -1117,6 +1119,10 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
    await sb.from("panel_release_drafts").update({last_run_id:runId,last_run_url:runUrl||null,status:"building",updated_at:new Date().toISOString()}).eq("id",draft.id);
  }
  return {ok:true,repo:workerRepo,ref:workerRef,sourceRepo:repo,sourceRef:ref,sourceSha:head,workflow,channel,runId:runId||null,draftId:draft.id,attemptNumber};
+}
+export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}&{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null}})=>{
+ const actor=readSession(data.token);
+ return startReleaseCore(data,actor);
 });
 
 
