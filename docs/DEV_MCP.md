@@ -113,10 +113,33 @@ If a licence is not linked, `license_change action=link` can auto-link a single 
 
 OAuth 2.1 + PKCE is owner-only and backed by the Dev Panel Owner account.
 
+Client registration:
+
+- CIMD is supported and preferred for current ChatGPT connections.
+- DCR remains available as a compatibility fallback and can be disabled independently.
+- CIMD client IDs are fetched only from the configured trusted host allowlist.
+- PKCE S256, owner-only authentication and MCP resource binding are fixed security requirements, not bypass switches.
+- Refresh-token issuance can be disabled from MCP Controls.
+- Registered/cached clients and active sessions can be inspected or revoked from MCP Controls.
+
 Scopes:
 
 - `dev.read`
 - `dev.write`
 - `authority.write`
+
+## MCP Controls
+
+The Dev Panel MCP Controls page now manages:
+
+- master enable/read-only/write gates;
+- Base, Engine, License Manager and Billing Store exposure;
+- every top-level MCP tool independently;
+- granular write permissions for prepare, service deploys, Quick Deploy, workflow control, releases, customer updates and licence changes;
+- embedded ChatGPT UI availability, fullscreen and PiP;
+- CIMD, DCR and refresh-token policy;
+- OAuth client/session visibility and revocation.
+
+These settings only gate the single private `/devmcp` path. They do not create local licence, release or deployment authority.
 
 The MCP remains structured: no generic shell, arbitrary SQL, arbitrary URL proxy, or secret reader.
