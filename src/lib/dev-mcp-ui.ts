@@ -44,6 +44,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
     <button class="btn primary" data-deploy="license_manager:deploy">Deploy</button>
     <button class="btn" data-deploy="license_manager:quick_deploy">Quick Deploy</button>
    </div>
+   <div class="result hidden" id="lmServiceResult"></div>
   </div>
   <div class="section">
    <div class="sectionLead"><h2>Billing Store</h2><span class="miniState" id="bsDeployState">Checking</span></div>
@@ -52,7 +53,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
     <button class="btn primary" data-deploy="billing_store:deploy">Deploy</button>
     <button class="btn" data-deploy="billing_store:quick_deploy">Quick Deploy</button>
    </div>
-   <div class="result hidden" id="serviceResult"></div>
+   <div class="result hidden" id="bsServiceResult"></div>
   </div>
   <div class="section full-only">
    <h2>Customer / licence</h2>
@@ -114,11 +115,12 @@ function render(data){
  text("baseState",base.disabled?"Disabled":base.preparedCurrent?"Release current":"Release behind");text("baseDetail",base.disabled?"":(base.preparedCurrent?short(base.releaseSha||base.currentSha):(baseAhead+" commit"+(baseAhead===1?"":"s")+" to prepare")));
  text("engineState",engine.disabled?"Disabled":engine.preparedCurrent?"Update current":"Update behind");text("engineDetail",engine.disabled?"":(engine.preparedCurrent?short(engine.releaseSha||engine.currentSha):(engineAhead+" commit"+(engineAhead===1?"":"s")+" to prepare")));
  const lmHealth=lm?.health,lmCurrent=Boolean(lm?.service?.productionCurrent),bsCurrent=Boolean(bs?.productionCurrent);
- text("lmState",lm?.disabled?"Disabled":lmHealth?.ok===false?"Issue":lmCurrent?"Deploy current":"Deploy pending");text("lmDetail",lm?.disabled?"":short(lm?.service?.currentSha));
- text("bsState",bs?.disabled?"Disabled":bs?.ok===false?"Issue":bsCurrent?"Deploy current":"Deploy pending");text("bsDetail",bs?.disabled?"":short(bs?.currentSha));
+ const lmMain=lm?.service?.currentSha,lmProd=lm?.service?.lastSuccessful?.head_sha,bsMain=bs?.currentSha,bsProd=bs?.lastSuccessful?.head_sha;
+ text("lmState",lm?.disabled?"Disabled":!lmCurrent?"Deploy pending":lmHealth?.ok===false?"Issue":"Deploy current");text("lmDetail",lm?.disabled?"":("main "+short(lmMain)+" · prod "+short(lmProd)));
+ text("bsState",bs?.disabled?"Disabled":!bsCurrent?"Deploy pending":bs?.ok===false?"Issue":"Deploy current");text("bsDetail",bs?.disabled?"":("main "+short(bsMain)+" · prod "+short(bsProd)));
  text("releaseFreshness",base.preparedCurrent&&engine.preparedCurrent?"Releases current":(baseAhead+engineAhead)+" commits to prepare");
- text("lmDeployState",lm?.disabled?"Disabled":lmHealth?.ok===false?"Issue":lmCurrent?"Current":"Deploy pending");
- text("bsDeployState",bs?.disabled?"Disabled":bs?.ok===false?"Issue":bsCurrent?"Current":"Deploy pending");
+ text("lmDeployState",lm?.disabled?"Disabled":!lmCurrent?"Deploy pending":lmHealth?.ok===false?"Issue":"Current");
+ text("bsDeployState",bs?.disabled?"Disabled":!bsCurrent?"Deploy pending":bs?.ok===false?"Issue":"Current");
  const healthy=!base?.error&&!engine?.error&&lmHealth?.ok!==false&&bs?.ok!==false;text("overall",healthy?"Ready":"Check systems");
 }
 async function call(name,args={}){
@@ -140,7 +142,7 @@ async function refreshStatus(){try{const r=await call("status",{scope:"all"});re
 document.querySelectorAll("[data-call=prepare]").forEach(btn=>btn.addEventListener("click",async()=>{try{showResult("prepareResult",await call("prepare",{target:btn.dataset.target}));await refreshStatus()}catch(e){showResult("prepareResult",{error:e.message})}}));
 $("lookup").addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return;try{const r=await call("license",{identity,view:"summary"});showResult("licenseResult",r);$("customerActions").classList.remove("hidden")}catch(e){showResult("licenseResult",{error:e.message})}});
 document.querySelectorAll("[data-license-action]").forEach(btn=>btn.addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return;try{const r=await call("license_change",{identity,action:btn.dataset.licenseAction});showResult("licenseResult",r)}catch(e){showResult("licenseResult",{error:e.message})}}));
-document.querySelectorAll("[data-deploy]").forEach(btn=>btn.addEventListener("click",async()=>{const [target,action]=btn.dataset.deploy.split(":");try{showResult("serviceResult",await call("deploy",{target,action}));await refreshStatus()}catch(e){showResult("serviceResult",{error:e.message})}}));
+document.querySelectorAll("[data-deploy]").forEach(btn=>btn.addEventListener("click",async()=>{const [target,action]=btn.dataset.deploy.split(":"),resultId=target==="license_manager"?"lmServiceResult":"bsServiceResult";try{showResult(resultId,await call("deploy",{target,action}));await refreshStatus()}catch(e){showResult(resultId,{error:e.message})}}));
 document.querySelectorAll("[data-update-action]").forEach(btn=>btn.addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return showResult("updateResult",{error:"Enter a customer email or ID above first."});try{showResult("updateResult",await call("update",{identity,action:btn.dataset.updateAction}))}catch(e){showResult("updateResult",{error:e.message})}}));
 document.querySelectorAll("[data-release-action]").forEach(btn=>btn.addEventListener("click",async()=>{const release_id=$("releaseId").value.trim();if(!release_id)return showResult("releaseResult",{error:"Enter a release ID first."});try{showResult("releaseResult",await call("release",{release_id,action:btn.dataset.releaseAction}))}catch(e){showResult("releaseResult",{error:e.message})}}));
 $("refresh").addEventListener("click",async()=>{const r=await refreshStatus();if(!r)showResult("prepareResult",{error:"Status refresh failed"})});
