@@ -209,6 +209,33 @@ async function createJob(actor:any,input:{action:string;target:string;sourceRef?
 }
 async function updateJob(id:string,patch:any){const settings=await getDevControlSettings();if(settings.storageReady===false)return;await sb().from("dev_control_jobs").update({...patch,updated_at:new Date().toISOString()}).eq("id",id)}
 
+export async function preparePrimaryReleaseSource(actor:any,target:"base"|"engine",confirm=false){
+ const settings=await getDevControlSettings();
+ const mcp=await getDevMcpSettings();
+ if(settings.enabled===false||settings.read_only_mode||settings.emergency_kill_switch)throw new Error("Dev Control mutations are blocked");
+ if(mcp.enabled===false||mcp.read_only_mode||mcp.allow_mutations===false)throw new Error("MCP mutations are blocked");
+ if(mcp.require_critical_confirmation&&!confirm)throw new Error("Explicit confirmation is required");
+ if(!settings.allowed_services.includes(target))throw new Error("Target is not allowed by Dev Control settings");
+ const cfg:any=targetConfig(target);
+ if(cfg.kind!=="release")throw new Error("Release source preparation is only valid for Base or Engine");
+ const current=await github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch));
+ const sourceSha=String(current?.object?.sha||"");
+ const job=await createJob(actor,{action:"prepare_release_source",target,sourceRef:cfg.branch,sourceSha,workflow:cfg.promotionWorkflow,detail:{repo:cfg.repo,label:cfg.label,releaseRef:cfg.releaseRef}});
+ await audit(actor,"job.requested",target,job.id,{action:"prepare_release_source",source_sha:sourceSha,workflow:cfg.promotionWorkflow});
+ try{
+  const startedAt=Date.now();
+  await github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.promotionWorkflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:cfg.branch,inputs:{confirmation:"PROMOTE"}})});
+  const run=await findRun(cfg,cfg.promotionWorkflow,startedAt);
+  await updateJob(job.id,{status:run?.status||"queued",external_run_id:run?.id||null,external_run_url:run?.html_url||null});
+  await audit(actor,"job.dispatched",target,job.id,{action:"prepare_release_source",run_id:run?.id||null});
+  return {ok:true,jobId:job.id,target,sourceSha,releaseRef:cfg.releaseRef,run,message:cfg.label+" release-source preparation queued."};
+ }catch(error:any){
+  await updateJob(job.id,{status:"failed",error:error?.message||"Dispatch failed",completed_at:new Date().toISOString()});
+  await audit(actor,"job.failed",target,job.id,{action:"prepare_release_source",error:error?.message||"Dispatch failed"});
+  throw error;
+ }
+}
+
 export async function runDevControlAction(actor:any,input:{action:DevControlAction;target:DevControlTarget;confirm?:boolean}){
  const settings=await getDevControlSettings();
  const envEnabled=String(process.env.DEV_CONTROL_ENABLED||"true").toLowerCase()!=="false";
