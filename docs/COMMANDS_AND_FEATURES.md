@@ -286,35 +286,25 @@ It should:
 
 ---
 
-## 7. Normal admin lockout message
+## 7. Existing customer/admin lockout display
 
-Normal customer or installation lockouts are different from the global emergency lockdown.
+Per-customer and per-installation lockout already exists in the Licence Manager and is separate from the global emergency lockdown.
 
-When an admin intentionally locks or suspends an individual licence/installation, the admin should be able to provide a **custom customer-facing lock message**.
+Dev Control does **not** need to invent a second lockout system. It should expose and display the existing authoritative lock state clearly.
 
-### Applies to
+### Dev Control should show
 
-- `suspend_license`
-- `lock_installation`
+- Whether the licence/installation is locked.
+- What was locked.
+- Why it was locked.
+- The existing admin/customer-facing lock message.
+- Any existing internal reason/status metadata that the caller is authorised to view.
+- When the lock was applied.
+- Current authoritative lock/suspension state.
 
-### Features
+The customer website/application should continue using the existing Licence Manager lockout behaviour and display the existing lock reason/message supplied by the authority.
 
-- Optional custom lock title.
-- Custom lock message/reason.
-- Internal admin reason can remain separate from the customer-facing message.
-- Customer website/application displays the configured lock message instead of a generic error.
-- Lock message remains attached to the authoritative Licence Manager lock/suspension state.
-- Restoring/unlocking the licence removes the customer lock screen on the next successful authority check.
-
-Example customer-facing state:
-
-> **Access locked**
->
-> Your OrbitFS installation has been locked by an administrator.
->
-> Please contact support regarding your account.
-
-The exact message may be customised by the admin performing the lock.
+Dev Control should only make that state easier to inspect and operate through ChatGPT/UI; it must not create a separate source of truth for lock messages or lock state.
 
 This normal per-customer lockout must **not** be confused with the global emergency lockdown above.
 
@@ -467,7 +457,7 @@ If a future command cannot be described as a narrow, auditable OrbitFS operation
 10. Updater status/preparation/execution.
 11. Licence Manager read-only commands.
 12. Licence Manager global emergency lockdown + isolated unlock route.
-13. Guarded Licence Manager mutation commands, including customer-facing admin lock messages.
+13. Guarded Licence Manager mutation commands and clear display of existing customer lock state/reason/message.
 14. Billing Store diagnostic commands.
 15. Additional commands only when a real operational need appears.
 
