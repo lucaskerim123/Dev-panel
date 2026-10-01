@@ -1,0 +1,6 @@
+import {createFileRoute} from "@tanstack/react-router";
+import {licenseManagerRecoveryRequest,licenseManagerRequest,requireDevControlOwner} from "@/lib/dev-control.server";
+export const Route=createFileRoute("/api/dev-control/v1/lockdown")({server:{handlers:{
+ GET:async({request})=>{try{requireDevControlOwner(request);return Response.json(await licenseManagerRequest("/lockdown/status"))}catch(error){return Response.json({ok:false,error:error instanceof Error?error.message:"Lockdown status unavailable"},{status:502})}},
+ POST:async({request})=>{try{requireDevControlOwner(request);const body=await request.json().catch(()=>({}));const action=String(body.action||"");if(action==="enable")return Response.json(await licenseManagerRequest("/lockdown",{method:"POST",body:JSON.stringify({confirm:"LOCKDOWN",reason:body.reason,message:body.message})}));if(action==="disable")return Response.json(await licenseManagerRecoveryRequest({method:"POST",body:JSON.stringify({confirm:"UNLOCK",reason:body.reason})}));return Response.json({ok:false,error:"INVALID_LOCKDOWN_ACTION"},{status:400})}catch(error){return Response.json({ok:false,error:error instanceof Error?error.message:"Lockdown control failed"},{status:502})}}
+}}});
