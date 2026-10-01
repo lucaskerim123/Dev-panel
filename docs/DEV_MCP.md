@@ -32,7 +32,7 @@ V2 Billing Store is used for customer/email resolution, customer-to-licence bind
 
 The `show_dev` tool returns `ui://dev-panel/v1.html` as an MCP App resource.
 
-The UI supports inline, fullscreen and PiP display modes. UI buttons call the same MCP tools that are available through normal chat commands.
+The UI supports inline, fullscreen and PiP display modes. UI buttons call the same MCP tools that are available through normal chat commands. Fullscreen includes prepare, service deployment, customer licence, customer update, release and live-job controls; PiP follows an active workflow.
 
 Typical use:
 
@@ -67,9 +67,9 @@ It does not publish or deploy a customer release.
 ### `deploy`
 Targets: `license_manager`, `billing_store`.
 
-Actions: `status`, `scan`, `deploy`, `quick_deploy`, `redeploy`.
+Actions: `status`, `scan`, `deploy`, `quick_deploy`, `redeploy`, `cancel`, `retry`.
 
-Normal deploy requires a successful Full Scan for the exact current main commit. Quick Deploy is the explicit bypass path already provided by the service workflow.
+Normal deploy requires a successful Full Scan for the exact current main commit. Quick Deploy is the explicit bypass path already provided by the service workflow. Billing Store Quick Deploy can also target an explicit branch because its existing workflow supports that input. Cancel/retry operate on an explicit GitHub workflow run ID.
 
 ### `release`
 Reads and controls authoritative License Manager releases. Supports list/get/manifest/validation/source/build/failures/compare and lifecycle controls such as approve, reject, publish, withdraw, archive, restore, promote and rollback.
