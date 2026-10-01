@@ -45,7 +45,7 @@ function toolEnabled(settings:any,name:string){
  if(name==="show_dev"&&settings?.ui_enabled===false)return false;
  return true;
 }
-function visibleTools(settings:any){return tools.filter(tool=>toolEnabled(settings,tool.name))}
+function visibleTools(settings:any){return settings?.enabled===false?[]:tools.filter(tool=>toolEnabled(settings,tool.name))}
 async function callTool(name:string,args:any,auth:any){
  const settings=await getMcpSettings();if(settings.enabled===false)throw new Error("Dev MCP is disabled");
  if(!toolEnabled(settings,name))throw new Error(name+" tool is disabled");
@@ -83,12 +83,12 @@ async function handlePost(request:Request){
   catch(error:any){const extra=error?.matches||error?.installations?{matches:error?.matches,installations:error?.installations}:undefined;return rpc(id,{content:[{type:"text",text:error instanceof Error?error.message:"Tool failed"}],structuredContent:extra?{error:error?.message||"Tool failed",...extra}:{error:error?.message||"Tool failed"},isError:true})}
  }
  if(body.method==="resources/list"){
-  const settings=await getMcpSettings();if(settings.ui_enabled===false)return rpc(id,{resources:[]});
+  const settings=await getMcpSettings();if(settings.enabled===false||settings.ui_enabled===false)return rpc(id,{resources:[]});
   const resource=devPanelUiResource(settings);return rpc(id,{resources:[{uri:resource.uri,name:resource.name,description:resource.description,mimeType:resource.mimeType}]});
  }
  if(body.method==="resources/read"){
   const settings=await getMcpSettings(),uri=String(body.params?.uri||"");
-  if(settings.ui_enabled===false||uri!==DEV_PANEL_UI_URI)return rpcError(id,-32002,"Resource not found");
+  if(settings.enabled===false||settings.ui_enabled===false||uri!==DEV_PANEL_UI_URI)return rpcError(id,-32002,"Resource not found");
   return rpc(id,{contents:[devPanelUiResource(settings)]});
  }
  return rpcError(id,-32601,"Method not found");
