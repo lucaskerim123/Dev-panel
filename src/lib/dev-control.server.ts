@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import {requireOwner} from "@/lib/panel.server";
 
 export type DevControlTarget="license_manager"|"billing_store";
-export type DevControlAction="prepare_latest_source"|"quick_deploy"|"production_deploy";
+export type DevControlAction="prepare_latest_source"|"quick_deploy"|"production_deploy"|"redeploy";
 
 const TARGETS={
  license_manager:{
@@ -61,7 +61,16 @@ async function github(path:string,init:RequestInit={}){
  return body;
 }
 export function devControlBearer(request:Request){return String(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim()}
-export function requireDevControlOwner(request:Request){const token=devControlBearer(request);if(!token)throw new Error("UNAUTHORIZED");return requireOwner(token)}
+export function requireDevControlOwner(request:Request){
+ const token=devControlBearer(request);
+ if(!token)throw new Error("UNAUTHORIZED");
+ const apiToken=String(process.env.DEV_CONTROL_API_TOKEN||"").trim();
+ if(apiToken){
+  const a=Buffer.from(token),b=Buffer.from(apiToken);
+  if(a.length===b.length&&crypto.timingSafeEqual(a,b))return {id:null,email:"dev-control-api",display_name:"Dev Control API",role:"owner",service:true};
+ }
+ return requireOwner(token);
+}
 export function devControlTargetList(){return Object.values(TARGETS).map(x=>({key:x.key,label:x.label,repo:x.repo,branch:x.branch}))}
 
 export async function getDevControlSettings(){
@@ -164,18 +173,18 @@ export async function runDevControlAction(actor:any,input:{action:DevControlActi
  if(!settings.allowed_services.includes(input.target))throw new Error("Target is not allowed by Dev Control settings");
  const cfg=targetConfig(input.target);
  const action=input.action;
- const critical=action==="quick_deploy"||action==="production_deploy";
+ const critical=action==="quick_deploy"||action==="production_deploy"||action==="redeploy";
  if(critical&&settings.require_critical_confirmation&&!input.confirm)throw new Error("Explicit confirmation is required for this production action");
  if(action==="quick_deploy"&&!settings.quick_deploy_enabled)throw new Error("Quick Deploy is disabled");
- if(action==="production_deploy"&&!settings.production_deploy_enabled)throw new Error("Production Deploy is disabled");
+ if((action==="production_deploy"||action==="redeploy")&&!settings.production_deploy_enabled)throw new Error("Production Deploy is disabled");
 
  const before=await latestRuns(cfg);
  let workflow=cfg.scan;
  if(action==="quick_deploy")workflow=cfg.quick;
- if(action==="production_deploy")workflow=cfg.deploy;
+ if(action==="production_deploy"||action==="redeploy")workflow=cfg.deploy;
 
- if(action==="production_deploy"){
-  if(before.lastSuccessful?.head_sha===before.sha)throw new Error("The current source is already deployed");
+ if(action==="production_deploy"||action==="redeploy"){
+  if(action==="production_deploy"&&before.lastSuccessful?.head_sha===before.sha)throw new Error("The current source is already deployed. Use redeploy instead.");
   const scans=await github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.scan+"/runs?branch="+encodeURIComponent(cfg.branch)+"&event=workflow_dispatch&per_page=50");
   const exact=(scans?.workflow_runs||[]).filter((x:any)=>x.head_sha===before.sha).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime())[0];
   if(!exact||exact.status!=="completed"||exact.conclusion!=="success")throw new Error("Production Deploy is blocked until the exact current source commit has a successful Full Scan");
@@ -219,12 +228,78 @@ export async function getDevControlJobs(limit=25){
  return {jobs,storageReady:true};
 }
 
+async function refreshDevControlJob(row:any){
+ if(!row?.external_run_id)return row;
+ try{
+  const cfg=targetConfig(row.target);
+  const run=cleanRun(await github("/repos/"+cfg.repo+"/actions/runs/"+row.external_run_id));
+  const status=run?.status==="completed"?(run.conclusion||"completed"):(run?.status||row.status);
+  if(status!==row.status||run?.html_url!==row.external_run_url){
+   await updateJob(row.id,{status,completed_at:run?.status==="completed"?run.updated_at:null,external_run_url:run?.html_url||row.external_run_url});
+  }
+  return {...row,status,run};
+ }catch{return row}
+}
+
+export async function getDevControlJob(jobId:string){
+ const {data,error}=await sb().from("dev_control_jobs").select("*").eq("id",jobId).maybeSingle();
+ if(error||!data)throw new Error("Dev Control job not found");
+ const row=await refreshDevControlJob(data);
+ let console:any[]=[];
+ if(row.external_run_id){
+  try{
+   const cfg=targetConfig(row.target);
+   const payload=await github("/repos/"+cfg.repo+"/actions/runs/"+row.external_run_id+"/jobs?filter=latest&per_page=100");
+   console=(payload?.jobs||[]).map((job:any)=>({
+    id:job.id,name:job.name,status:job.status,conclusion:job.conclusion,started_at:job.started_at,completed_at:job.completed_at,html_url:job.html_url,
+    steps:(job.steps||[]).map((step:any)=>({number:step.number,name:step.name,status:step.status,conclusion:step.conclusion,started_at:step.started_at,completed_at:step.completed_at}))
+   }));
+  }catch{}
+ }
+ return {...row,console};
+}
+
+export async function controlDevControlJob(actor:any,jobId:string,action:"cancel"|"retry"){
+ const settings=await getDevControlSettings();
+ if(settings.enabled===false||settings.read_only_mode||settings.emergency_kill_switch)throw new Error("Dev Control mutations are blocked");
+ const {data,error}=await sb().from("dev_control_jobs").select("*").eq("id",jobId).maybeSingle();
+ if(error||!data)throw new Error("Dev Control job not found");
+ if(!data.external_run_id)throw new Error("Job has no attached workflow run");
+ const cfg=targetConfig(data.target);
+ if(action==="cancel"){
+  await github("/repos/"+cfg.repo+"/actions/runs/"+data.external_run_id+"/cancel",{method:"POST",body:"{}"});
+  await updateJob(jobId,{status:"cancelling"});
+ }else{
+  await github("/repos/"+cfg.repo+"/actions/runs/"+data.external_run_id+"/rerun",{method:"POST",body:"{}"});
+  await updateJob(jobId,{status:"queued",error:null,completed_at:null});
+ }
+ await audit(actor,"job."+action,data.target,jobId,{run_id:data.external_run_id});
+ return getDevControlJob(jobId);
+}
+
+export async function getDevControlAudit(limit=100){
+ const {data,error}=await sb().from("dev_control_audit").select("*").order("created_at",{ascending:false}).limit(Math.min(200,Math.max(1,limit)));
+ if(error)throw new Error("Unable to load Dev Control audit");
+ return {events:data||[]};
+}
+
 export async function licenseManagerRequest(path:string,init:RequestInit={}){
  const base=String(process.env.LICENSE_MASTER_URL||"").replace(/\/+$/,"");
  if(!base)throw new Error("LICENSE_MASTER_URL is not configured");
- const token=required("LICENSE_MASTER_API_TOKEN");
+ const token=String(process.env.LICENSE_MASTER_CONTROL_API_TOKEN||process.env.LICENSE_MASTER_API_TOKEN||"").trim();if(!token)throw new Error("License Manager control API token is not configured");
  const response=await fetch(base+path,{...init,headers:{authorization:"Bearer "+token,"content-type":"application/json",...(init.headers||{})},cache:"no-store"});
  const text=await response.text();let body:any={};try{body=text?JSON.parse(text):{}}catch{body={raw:text}}
  if(!response.ok)throw new Error(body?.error||body?.message||("License Manager returned HTTP "+response.status));
+ return body;
+}
+
+export async function licenseManagerRecoveryRequest(init:RequestInit={}){
+ const base=String(process.env.LICENSE_MASTER_URL||"").replace(/\/+$/,"");
+ if(!base)throw new Error("LICENSE_MASTER_URL is not configured");
+ const token=String(process.env.LICENSE_MANAGER_LOCKDOWN_RECOVERY_TOKEN||"").trim();
+ if(!token)throw new Error("License Manager lockdown recovery token is not configured");
+ const response=await fetch(base+"/lockdown/recover",{...init,headers:{authorization:"Bearer "+token,"content-type":"application/json",...(init.headers||{})},cache:"no-store"});
+ const text=await response.text();let body:any={};try{body=text?JSON.parse(text):{}}catch{body={raw:text}}
+ if(!response.ok)throw new Error(body?.error||body?.message||body?.code||("License Manager recovery returned HTTP "+response.status));
  return body;
 }
