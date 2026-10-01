@@ -235,7 +235,7 @@ export async function authenticateMcpOAuth(request:Request,requiredScopes:string
 
 export async function oauthAdminState(){
  const [{data:clients,error:clientError},{data:tokens,error:tokenError}]=await Promise.all([
-  db().from("dev_oauth_clients").select("client_id,client_name,redirect_uris,grant_types,response_types,registration_method,created_at").order("created_at",{ascending:false}),
+  db().from("dev_oauth_clients").select("*").order("created_at",{ascending:false}),
   db().from("dev_oauth_tokens").select("client_id,token_type,scopes,expires_at,revoked_at,created_at").order("created_at",{ascending:false}).limit(500)
  ]);
  if(clientError||tokenError)throw new Error("Unable to load OAuth connections");
