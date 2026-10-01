@@ -121,10 +121,16 @@ async function serviceState(target:ServiceTarget){
  const active=[...scans,...deploys,...quicks].filter((x:any)=>x&&x.status!=="completed").sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime())[0]||null;
  return {target,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,latestScan:scans[0]||null,latestDeploy:deploys[0]||null,latestQuickDeploy:quicks[0]||null,lastSuccessful:successful[0]||null,productionCurrent:Boolean(currentSha&&successful[0]?.head_sha===currentSha),activeRun:active};
 }
-export async function deployService(target:ServiceTarget,action:"status"|"scan"|"deploy"|"quick_deploy"|"redeploy"){
+export async function deployService(target:ServiceTarget,action:"status"|"scan"|"deploy"|"quick_deploy"|"redeploy"|"cancel"|"retry",options:{branch?:string;run_id?:number}={}){
  if(action==="status"){await assertTargetEnabled(target);return serviceState(target);}
  await assertMutation(target);
- const cfg=serviceCfg(target),before=await serviceState(target);
+ const cfg=serviceCfg(target);
+ if(action==="cancel"||action==="retry"){
+  const runId=Number(options.run_id||0);if(!runId)throw new Error("run_id is required");
+  await github("/repos/"+cfg.repo+"/actions/runs/"+runId+(action==="cancel"?"/cancel":"/rerun"),{method:"POST",body:"{}"});
+  return {ok:true,target,action,runId,message:cfg.label+" workflow "+(action==="cancel"?"cancellation":"retry")+" requested."};
+ }
+ const before=await serviceState(target);
  let workflow=cfg.scan;
  if(action==="scan")workflow=cfg.scan;
  if(action==="quick_deploy")workflow=cfg.quick;
@@ -136,10 +142,19 @@ export async function deployService(target:ServiceTarget,action:"status"|"scan"|
  }
  if(action==="redeploy"&&before.lastSuccessful?.head_sha!==before.currentSha)throw new Error("Production is behind main. Redeploy would change the running version; use deploy or quick_deploy instead.");
  const startedAt=Date.now(),dispatch:any={ref:cfg.branch};
- if(action==="quick_deploy"&&target==="billing_store")dispatch.inputs={branch:"main"};
+ if(action==="quick_deploy"){
+  const requestedBranch=String(options.branch||"main").trim()||"main";
+  if(target==="billing_store"){
+   dispatch.inputs=requestedBranch==="main"||requestedBranch==="CustomDesign/Run"
+    ?{branch:requestedBranch}
+    :{branch:"main",custom_branch:requestedBranch};
+  }else if(requestedBranch!=="main"){
+   throw new Error("Custom branch Quick Deploy is only supported by Billing Store.");
+  }
+ }
  await github("/repos/"+cfg.repo+"/actions/workflows/"+encodeURIComponent(workflow)+"/dispatches",{method:"POST",body:JSON.stringify(dispatch)});
  const run=await findRun(cfg.repo,workflow,cfg.branch,startedAt);
- return {ok:true,target,action,sourceSha:before.currentSha,workflow,run,message:cfg.label+" "+action.replaceAll("_"," ")+" queued."};
+ return {ok:true,target,action,sourceSha:before.currentSha,branch:options.branch||cfg.branch,workflow,run,message:cfg.label+" "+action.replaceAll("_"," ")+" queued."};
 }
 
 export async function licenseManagerRequest(path:string,init:RequestInit={}){
@@ -312,8 +327,14 @@ export async function workflowDetail(input:{target:"base"|"engine"|"license_mana
  return {target:input.target,repo:cfg.repo,run:cleanRun(run),jobs:(jobs?.jobs||[]).map((j:any)=>({id:j.id,name:j.name,status:j.status,conclusion:j.conclusion,started_at:j.started_at,completed_at:j.completed_at,html_url:j.html_url,steps:(j.steps||[]).map((s:any)=>({number:s.number,name:s.name,status:s.status,conclusion:s.conclusion,started_at:s.started_at,completed_at:s.completed_at}))}))};
 }
 export async function diagnostics(identity?:string){
- const [base,engine,lm,bs]=await Promise.all([releaseBranchState("base"),releaseBranchState("engine"),licenseManagerRequest("/license/health").catch((e:any)=>({ok:false,error:e.message})),serviceState("billing_store").catch((e:any)=>({ok:false,error:e.message}))]);
- const customer=identity?await customerLicenseSnapshot(identity).catch((e:any)=>({identity,error:e.message})):null;
+ const settings=await getMcpSettings();
+ const [base,engine,lm,bs]=await Promise.all([
+  settings.expose_base?releaseBranchState("base"):Promise.resolve({disabled:true}),
+  settings.expose_engine?releaseBranchState("engine"):Promise.resolve({disabled:true}),
+  settings.expose_license_manager?licenseManagerRequest("/license/health").catch((e:any)=>({ok:false,error:e.message})):Promise.resolve({disabled:true}),
+  settings.expose_billing_store?serviceState("billing_store").catch((e:any)=>({ok:false,error:e.message})):Promise.resolve({disabled:true})
+ ]);
+ const customer=identity&&settings.expose_license_manager?await customerLicenseSnapshot(identity).catch((e:any)=>({identity,error:e.message})):null;
  return {checkedAt:new Date().toISOString(),base,engine,licenseManager:lm,billingStore:bs,customer};
 }
 export async function systemOverview(){
