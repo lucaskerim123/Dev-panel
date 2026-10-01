@@ -13,7 +13,17 @@ const SERVICE_TARGETS={
  license_manager:{key:"license_manager" as const,label:"Custom License Manager",repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",branch:"main",scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml"},
  billing_store:{key:"billing_store" as const,label:"V2 Billing Store",repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",branch:"main",scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml"},
 };
-const DEFAULT_MCP_SETTINGS={enabled:true,read_only_mode:false,allow_mutations:true,expose_base:true,expose_engine:true,expose_license_manager:true,expose_billing_store:true};
+export const DEFAULT_MCP_SETTINGS={
+ enabled:true,read_only_mode:false,allow_mutations:true,
+ expose_base:true,expose_engine:true,expose_license_manager:true,expose_billing_store:true,
+ tool_show_dev:true,tool_status:true,tool_prepare:true,tool_deploy:true,tool_release:true,tool_update:true,tool_license:true,tool_license_change:true,tool_diagnose:true,tool_logs:true,
+ allow_prepare:true,allow_service_scan:true,allow_service_deploy:true,allow_quick_deploy:true,allow_workflow_control:true,
+ allow_release_review:true,allow_release_publish:true,allow_release_rollback:true,
+ allow_update_apply:true,allow_update_rollback:true,
+ allow_license_state_changes:true,allow_license_entitlement_changes:true,allow_installation_unlock:true,allow_license_linking:true,
+ ui_enabled:true,ui_fullscreen_enabled:true,ui_pip_enabled:true,
+ oauth_dcr_enabled:true,oauth_cimd_enabled:true,oauth_refresh_tokens_enabled:true
+};
 
 function required(name:string){const value=process.env[name];if(!value)throw new Error("Missing server environment variable: "+name);return value}
 function db(){return createClient(required("SUPABASE_URL"),required("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}})}
@@ -88,6 +98,16 @@ async function assertTargetEnabled(target?:ReleaseTarget|ServiceTarget){
 async function assertMutation(target?:ReleaseTarget|ServiceTarget){
  const settings=await assertTargetEnabled(target);
  if(settings.read_only_mode||settings.allow_mutations===false)throw new Error("Dev MCP mutations are disabled");
+ return settings;
+}
+function requireSetting(settings:any,key:keyof typeof DEFAULT_MCP_SETTINGS,message:string){
+ if(settings[key]===false)throw new Error(message);
+}
+export async function assertMcpToolEnabled(name:string){
+ const settings=await getMcpSettings();
+ if(settings.enabled===false)throw new Error("Dev MCP is disabled");
+ const key=("tool_"+name) as keyof typeof DEFAULT_MCP_SETTINGS;
+ if(Object.prototype.hasOwnProperty.call(DEFAULT_MCP_SETTINGS,key)&&settings[key]===false)throw new Error(name+" tool is disabled");
  return settings;
 }
 export async function prepareRelease(target:"base"|"engine"|"both"){
