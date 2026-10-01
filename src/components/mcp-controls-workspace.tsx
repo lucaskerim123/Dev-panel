@@ -11,7 +11,7 @@ type SettingItem=readonly [string,string,string];
 
 const GENERAL:SettingItem[]=[
  ["read_only_mode","Read-only mode","Keep lookups, status and diagnostics available while blocking mutations."],
- ["allow_mutations","Allow write controls","Global write gate for prepare, deployment, update, release and licence changes."],
+ ["allow_mutations","Allow UI write controls","Global write gate for Dev Panel UI prepare, deployment, update, release and licence changes. Chat/model access remains read-only."],
 ];
 const SYSTEMS:SettingItem[]=[
  ["expose_base","V1 Base","Base release status, preparation and workflows."],
@@ -22,12 +22,12 @@ const SYSTEMS:SettingItem[]=[
 const TOOLS:SettingItem[]=[
  ["tool_show_dev","show_dev","Embedded ChatGPT Dev Panel interface."],
  ["tool_status","status","System, release branch, service and customer status."],
- ["tool_prepare","prepare","Prepare Base, Engine or both release branches."],
- ["tool_deploy","deploy","Service scan, deploy, Quick Deploy, redeploy and workflow controls."],
- ["tool_release","release","Authoritative release inspection and lifecycle actions."],
- ["tool_update","update","Customer update inspect, plan, apply, retry and rollback."],
+ ["tool_prepare","prepare","UI-only: Prepare Base, Engine or both release branches."],
+ ["tool_deploy","deploy","UI-only: Service scan, deploy, Quick Deploy, redeploy and workflow controls."],
+ ["tool_release","release","UI-only control surface for release inspection and lifecycle actions."],
+ ["tool_update","update","UI-only control surface for customer update inspect, plan, apply, retry and rollback."],
  ["tool_license","license","Customer/licence lookup, runtime, components, pulse and history."],
- ["tool_license_change","license_change","Licence state, component access, linking and installation controls."],
+ ["tool_license_change","license_change","UI-only: Licence state, component access, linking and installation controls."],
  ["tool_diagnose","diagnose","Combined system/customer diagnostics."],
  ["tool_logs","logs","GitHub Actions run, job and step state."],
 ];
