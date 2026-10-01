@@ -517,7 +517,7 @@ export async function releaseBuildCommand(input:{action:string;target:ReleaseTar
   inspectedSourceSha:String(inspection.head||""),
   inspectedPublishedBaselineSha:inspection.publishedBaselineSha??null,
  },actor||{id:"dev-mcp",email:"dev-mcp@orbitfs.local"});
- return {ok:true,target,version,channel,sourceSha:inspection.head,database:{changedMigrationCount:database.changedMigrationCount,latestMigration:database.latestMigration},runId:release.runId||null,runUrl:null,draftId:release.draftId,message:(target==="base"?"Base release ":"Update release ")+"v"+version+" build started"+(release.runId?" · run #"+release.runId:"")+".";
+ return {ok:true,target,version,channel,sourceSha:inspection.head,database:{changedMigrationCount:database.changedMigrationCount,latestMigration:database.latestMigration},runId:release.runId||null,runUrl:null,draftId:release.draftId,message:(target==="base"?"Base release ":"Update release ")+"v"+version+" build started"+(release.runId?" · run #"+release.runId:"")+"."};
 }
 
 export async function releaseCommand(input:{action:string;release_id?:string;other_release_id?:string;type?:string;channel?:string;target_channel?:string;reason?:string}){
