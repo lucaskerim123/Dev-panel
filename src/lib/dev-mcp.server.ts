@@ -76,14 +76,18 @@ export async function releaseBranchState(target:ReleaseTarget){
   changedFileCount:Array.isArray(compare?.files)?compare.files.length:0
  };
 }
-async function assertMutation(target?:ReleaseTarget|ServiceTarget){
+async function assertTargetEnabled(target?:ReleaseTarget|ServiceTarget){
  const settings=await getMcpSettings();
  if(settings.enabled===false)throw new Error("Dev MCP is disabled");
- if(settings.read_only_mode||settings.allow_mutations===false)throw new Error("Dev MCP mutations are disabled");
  if(target==="base"&&!settings.expose_base)throw new Error("Base tools are disabled");
  if(target==="engine"&&!settings.expose_engine)throw new Error("Engine tools are disabled");
  if(target==="license_manager"&&!settings.expose_license_manager)throw new Error("License Manager tools are disabled");
  if(target==="billing_store"&&!settings.expose_billing_store)throw new Error("Billing Store tools are disabled");
+ return settings;
+}
+async function assertMutation(target?:ReleaseTarget|ServiceTarget){
+ const settings=await assertTargetEnabled(target);
+ if(settings.read_only_mode||settings.allow_mutations===false)throw new Error("Dev MCP mutations are disabled");
  return settings;
 }
 export async function prepareRelease(target:"base"|"engine"|"both"){
@@ -118,7 +122,7 @@ async function serviceState(target:ServiceTarget){
  return {target,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,latestScan:scans[0]||null,latestDeploy:deploys[0]||null,latestQuickDeploy:quicks[0]||null,lastSuccessful:successful[0]||null,productionCurrent:Boolean(currentSha&&successful[0]?.head_sha===currentSha),activeRun:active};
 }
 export async function deployService(target:ServiceTarget,action:"status"|"scan"|"deploy"|"quick_deploy"|"redeploy"){
- if(action==="status")return serviceState(target);
+ if(action==="status"){await assertTargetEnabled(target);return serviceState(target);}
  await assertMutation(target);
  const cfg=serviceCfg(target),before=await serviceState(target);
  let workflow=cfg.scan;
@@ -170,8 +174,10 @@ function customerMatchReason(x:any,c:any,orders:any[]){
  if(vals.some(v=>refs.has(v)))return "order";return "";
 }
 export async function customerLicenseSnapshot(identity:string){
- const settings=await getMcpSettings();if(!settings.expose_license_manager)throw new Error("License Manager tools are disabled");
- const billing=await billingCustomer(identity).catch((error:any)=>({ok:false,found:false,error:error?.message||"Billing Store unavailable",customer:null,orders:[],bindings:[],installations:[]}));
+ const settings=await assertTargetEnabled("license_manager");
+ const billing=settings.expose_billing_store
+  ?await billingCustomer(identity).catch((error:any)=>({ok:false,found:false,error:error?.message||"Billing Store unavailable",customer:null,orders:[],bindings:[],installations:[]}))
+  :{ok:false,found:false,error:"Billing Store tools are disabled",customer:null,orders:[],bindings:[],installations:[]};
  const master=await licenseManagerRequest("/license"),all=Array.isArray(master?.licenses)?master.licenses:[];
  const linked=new Set((billing?.bindings||[]).map((b:any)=>String(b.license_id||"")).filter(Boolean));
  const customer=billing?.customer||null,orders=billing?.orders||[];
@@ -213,6 +219,7 @@ export async function licenseChange(input:{identity:string;action:string;license
  await assertMutation("license_manager");
  const action=String(input.action||"").toLowerCase();
  if(action==="link"){
+  await assertTargetEnabled("billing_store");
   if(!input.identity)throw new Error("Customer email or identity is required");
   return billingStoreRequest("/api/internal/orbitfs/customer-lookup",{method:"POST",body:JSON.stringify({action:"link_license",identity:input.identity,license_id:input.license_id,mode:input.license_id?"manual":"auto"})});
  }
@@ -240,6 +247,7 @@ export async function licenseChange(input:{identity:string;action:string;license
 }
 
 export async function releaseCommand(input:{action:string;release_id?:string;other_release_id?:string;type?:string;channel?:string;target_channel?:string;reason?:string}){
+ await assertTargetEnabled("license_manager");
  const action=String(input.action||"list").toLowerCase();
  const mutation=new Set(["approve","reject","publish","unpublish","withdraw","archive","deprecate","restore","promote","rollback","revert","pause"]);
  if(mutation.has(action))await assertMutation("license_manager");
@@ -276,6 +284,7 @@ async function chooseInstallation(snapshot:any,installationId?:string){
  throw new Error("No Billing Store installation is linked to this customer");
 }
 export async function updateCommand(input:{action:string;identity:string;installation_id?:string;release_id?:string;version?:string;channel?:string;reason?:string}){
+ await assertTargetEnabled("billing_store");
  const action=String(input.action||"status").toLowerCase(),snapshot=await customerLicenseSnapshot(input.identity),license=selectLicense(snapshot),install=await chooseInstallation(snapshot,input.installation_id);
  if(["apply","retry","rollback"].includes(action))await assertMutation("billing_store");
  const latest=await licenseManagerRequest("/updater",{method:"POST",body:JSON.stringify({product:"orbitfs_base",channel:input.channel||install.release_channel||"stable",type:"update",release_id:input.release_id})});
@@ -290,6 +299,7 @@ export async function updateCommand(input:{action:string;identity:string;install
 }
 
 export async function workflowDetail(input:{target:"base"|"engine"|"license_manager"|"billing_store";run_id?:number}){
+ await assertTargetEnabled(input.target);
  const cfg:any=input.target==="base"||input.target==="engine"?releaseCfg(input.target):serviceCfg(input.target as ServiceTarget);
  let runId=Number(input.run_id||0);
  if(!runId){
