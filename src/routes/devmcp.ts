@@ -20,7 +20,7 @@ function authToolError(scopes:string[]){return {content:[{type:"text",text:"Addi
 const readSecurity=[{type:"oauth2",scopes:["dev.read"]}];
 const writeSecurity=[{type:"oauth2",scopes:["dev.write"]}];
 const authoritySecurity=[{type:"oauth2",scopes:["dev.write","authority.write"]}];
-const metaSecurity=(security:any)=>({securitySchemes:security});
+const metaSecurity=(security:any)=>({securitySchemes:security,ui:{visibility:["model","app"]}});
 
 const tools:any[]=[
  {name:"show_dev",title:"Open Dev Panel",description:"Open the private mobile Dev Panel interface inside ChatGPT. Use when the user says show dev, open dev, open the dev panel, or asks for the developer interface.",inputSchema:{type:"object",properties:{}},securitySchemes:readSecurity,annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},_meta:{...metaSecurity(readSecurity),ui:{resourceUri:DEV_PANEL_UI_URI,visibility:["model","app"]},"openai/outputTemplate":DEV_PANEL_UI_URI}},
