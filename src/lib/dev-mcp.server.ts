@@ -210,6 +210,49 @@ export async function licenseManagerRequest(path:string,init:RequestInit={}){
  if(!response.ok)throw Object.assign(new Error(body?.error||body?.message||body?.code||("License Manager returned HTTP "+response.status)),{status:response.status,body});
  return body;
 }
+function licenseManagerBase(){
+ const base=String(process.env.LICENSE_MASTER_URL||"").replace(/\/+$/,"");
+ if(!base)throw new Error("LICENSE_MASTER_URL is not configured");
+ return base;
+}
+export async function licenseManagerLockdownStatus(){
+ const response=await fetch(licenseManagerBase()+"/lockdown/status",{cache:"no-store",headers:{accept:"application/json"}});
+ const text=await response.text();let body:any={};try{body=text?JSON.parse(text):{}}catch{body={raw:text}}
+ if(!response.ok&&response.status!==423)throw Object.assign(new Error(body?.message||body?.code||("License Manager lockdown status returned HTTP "+response.status)),{status:response.status,body});
+ return {
+  ok:response.ok,
+  locked:Boolean(body?.locked),
+  code:String(body?.code|| (body?.locked?"AUTHORITY_LOCKDOWN":"AUTHORITY_AVAILABLE")),
+  message:body?.message||null,
+  lockedAt:body?.locked_at||body?.lockedAt||null
+ };
+}
+export async function licenseManagerLockdownControl(input:{action:"status"|"lock"|"unlock";reason?:string;message?:string}){
+ const action=input.action;
+ if(action==="status")return licenseManagerLockdownStatus();
+ if(action==="lock"){
+  const reason=String(input.reason||"Emergency lockdown from private Dev MCP").trim();
+  if(!reason)throw new Error("Lockdown reason is required");
+  const result=await licenseManagerRequest("/lockdown",{method:"POST",body:JSON.stringify({confirm:"LOCKDOWN",reason,message:input.message||undefined})});
+  return {ok:true,action:"lock",locked:true,code:result?.code||"AUTHORITY_LOCKDOWN",message:result?.message||null,lockedAt:result?.lockedAt||result?.locked_at||null};
+ }
+ const recoveryToken=String(process.env.LICENSE_MASTER_LOCKDOWN_RECOVERY_TOKEN||"").trim();
+ if(!recoveryToken)throw new Error("LICENSE_MASTER_LOCKDOWN_RECOVERY_TOKEN is not configured in Dev Panel");
+ const response=await fetch(licenseManagerBase()+"/lockdown/recover",{
+  method:"POST",cache:"no-store",
+  headers:{authorization:"Bearer "+recoveryToken,"content-type":"application/json"},
+  body:JSON.stringify({confirm:"UNLOCK",reason:String(input.reason||"Owner recovery from private Dev MCP").trim()||"Owner recovery from private Dev MCP"})
+ });
+ const text=await response.text();let body:any={};try{body=text?JSON.parse(text):{}}catch{body={raw:text}}
+ if(!response.ok)throw Object.assign(new Error(body?.error||body?.message||body?.code||("License Manager recovery returned HTTP "+response.status)),{status:response.status,body});
+ return {ok:true,action:"unlock",locked:false,code:body?.code||"AUTHORITY_AVAILABLE",message:body?.message||null};
+}
+export const getLicenseManagerLockdownForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ requireOwner(data.token);return licenseManagerLockdownStatus();
+});
+export const setLicenseManagerLockdownForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;action:"lock"|"unlock";reason?:string;message?:string}})=>{
+ requireOwner(data.token);return licenseManagerLockdownControl({action:data.action,reason:data.reason,message:data.message});
+});
 function billingOrigin(){
  const configured=String(process.env.BILLING_STORE_URL||process.env.CUSTOMER_PORTAL_URL||"").trim();if(!configured)throw new Error("Billing Store URL is not configured");
  const u=new URL(configured);if(u.protocol!=="https:")throw new Error("Billing Store URL must use HTTPS");return u.origin;
@@ -404,7 +447,14 @@ export async function systemOverview(){
  const [base,engine,licenseManager,billingStore]=await Promise.all([
   settings.expose_base?releaseBranchState("base"):Promise.resolve({target:"base",disabled:true}),
   settings.expose_engine?releaseBranchState("engine"):Promise.resolve({target:"engine",disabled:true}),
-  settings.expose_license_manager?Promise.all([serviceState("license_manager").catch((e:any)=>({ok:false,error:e.message})),licenseManagerRequest("/license/health").catch((e:any)=>({ok:false,error:e.message}))]).then(([service,health])=>({service,health})):Promise.resolve({disabled:true}),
+  settings.expose_license_manager?Promise.all([
+   serviceState("license_manager").catch((e:any)=>({ok:false,error:e.message})),
+   licenseManagerLockdownStatus().catch((e:any)=>({ok:false,locked:true,code:"LOCKDOWN_STATE_UNAVAILABLE",error:e.message}))
+  ]).then(async([service,lockdown])=>{
+   if(lockdown?.locked)return {service,lockdown,health:{ok:false,locked:true,code:lockdown.code||"AUTHORITY_LOCKDOWN",error:lockdown.message||"License Manager is locked down"}};
+   const health=await licenseManagerRequest("/license/health").catch((e:any)=>({ok:false,error:e.message}));
+   return {service,lockdown,health};
+  }):Promise.resolve({disabled:true}),
   settings.expose_billing_store?serviceState("billing_store").catch((e:any)=>({ok:false,error:e.message})):Promise.resolve({disabled:true})
  ]);
  return {checkedAt:new Date().toISOString(),settings,base,engine,licenseManager,billingStore};
