@@ -203,7 +203,7 @@ export async function deployService(target:ServiceTarget,action:"status"|"scan"|
 }
 
 export async function licenseManagerRequest(path:string,init:RequestInit={}){
- const base=String(process.env.LICENSE_MASTER_URL||"").replace(/\/+$/,"");if(!base)throw new Error("LICENSE_MASTER_URL is not configured");
+ const base=licenseManagerBase();
  const token=String(process.env.LICENSE_MASTER_CONTROL_API_TOKEN||process.env.LICENSE_MASTER_API_TOKEN||"").trim();if(!token)throw new Error("License Manager control API token is not configured");
  const response=await fetch(base+path,{...init,headers:{authorization:"Bearer "+token,"content-type":"application/json",...(init.headers||{})},cache:"no-store"});
  const text=await response.text();let body:any={};try{body=text?JSON.parse(text):{}}catch{body={raw:text}}
@@ -211,9 +211,15 @@ export async function licenseManagerRequest(path:string,init:RequestInit={}){
  return body;
 }
 function licenseManagerBase(){
- const base=String(process.env.LICENSE_MASTER_URL||"").replace(/\/+$/,"");
- if(!base)throw new Error("LICENSE_MASTER_URL is not configured");
- return base;
+ const raw=String(process.env.LICENSE_MASTER_URL||"https://incendiarynetworks.cc/api/v1").trim();
+ let url:URL;
+ try{url=new URL(raw)}catch{throw new Error("LICENSE_MASTER_URL is invalid")}
+ if(url.protocol!=="https:")throw new Error("LICENSE_MASTER_URL must use HTTPS");
+ const path=url.pathname.replace(/\/+$/,"");
+ if(!path||path==="/")url.pathname="/api/v1";
+ else if(path!=="/api/v1")throw new Error("LICENSE_MASTER_URL must point to the License Manager /api/v1 root");
+ url.search="";url.hash="";
+ return url.origin+url.pathname.replace(/\/+$/,"");
 }
 export async function licenseManagerLockdownStatus(){
  const response=await fetch(licenseManagerBase()+"/lockdown/status",{cache:"no-store",headers:{accept:"application/json"}});
