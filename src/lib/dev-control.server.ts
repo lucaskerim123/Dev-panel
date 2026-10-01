@@ -149,7 +149,7 @@ async function findRun(cfg:any,workflow:string,startedAt:number){
  return null;
 }
 
-async function audit(actor:any,action:string,target:string,jobId:string|null,detail:any={}){
+async function audit(actor:any,action:string,target:string|null,jobId:string|null,detail:any={}){
  const settings=await getDevControlSettings();
  if(settings.audit_logging===false||settings.storageReady===false)return;
  await sb().from("dev_control_audit").insert({actor_id:actor.id,actor_email:actor.email,action,target,job_id:jobId,detail});
