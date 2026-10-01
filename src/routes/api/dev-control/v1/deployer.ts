@@ -1,0 +1,5 @@
+import {createFileRoute} from "@tanstack/react-router";
+import {getDevControlSettings,licenseManagerRequest,requireDevControlOwner} from "@/lib/dev-control.server";
+export const Route=createFileRoute("/api/dev-control/v1/deployer")({server:{handlers:{
+ GET:async({request})=>{try{requireDevControlOwner(request);const settings=await getDevControlSettings();if(!settings.license_controls_enabled)return Response.json({ok:false,error:"LICENSE_CONTROLS_DISABLED"},{status:403});const u=new URL(request.url);const installation=u.searchParams.get("installation_id")||"";if(!installation)return Response.json({ok:false,error:"INSTALLATION_ID_REQUIRED"},{status:400});const license=u.searchParams.get("license_id");const qs=new URLSearchParams({installation_id:installation});if(license)qs.set("license_id",license);return Response.json(await licenseManagerRequest("/deployer?"+qs.toString()))}catch(error){return Response.json({ok:false,error:error instanceof Error?error.message:"Deployer unavailable"},{status:502})}}
+}}});
