@@ -88,19 +88,22 @@ function serviceCfg(target:ServiceTarget){return SERVICE_TARGETS[target]}
 
 export async function releaseBranchState(target:ReleaseTarget){
  const cfg=releaseCfg(target);
- const [mainRef,releaseRef]=await Promise.all([
+ const [mainRef,releaseRef,runs]=await Promise.all([
   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
-  github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.releaseRef)).catch(()=>null)
+  github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.releaseRef)).catch(()=>null),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+encodeURIComponent(cfg.workflow)+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=5").catch(()=>({workflow_runs:[]}))
  ]);
  const currentSha=String(mainRef?.object?.sha||""),preparedSha=String(releaseRef?.object?.sha||"");
  let compare:any=null;
  if(preparedSha&&currentSha&&preparedSha!==currentSha)compare=await github("/repos/"+cfg.repo+"/compare/"+preparedSha+"..."+currentSha).catch(()=>null);
+ const latestPrepare=cleanRun((runs?.workflow_runs||[])[0]||null);
  return {
   target,label:cfg.label,repo:cfg.repo,sourceBranch:cfg.branch,releaseBranch:cfg.releaseRef,
   currentSha,preparedSha,preparedCurrent:Boolean(currentSha&&preparedSha===currentSha),
   commitsAhead:Number(compare?.ahead_by||0),commitsBehind:Number(compare?.behind_by||0),
   changedFiles:Array.isArray(compare?.files)?compare.files.map((f:any)=>({path:f.filename,status:f.status,additions:f.additions,deletions:f.deletions,changes:f.changes})):[],
-  changedFileCount:Array.isArray(compare?.files)?compare.files.length:0
+  changedFileCount:Array.isArray(compare?.files)?compare.files.length:0,
+  latestPrepare
  };
 }
 async function assertTargetEnabled(target?:ReleaseTarget|ServiceTarget){
