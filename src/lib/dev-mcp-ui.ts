@@ -52,6 +52,26 @@ body{padding:10px}.shell{max-width:760px;margin:0 auto}.card{border:1px solid va
    </div>
   </div>
   <div class="section full-only">
+   <h2>Customer update</h2>
+   <div class="sub">Uses the customer identity above and resolves the linked installation through Billing Store.</div>
+   <div class="row" style="margin-top:8px">
+    <button class="btn" data-update-action="plan">Plan Update</button>
+    <button class="btn primary" data-update-action="apply">Apply Update</button>
+    <button class="btn danger" data-update-action="rollback">Rollback Update</button>
+   </div>
+   <div class="result hidden" id="updateResult"></div>
+  </div>
+  <div class="section full-only">
+   <h2>Release management</h2>
+   <div class="field"><input id="releaseId" placeholder="Release ID"><button class="btn" data-release-action="get">Open</button></div>
+   <div class="row" style="margin-top:8px">
+    <button class="btn" data-release-action="validate">Validate</button>
+    <button class="btn primary" data-release-action="publish">Publish</button>
+    <button class="btn danger" data-release-action="unpublish">Unpublish</button>
+   </div>
+   <div class="result hidden" id="releaseResult"></div>
+  </div>
+  <div class="section full-only">
    <h2>Service operations</h2>
    <div class="row">
     <button class="btn" data-deploy="license_manager:scan">Scan Licence Manager</button>
@@ -111,6 +131,8 @@ document.querySelectorAll("[data-call=prepare]").forEach(btn=>btn.addEventListen
 $("lookup").addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return;try{const r=await call("license",{identity,view:"summary"});showResult("licenseResult",r);$("customerActions").classList.remove("hidden")}catch(e){showResult("licenseResult",{error:e.message})}});
 document.querySelectorAll("[data-license-action]").forEach(btn=>btn.addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return;try{const r=await call("license_change",{identity,action:btn.dataset.licenseAction});showResult("licenseResult",r)}catch(e){showResult("licenseResult",{error:e.message})}}));
 document.querySelectorAll("[data-deploy]").forEach(btn=>btn.addEventListener("click",async()=>{const [target,action]=btn.dataset.deploy.split(":");try{showResult("serviceResult",await call("deploy",{target,action}))}catch(e){showResult("serviceResult",{error:e.message})}}));
+document.querySelectorAll("[data-update-action]").forEach(btn=>btn.addEventListener("click",async()=>{const identity=$("identity").value.trim();if(!identity)return showResult("updateResult",{error:"Enter a customer email or ID above first."});try{showResult("updateResult",await call("update",{identity,action:btn.dataset.updateAction}))}catch(e){showResult("updateResult",{error:e.message})}}));
+document.querySelectorAll("[data-release-action]").forEach(btn=>btn.addEventListener("click",async()=>{const release_id=$("releaseId").value.trim();if(!release_id)return showResult("releaseResult",{error:"Enter a release ID first."});try{showResult("releaseResult",await call("release",{release_id,action:btn.dataset.releaseAction}))}catch(e){showResult("releaseResult",{error:e.message})}}));
 $("refresh").addEventListener("click",async()=>{try{const r=await call("status",{scope:"all"});render(r)}catch(e){showResult("prepareResult",{error:e.message})}});
 $("fullscreen").addEventListener("click",async()=>{if(window.openai?.requestDisplayMode)await window.openai.requestDisplayMode({mode:"fullscreen"})});
 async function refreshLive(){
