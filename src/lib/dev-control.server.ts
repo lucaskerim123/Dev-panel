@@ -2,27 +2,27 @@ import {createClient} from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import {requireOwner} from "@/lib/panel.server";
 
-export type DevControlTarget="license_manager"|"billing_store";
+export type DevControlTarget="base"|"engine"|"license_manager"|"billing_store";
 export type DevControlAction="prepare_latest_source"|"quick_deploy"|"production_deploy"|"redeploy";
 
 const TARGETS={
+ base:{
+  key:"base" as const,label:"V1 Base",repo:process.env.BASE_RELEASE_REPO||"lucaskerim123/V1-vercel-base",
+  branch:"main",kind:"release" as const,priority:"primary" as const,releaseRef:process.env.BASE_RELEASE_REF||"base-release",promotionWorkflow:"sync-release-branch.yml",
+ },
+ engine:{
+  key:"engine" as const,label:"V1 Engine / Updater",repo:process.env.ENGINE_RELEASE_REPO||"lucaskerim123/V1-vercel-engine",
+  branch:"main",kind:"release" as const,priority:"primary" as const,releaseRef:process.env.ENGINE_RELEASE_REF||"UPDATE_RELEASE",promotionWorkflow:"sync-release-branch.yml",
+ },
  license_manager:{
-  key:"license_manager" as const,
-  label:"Custom License Manager",
-  repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",
-  branch:"main",
-  scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",
-  deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",
-  quick:process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml",
+  key:"license_manager" as const,label:"Custom License Manager",repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",
+  branch:"main",kind:"service" as const,priority:"secondary" as const,
+  scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml",
  },
  billing_store:{
-  key:"billing_store" as const,
-  label:"V2 Billing Store",
-  repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",
-  branch:"main",
-  scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",
-  deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",
-  quick:process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml",
+  key:"billing_store" as const,label:"V2 Billing Store",repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",
+  branch:"main",kind:"service" as const,priority:"secondary" as const,
+  scan:process.env.OPERATIONS_CI_WORKFLOW||"ci.yml",deploy:process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml",quick:process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml",
  },
 };
 
@@ -42,12 +42,13 @@ const DEFAULT_SETTINGS={
  secret_redaction:true,
  audit_logging:true,
  emergency_kill_switch:false,
- allowed_services:["license_manager","billing_store"],
+ allowed_services:["base","engine","license_manager","billing_store"],
 };
 
 function required(name:string){const value=process.env[name];if(!value)throw new Error("Missing server environment variable: "+name);return value}
 function sb(){return createClient(required("SUPABASE_URL"),required("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}})}
 function targetConfig(target:string){const cfg=TARGETS[target as DevControlTarget];if(!cfg)throw new Error("Unknown Dev Control target");return cfg}
+function serviceTargetConfig(target:string){const cfg=targetConfig(target);if(cfg.kind!=="service")throw new Error("This action belongs to Operations and is only valid for service targets");return cfg}
 function cleanRun(run:any){return run?{id:Number(run.id),name:run.name,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,head_branch:run.head_branch,event:run.event,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url}:null}
 async function github(path:string,init:RequestInit={}){
  const response=await fetch("https://api.github.com"+path,{
@@ -71,7 +72,7 @@ export function requireDevControlOwner(request:Request){
  }
  return requireOwner(token);
 }
-export function devControlTargetList(){return Object.values(TARGETS).map(x=>({key:x.key,label:x.label,repo:x.repo,branch:x.branch}))}
+export function devControlTargetList(){return Object.values(TARGETS).map((x:any)=>({key:x.key,label:x.label,repo:x.repo,branch:x.branch,kind:x.kind,priority:x.priority,releaseRef:x.releaseRef||null}))}
 
 export async function getDevControlSettings(){
  const client=sb();
@@ -96,7 +97,7 @@ export async function updateDevControlSettings(actor:any,patch:Record<string,unk
  for(const [key,value] of Object.entries(patch||{})){
   if(BOOLEAN_SETTINGS.has(key)&&typeof value==="boolean")clean[key]=value;
   if(key==="allowed_services"&&Array.isArray(value)){
-   const allowed=value.map(String).filter(x=>x==="license_manager"||x==="billing_store");
+   const allowed=value.map(String).filter(x=>["base","engine","license_manager","billing_store"].includes(x));
    clean.allowed_services=[...new Set(allowed)];
   }
  }
@@ -108,6 +109,36 @@ export async function updateDevControlSettings(actor:any,patch:Record<string,unk
   await client.from("dev_control_audit").insert({actor_id:actor.id,actor_email:actor.email,action:"settings.update",target:"dev_control",detail:{changed:Object.keys(clean).filter(x=>!["updated_by","updated_at"].includes(x))}});
  }
  return {...DEFAULT_SETTINGS,...data,storageReady:true};
+}
+
+const DEFAULT_MCP_SETTINGS={
+ enabled:true,
+ read_only_mode:false,
+ allow_mutations:true,
+ require_critical_confirmation:true,
+ expose_base:true,
+ expose_engine:true,
+ expose_license_manager:true,
+ expose_billing_store:true,
+ expose_authority_controls:true,
+ audit_logging:true,
+};
+
+export async function getDevMcpSettings(){
+ const {data,error}=await sb().from("dev_mcp_settings").select("*").eq("id",true).maybeSingle();
+ if(error){if(error.code==="42P01")return {...DEFAULT_MCP_SETTINGS,storageReady:false};throw new Error("Unable to load MCP settings")}
+ return {...DEFAULT_MCP_SETTINGS,...(data||{}),storageReady:true};
+}
+
+const MCP_BOOLEAN_SETTINGS=new Set(Object.keys(DEFAULT_MCP_SETTINGS));
+export async function updateDevMcpSettings(actor:any,patch:Record<string,unknown>){
+ const clean:any={updated_by:actor.id,updated_at:new Date().toISOString()};
+ for(const [key,value] of Object.entries(patch||{}))if(MCP_BOOLEAN_SETTINGS.has(key)&&typeof value==="boolean")clean[key]=value;
+ if(Object.keys(clean).length<=2)throw new Error("No valid MCP settings supplied");
+ const {data,error}=await sb().from("dev_mcp_settings").update(clean).eq("id",true).select("*").single();
+ if(error)throw new Error("Unable to update MCP settings");
+ await recordDevControlAudit(actor,"mcp.settings.update","dev_mcp",{changed:Object.keys(clean).filter(x=>!["updated_by","updated_at"].includes(x))});
+ return {...DEFAULT_MCP_SETTINGS,...data,storageReady:true};
 }
 
 async function latestRuns(cfg:any){
@@ -128,12 +159,22 @@ async function latestRuns(cfg:any){
 
 export async function getDevControlSystems(){
  const settings=await getDevControlSettings();
- const systems=await Promise.all(Object.values(TARGETS).map(async cfg=>{
+ const systems=await Promise.all(Object.values(TARGETS).map(async (cfg:any)=>{
   try{
+   if(cfg.kind==="release"){
+    const [mainRef,releaseRef,runs]=await Promise.all([
+     github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
+     github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.releaseRef)),
+     github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.promotionWorkflow+"/runs?per_page=5"),
+    ]);
+    const currentSha=String(mainRef?.object?.sha||""),preparedSha=String(releaseRef?.object?.sha||"");
+    const latestPromotion=cleanRun((runs?.workflow_runs||[])[0]);
+    return {key:cfg.key,label:cfg.label,repo:cfg.repo,branch:cfg.branch,kind:cfg.kind,priority:cfg.priority,releaseRef:cfg.releaseRef,ok:true,currentSha,preparedSha,preparedCurrent:Boolean(currentSha&&preparedSha===currentSha),latestPromotion};
+   }
    const runs=await latestRuns(cfg);
-   return {key:cfg.key,label:cfg.label,repo:cfg.repo,branch:cfg.branch,ok:true,currentSha:runs.sha,productionSha:runs.lastSuccessful?.head_sha||null,productionCurrent:Boolean(runs.sha&&runs.lastSuccessful?.head_sha===runs.sha),latestScan:runs.scan,latestDeploy:runs.deploy,latestQuickDeploy:runs.quick,activeRun:runs.active};
+   return {key:cfg.key,label:cfg.label,repo:cfg.repo,branch:cfg.branch,kind:cfg.kind,priority:cfg.priority,ok:true,currentSha:runs.sha,productionSha:runs.lastSuccessful?.head_sha||null,productionCurrent:Boolean(runs.sha&&runs.lastSuccessful?.head_sha===runs.sha),latestScan:runs.scan,latestDeploy:runs.deploy,latestQuickDeploy:runs.quick,activeRun:runs.active};
   }catch(error:any){
-   return {key:cfg.key,label:cfg.label,repo:cfg.repo,branch:cfg.branch,ok:false,error:error?.message||"Unable to inspect target"};
+   return {key:cfg.key,label:cfg.label,repo:cfg.repo,branch:cfg.branch,kind:cfg.kind,priority:cfg.priority,ok:false,error:error?.message||"Unable to inspect target"};
   }
  }));
  return {settings,systems,checkedAt:new Date().toISOString()};
@@ -175,7 +216,7 @@ export async function runDevControlAction(actor:any,input:{action:DevControlActi
  if(settings.emergency_kill_switch)throw new Error("Dev Control emergency kill switch is active");
  if(settings.read_only_mode)throw new Error("Dev Control is in read-only mode");
  if(!settings.allowed_services.includes(input.target))throw new Error("Target is not allowed by Dev Control settings");
- const cfg=targetConfig(input.target);
+ const cfg=serviceTargetConfig(input.target);
  const action=input.action;
  const critical=action==="quick_deploy"||action==="production_deploy"||action==="redeploy";
  if(critical&&settings.require_critical_confirmation&&!input.confirm)throw new Error("Explicit confirmation is required for this production action");
