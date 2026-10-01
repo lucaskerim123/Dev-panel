@@ -1,6 +1,7 @@
 import {createClient} from "@supabase/supabase-js";
 import {createServerFn} from "@tanstack/react-start";
-import {requireOwner} from "@/lib/panel.server";
+import crypto from "node:crypto";
+import {inspectSourceCore,requireOwner,startReleaseCore} from "@/lib/panel.server";
 import {oauthAdminState,revokeOAuthConnection} from "@/lib/dev-oauth.server";
 
 type ReleaseTarget="base"|"engine";
@@ -361,6 +362,146 @@ export async function licenseChange(input:{identity:string;action:string;license
   else throw new Error("Specify installation_id because more than one installation may match.");
  }
  return licenseManagerRequest("/license/"+encodeURIComponent(id)+"/control",{method:"POST",body:JSON.stringify({action:control,...(installationId?{installation_id:installationId}:{})})});
+}
+
+
+function nextPatchVersion(value:any){
+ const match=String(value||"").trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+ return match?match[1]+"."+match[2]+"."+(Number(match[3])+1):"1.0.0";
+}
+function migrationPathInfo(target:ReleaseTarget,pathValue:any){
+ const path=String(pathValue||"").replaceAll("\\","/");
+ if(target==="base"){
+  const match=path.match(/^supabase\/migrations\/(\d{14})_([A-Za-z0-9._-]+)\.sql$/);
+  return match?{id:match[1]+"_"+match[2],component:"base",path}:null;
+ }
+ const match=path.match(/^supabase\/migrations\/(shared|base|apex|mcp|studio)\/(\d{14})_([A-Za-z0-9._-]+)\.sql$/);
+ return match?{id:match[2]+"_"+match[3],component:match[1].toLowerCase(),path}:null;
+}
+async function githubFileSha256(repo:string,path:string,ref:string){
+ const row=await github("/repos/"+repo+"/contents/"+path.split("/").map(encodeURIComponent).join("/")+"?ref="+encodeURIComponent(ref));
+ const raw=String(row?.content||"").replace(/\n/g,"");
+ if(!raw)throw new Error("Unable to read migration "+path+" at "+ref);
+ const bytes=Buffer.from(raw,"base64");
+ return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+async function releaseDatabaseInspection(target:ReleaseTarget,inspection:any){
+ const repo=String(inspection?.repo||releaseCfg(target).repo),ref=String(inspection?.head||"");
+ const files=Array.isArray(inspection?.files)?inspection.files:[];
+ const migrations:any[]=[];
+ const invalid:any[]=[];
+ for(const file of files){
+  const info=migrationPathInfo(target,file?.filename||file?.path);
+  if(!info)continue;
+  const status=String(file?.status||"modified").toLowerCase();
+  const immutableViolation=!["added","snapshot"].includes(status);
+  if(immutableViolation){
+   invalid.push({...info,status,reason:"Published migrations are immutable; existing migration files cannot be "+status+"."});
+   continue;
+  }
+  const sha256=await githubFileSha256(repo,info.path,ref);
+  migrations.push({...info,status,sha256});
+ }
+ const ids=new Set<string>(),duplicates:string[]=[];
+ for(const item of migrations){if(ids.has(item.id))duplicates.push(item.id);ids.add(item.id)}
+ if(duplicates.length)for(const id of duplicates)invalid.push({id,status:"duplicate",reason:"Duplicate migration ID"});
+ return {
+  ok:invalid.length===0,
+  changedMigrationCount:migrations.length,
+  migrations,
+  invalid,
+  latestMigration:migrations.map(x=>x.id).sort().at(-1)||null,
+  message:invalid.length?invalid.length+" database migration issue"+(invalid.length===1?"":"s")+" must be fixed before packaging.":migrations.length?migrations.length+" new immutable database migration"+(migrations.length===1?"":"s")+" ready for packaging.":"No database migration changes in this release."
+ };
+}
+function releaseDocument(target:ReleaseTarget,input:any){
+ const base=target==="base",inspection=input.inspection||{},version=String(input.version||"");
+ const commits=(inspection.commits||[]).map((row:any)=>String(row?.commit?.message||row?.message||"").split("\n")[0].trim()).filter(Boolean).slice(0,20);
+ const summary=inspection.changeSummary||{};
+ const components=Array.isArray(input.components)?input.components:[];
+ const db=input.database||{};
+ return `# OrbitFS ${base?"Base Deployment":"Update"} — v${version}
+
+## Source
+Repository: ${inspection.repo}
+Release ref: ${inspection.ref}
+Source SHA: ${inspection.head}
+Previous published version: ${inspection.baseline?.version||"none"}
+
+## Change summary
+Files: ${Number(summary.total??inspection.files?.length??0)}
+Added: ${Number(summary.added||0)}
+Modified: ${Number(summary.modified||0)}
+Deleted: ${Number(summary.deleted||0)}
+${base?"":`Components: ${components.join(", ")||"none"}`}
+
+## Database
+${db.message||"Database inspection not run."}
+${(db.migrations||[]).map((m:any)=>`• ${m.id} · ${m.component} · sha256:${m.sha256}`).join("\n")||"No new database migrations."}
+
+## Main changes
+${commits.length?commits.map((x:string)=>"• "+x).join("\n"):"No commit summaries returned."}
+
+## Compatibility
+${base?"Base deployment compatibility is validated by the Base worker.":`Minimum Base version: ${input.minimumBaseVersion}\nMinimum deployer protocol: ${input.protocol}`}
+
+## Notes
+${String(input.notes||"").trim()||"No additional operator notes."}
+`;
+}
+export async function releaseBuildCommand(input:{action:string;target:ReleaseTarget;channel?:string;version?:string;minimum_base_version?:string;protocol?:string;notes?:string},actor?:any){
+ const target=input.target;
+ await assertTargetEnabled(target);
+ const action=String(input.action||"status").toLowerCase();
+ const channel=String(input.channel||"stable").trim().toLowerCase()||"stable";
+ const branch=await releaseBranchState(target);
+ const type=target==="base"?"base":"engine";
+ if(action==="status"){
+  let inspection:any=null;
+  if(branch.preparedCurrent)inspection=await inspectSourceCore({type,channel});
+  const currentVersion=inspection?.baseline?.version||null;
+  const suggestedVersion=inspection?.initialUpdate
+   ?String(inspection?.baseline?.initialReleaseVersion||"1.0.0")
+   :inspection?.initialRelease?"1.0.0":nextPatchVersion(currentVersion);
+  const migrations=branch.preparedCurrent&&inspection?await releaseDatabaseInspection(target,inspection):null;
+  return {ok:true,target,channel,preparedCurrent:branch.preparedCurrent,commitsAhead:branch.commitsAhead,currentVersion,suggestedVersion,sourceSha:inspection?.head||branch.preparedSha||null,components:inspection?.detectedComponents||[],minimumBaseVersion:target==="engine"?(inspection?.baseBaseline?.version||null):null,database:migrations,message:branch.preparedCurrent?(target==="base"?"Base":"Update")+" release source is ready. Suggested version v"+suggestedVersion+".":"Prepare "+(target==="base"?"Base":"Engine")+" source first; "+branch.commitsAhead+" commit"+(branch.commitsAhead===1?" is":"s are")+" still ahead."};
+ }
+ if(!branch.preparedCurrent)throw new Error("Prepare "+(target==="base"?"Base":"Engine")+" source before "+action+". The release branch is "+branch.commitsAhead+" commit"+(branch.commitsAhead===1?"":"s")+" behind main.");
+ const inspection=await inspectSourceCore({type,channel});
+ const currentVersion=inspection?.baseline?.version||null;
+ const suggestedVersion=inspection?.initialUpdate
+  ?String(inspection?.baseline?.initialReleaseVersion||"1.0.0")
+  :inspection?.initialRelease?"1.0.0":nextPatchVersion(currentVersion);
+ const version=String(input.version||suggestedVersion).trim();
+ const database=await releaseDatabaseInspection(target,inspection);
+ const components=target==="engine"?(Array.isArray(inspection?.detectedComponents)?inspection.detectedComponents:[]):["base"];
+ const minimumBaseVersion=target==="engine"?String(input.minimum_base_version||inspection?.baseBaseline?.version||"").trim():"";
+ const protocol=target==="engine"?String(input.protocol||"1").trim():"";
+ if(action==="inspect")return {ok:true,target,channel,currentVersion,suggestedVersion,selectedVersion:version,sourceSha:inspection.head,hasSourceChanges:inspection.hasSourceChanges===true,changeSummary:inspection.changeSummary||{},components,minimumBaseVersion:minimumBaseVersion||null,protocol:protocol||null,database,message:(target==="base"?"Base":"Update")+" inspected at "+String(inspection.head||"").slice(0,8)+". Next version v"+version+"."};
+ if(action==="database")return {ok:database.ok,target,version,sourceSha:inspection.head,database,message:database.message};
+ if(action!=="build")throw new Error("Unsupported release build action");
+ const mutationSettings=await assertMutation(target);
+ requireSetting(mutationSettings,"allow_prepare","Release building is disabled");
+ if(!inspection.hasSourceChanges)throw new Error("No source changes exist since the published "+(target==="base"?"Base":"Update")+" baseline.");
+ if(!database.ok)throw new Error(database.message);
+ if(target==="engine"&&!components.length)throw new Error("No Update components were detected. Open Full Dev Panel to select the intended component targets before building.");
+ if(target==="engine"&&!minimumBaseVersion)throw new Error("Minimum Base version could not be resolved.");
+ const changelogDraft=releaseDocument(target,{inspection,version,components,minimumBaseVersion,protocol,database,notes:input.notes});
+ const release=await startReleaseCore({
+  type,
+  version,
+  channel,
+  notes:String(input.notes||""),
+  changelogDraft,
+  files:inspection.files||[],
+  components,
+  minimumBaseVersion,
+  protocol,
+  changelogTemplate:target==="base"?"base_deployment_log":"update_changelog",
+  inspectedSourceSha:String(inspection.head||""),
+  inspectedPublishedBaselineSha:inspection.publishedBaselineSha??null,
+ },actor||{id:"dev-mcp",email:"dev-mcp@orbitfs.local"});
+ return {ok:true,target,version,channel,sourceSha:inspection.head,database:{changedMigrationCount:database.changedMigrationCount,latestMigration:database.latestMigration},runId:release.runId||null,runUrl:null,draftId:release.draftId,message:(target==="base"?"Base release ":"Update release ")+"v"+version+" build started"+(release.runId?" · run #"+release.runId:"")+".";
 }
 
 export async function releaseCommand(input:{action:string;release_id?:string;other_release_id?:string;type?:string;channel?:string;target_channel?:string;reason?:string}){
