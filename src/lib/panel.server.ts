@@ -267,7 +267,7 @@ function verifyPassword(password:string,hash:string,salt:string){
  return derived.length===stored.length&&crypto.timingSafeEqual(derived,stored);
 }
 
-function requireOwner(token:string){
+export function requireOwner(token:string){
  const user=readSession(token);
  if(String(user.role).toLowerCase()!=="owner")throw new Error("Owner access required");
  return user;
