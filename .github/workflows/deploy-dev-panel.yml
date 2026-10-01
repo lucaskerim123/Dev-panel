@@ -17,6 +17,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment:
+      name: production
     env:
       VERCEL_ORG_ID: team_KSnSnvytDVnjei0muWV3AAMN
       VERCEL_PROJECT_ID: prj_x8GB1vfx3VtzvncJljwnHndaSW3n
