@@ -1,7 +1,7 @@
 import {createFileRoute} from "@tanstack/react-router";
 import {
  customerLicenseSnapshot,deployService,diagnostics,getMcpSettings,licenseChange,licenseView,
- engineAuthorityState,prepareRelease,releaseBranchState,releaseCommand,setEngineAuthority,systemOverview,updateCommand,workflowDetail
+ prepareRelease,releaseBranchState,releaseCommand,systemOverview,updateCommand,workflowDetail
 } from "@/lib/dev-mcp.server";
 import {DEV_PANEL_UI_URI,devPanelUiResource} from "@/lib/dev-mcp-ui";
 import {authenticateMcpOAuth,oauthChallenge} from "@/lib/dev-oauth.server";
@@ -26,7 +26,6 @@ const tools:any[]=[
  {name:"show_dev",title:"Open Dev Panel",description:"Open the private mobile Dev Panel interface inside ChatGPT. Use when the user says show dev, open dev, open the dev panel, or asks for the developer interface.",inputSchema:{type:"object",properties:{}},securitySchemes:readSecurity,annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},_meta:{...metaSecurity(readSecurity),ui:{resourceUri:DEV_PANEL_UI_URI,visibility:["model","app"]},"openai/outputTemplate":DEV_PANEL_UI_URI}},
  {name:"status",title:"Dev status",description:"Read current Base, Engine, service, or customer state. Use for status, what is current, whether a release branch is behind, or a quick system overview.",inputSchema:{type:"object",properties:{scope:{type:"string",enum:["all","base","engine","license_manager","billing_store","customer"]},identity:{type:"string",description:"Customer email, customer number, licence id, or account id when scope=customer."}}},securitySchemes:readSecurity,annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},_meta:metaSecurity(readSecurity)},
  {name:"prepare",title:"Prepare Base or Engine",description:"Prepare base, engine, or both. Compares the release branch with current main, gathers the outstanding change set, then dispatches the repository's guarded workflow which scans current main and moves the release branch only if validation succeeds.",inputSchema:{type:"object",properties:{target:{type:"string",enum:["base","engine","both"]}},required:["target"]},securitySchemes:writeSecurity,annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},_meta:metaSecurity(writeSecurity)},
- {name:"engine",title:"Engine authority",description:"Read, start, or stop OrbitFS Engine update/deployment authority. Stop disables License Manager update_deployment_enabled so Engine bootstrap/update deployment authorization is refused; Start restores it. This does not stop Base licensing or License Manager itself.",inputSchema:{type:"object",properties:{action:{type:"string",enum:["status","start","stop"]}},required:["action"]},securitySchemes:writeSecurity,annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:metaSecurity(writeSecurity)},
  {name:"deploy",title:"Service deployment",description:"Control Dev Panel deployment workflows for Custom License Manager or V2 Billing Store. Supports status, Full Scan, normal deploy, Quick Deploy, safe redeploy, and workflow cancel/retry. Billing Store Quick Deploy can target an explicit branch.",inputSchema:{type:"object",properties:{target:{type:"string",enum:["license_manager","billing_store"]},action:{type:"string",enum:["status","scan","deploy","quick_deploy","redeploy","cancel","retry"]},branch:{type:"string"},run_id:{type:"number"}},required:["target","action"]},securitySchemes:writeSecurity,annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:metaSecurity(writeSecurity)},
  {name:"release",title:"Release management",description:"Read or control authoritative releases in Custom License Manager. Handles list/get/manifest/validation/source/build/failures/compare plus approve, reject, publish, unpublish, archive/deprecate, restore, promote, rollback, revert, and pause.",inputSchema:{type:"object",properties:{action:{type:"string"},release_id:{type:"string"},other_release_id:{type:"string"},type:{type:"string",enum:["base","update"]},channel:{type:"string"},target_channel:{type:"string"},reason:{type:"string"}},required:["action"]},securitySchemes:writeSecurity,annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:metaSecurity(writeSecurity)},
  {name:"update",title:"Customer update",description:"Inspect, plan, dry-run, apply, retry, or roll back an OrbitFS customer update. Resolve the customer by email when possible and use Billing Store only for customer/install execution while License Manager stays authoritative for release and licence state.",inputSchema:{type:"object",properties:{action:{type:"string",enum:["status","available","inspect","compatibility","plan","dry_run","apply","retry","rollback"]},identity:{type:"string"},installation_id:{type:"string"},release_id:{type:"string"},version:{type:"string"},channel:{type:"string"},reason:{type:"string"}},required:["action","identity"]},securitySchemes:writeSecurity,annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:metaSecurity(writeSecurity)},
@@ -37,7 +36,7 @@ const tools:any[]=[
 ];
 const scopesByTool:Record<string,string[]>={
  show_dev:["dev.read"],status:["dev.read"],license:["dev.read"],diagnose:["dev.read"],logs:["dev.read"],
- prepare:["dev.write"],engine:["dev.write"],deploy:["dev.write"],release:["dev.write"],update:["dev.write"],
+ prepare:["dev.write"],deploy:["dev.write"],release:["dev.write"],update:["dev.write"],
  license_change:["dev.write","authority.write"]
 };
 
@@ -60,12 +59,6 @@ async function callTool(name:string,args:any,auth:any){
   if(scope==="customer"){if(!args?.identity)throw new Error("identity is required for customer status");return toolResult(await customerLicenseSnapshot(String(args.identity)))}
  }
  if(name==="prepare")return toolResult(await prepareRelease(String(args?.target||"") as any));
- if(name==="engine"){
-  const action=String(args?.action||"status");
-  if(action==="status")return toolResult(await engineAuthorityState());
-  if(action==="start"||action==="stop")return toolResult(await setEngineAuthority(action));
-  throw new Error("Unsupported Engine action");
- }
  if(name==="deploy")return toolResult(await deployService(String(args?.target||"") as any,String(args?.action||"") as any,{branch:args?.branch?String(args.branch):undefined,run_id:args?.run_id?Number(args.run_id):undefined}));
  if(name==="release")return toolResult(await releaseCommand(args||{}));
  if(name==="update")return toolResult(await updateCommand(args||{}));
