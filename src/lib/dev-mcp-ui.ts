@@ -21,6 +21,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
    <div><div class="title">Dev Panel</div><div class="sub">Private developer controls</div></div>
    <div class="grow"></div>
    <span class="pill" id="overall">Loading</span>
+   <button class="btn" id="closePanel" aria-label="Close Dev Panel">Close</button>
   </div>
   <nav class="pageNav" id="pageNav"><button class="btn active" data-page-btn="overview">Overview</button><button class="btn" data-page-btn="releases">Releases</button><button class="btn" data-page-btn="services">Services</button><button class="btn full-only" data-page-btn="customers">Customers</button><button class="btn full-only" data-page-btn="logs">Logs</button></nav>
   <div class="refreshMeta"><span class="statusPulse" id="statusPulse"><i></i><span id="refreshState">Live status</span></span><span id="lastChecked">Not refreshed yet</span></div>
@@ -179,6 +180,7 @@ document.querySelectorAll("[data-release-action]").forEach(btn=>btn.addEventList
 $("refresh").addEventListener("click",async()=>{const r=await refreshStatus();if(!r)showResult("prepareResult",{error:"Status refresh failed"})});
 document.querySelectorAll("[data-page-btn]").forEach(btn=>btn.addEventListener("click",()=>showPage(btn.dataset.pageBtn)));
 $("fullscreen").addEventListener("click",async()=>{if(window.openai?.requestDisplayMode)await window.openai.requestDisplayMode({mode:"fullscreen"})});
+$("closePanel").addEventListener("click",async()=>{try{if(window.openai?.requestClose){await window.openai.requestClose();return}if(window.openai?.requestDisplayMode&&window.openai?.displayMode!=="inline"){await window.openai.requestDisplayMode({mode:"inline"});return}}catch{}$("card").classList.add("hidden")});
 async function refreshLive(){
  if(!lastRun?.id||!lastRunTarget||!window.openai?.callTool)return;
  try{
