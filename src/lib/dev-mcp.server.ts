@@ -1,6 +1,7 @@
 import {createClient} from "@supabase/supabase-js";
 import {createServerFn} from "@tanstack/react-start";
 import {requireOwner} from "@/lib/panel.server";
+import {oauthAdminState,revokeOAuthConnection} from "@/lib/dev-oauth.server";
 
 type ReleaseTarget="base"|"engine";
 type ServiceTarget="license_manager"|"billing_store";
@@ -44,10 +45,21 @@ export async function updateMcpSettings(actor:any,patch:Record<string,unknown>){
 export const getMcpSettingsForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
  const origin=String(process.env.DEV_MCP_PUBLIC_ORIGIN||process.env.APP_URL||"https://dev.incendiarynetworks.cc").replace(/\/+$/,"");
- return {settings:await getMcpSettings(),runtime:{endpoint:origin+"/devmcp",oauth:true,ownerOnly:true}};
+ return {settings:await getMcpSettings(),runtime:{
+  endpoint:origin+"/devmcp",oauth:true,ownerOnly:true,pkce:"S256",resourceBinding:true,
+  protectedResourceMetadata:origin+"/.well-known/oauth-protected-resource",
+  authorizationMetadata:origin+"/.well-known/oauth-authorization-server",
+  authorizeEndpoint:origin+"/oauth/authorize",tokenEndpoint:origin+"/oauth/token",registrationEndpoint:origin+"/oauth/register"
+ }};
 });
 export const updateMcpSettingsForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;patch:Record<string,unknown>}})=>{
  const actor=requireOwner(data.token);return {settings:await updateMcpSettings(actor,data.patch||{})};
+});
+export const getMcpConnectionsForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ requireOwner(data.token);return oauthAdminState();
+});
+export const manageMcpConnectionForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;clientId?:string;removeClient?:boolean;all?:boolean}})=>{
+ requireOwner(data.token);return revokeOAuthConnection({clientId:data.clientId,removeClient:data.removeClient===true,all:data.all===true});
 });
 
 function cleanRun(run:any){return run?{id:Number(run.id),name:run.name,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,head_branch:run.head_branch,event:run.event,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url}:null}
