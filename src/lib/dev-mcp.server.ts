@@ -111,7 +111,8 @@ export async function assertMcpToolEnabled(name:string){
  return settings;
 }
 export async function prepareRelease(target:"base"|"engine"|"both"){
- await assertMutation(target==="both"?undefined:target);
+ const mutationSettings=await assertMutation(target==="both"?undefined:target);
+ requireSetting(mutationSettings,"allow_prepare","Release preparation is disabled");
  const targets:ReleaseTarget[]=target==="both"?["base","engine"]:[target];
  const settings=await getMcpSettings();
  if(target==="both"){
@@ -143,7 +144,11 @@ async function serviceState(target:ServiceTarget){
 }
 export async function deployService(target:ServiceTarget,action:"status"|"scan"|"deploy"|"quick_deploy"|"redeploy"|"cancel"|"retry",options:{branch?:string;run_id?:number}={}){
  if(action==="status"){await assertTargetEnabled(target);return serviceState(target);}
- await assertMutation(target);
+ const mutationSettings=await assertMutation(target);
+ if(action==="scan")requireSetting(mutationSettings,"allow_service_scan","Service scans are disabled");
+ if(action==="deploy"||action==="redeploy")requireSetting(mutationSettings,"allow_service_deploy","Service deployments are disabled");
+ if(action==="quick_deploy")requireSetting(mutationSettings,"allow_quick_deploy","Quick Deploy is disabled");
+ if(action==="cancel"||action==="retry")requireSetting(mutationSettings,"allow_workflow_control","Workflow cancel/retry is disabled");
  const cfg=serviceCfg(target);
  if(action==="cancel"||action==="retry"){
   const runId=Number(options.run_id||0);if(!runId)throw new Error("run_id is required");
@@ -251,25 +256,33 @@ export async function licenseView(identity:string,view="summary",licenseId?:stri
  return snapshot;
 }
 export async function licenseChange(input:{identity:string;action:string;license_id?:string;installation_id?:string;component?:string;enabled?:boolean;components?:Record<string,boolean>;reason?:string}){
- await assertMutation("license_manager");
+ const mutationSettings=await assertMutation("license_manager");
  const action=String(input.action||"").toLowerCase();
  if(action==="link"){
+  requireSetting(mutationSettings,"allow_license_linking","Customer licence linking is disabled");
   await assertTargetEnabled("billing_store");
   if(!input.identity)throw new Error("Customer email or identity is required");
   return billingStoreRequest("/api/internal/orbitfs/customer-lookup",{method:"POST",body:JSON.stringify({action:"link_license",identity:input.identity,license_id:input.license_id,mode:input.license_id?"manual":"auto"})});
  }
  const snapshot=await customerLicenseSnapshot(input.identity),selected=selectLicense(snapshot,input.license_id),id=lid(selected);
  const map:any={suspend:"suspend",unsuspend:"activate",restore:"activate",activate:"activate",revoke:"revoke",rotate:"rotate",unlock_installation:"unlock-installation"};
- if(action==="force_revalidation")return licenseManagerRequest("/license/pulse",{method:"POST",body:JSON.stringify({action:"pulse",pulse_action:"full_recheck",scope:"license",license_id:id,reason:input.reason||"dev-mcp-force-revalidation"})});
+ if(action==="force_revalidation"){
+  requireSetting(mutationSettings,"allow_license_state_changes","Licence state/runtime changes are disabled");
+  return licenseManagerRequest("/license/pulse",{method:"POST",body:JSON.stringify({action:"pulse",pulse_action:"full_recheck",scope:"license",license_id:id,reason:input.reason||"dev-mcp-force-revalidation"})});
+ }
  if(action==="set_component"){
+  requireSetting(mutationSettings,"allow_license_entitlement_changes","Licence component/entitlement changes are disabled");
   if(!input.component||typeof input.enabled!=="boolean")throw new Error("component and enabled are required");
   return licenseManagerRequest("/license/"+encodeURIComponent(id)+"/control",{method:"POST",body:JSON.stringify({action:"set-component",component:input.component,enabled:input.enabled})});
  }
  if(action==="set_components"){
+  requireSetting(mutationSettings,"allow_license_entitlement_changes","Licence component/entitlement changes are disabled");
   if(!input.components||typeof input.components!=="object")throw new Error("components is required");
   return licenseManagerRequest("/license/"+encodeURIComponent(id)+"/control",{method:"POST",body:JSON.stringify({action:"set-components",components:input.components})});
  }
  const control=map[action];if(!control)throw new Error("Unsupported licence action");
+ if(control==="unlock-installation")requireSetting(mutationSettings,"allow_installation_unlock","Installation unlock is disabled");
+ else requireSetting(mutationSettings,"allow_license_state_changes","Licence state changes are disabled");
  let installationId=String(input.installation_id||"").trim();
  if(control==="unlock-installation"&&!installationId){
   const acts=Array.isArray(selected.activations)?selected.activations.filter((x:any)=>x.status==="active"):[];
@@ -285,7 +298,12 @@ export async function releaseCommand(input:{action:string;release_id?:string;oth
  await assertTargetEnabled("license_manager");
  const action=String(input.action||"list").toLowerCase();
  const mutation=new Set(["approve","reject","publish","unpublish","withdraw","archive","deprecate","restore","promote","rollback","revert","pause"]);
- if(mutation.has(action))await assertMutation("license_manager");
+ if(mutation.has(action)){
+  const mutationSettings=await assertMutation("license_manager");
+  if(["approve","reject"].includes(action))requireSetting(mutationSettings,"allow_release_review","Release approve/reject is disabled");
+  else if(["rollback","revert"].includes(action))requireSetting(mutationSettings,"allow_release_rollback","Release rollback/revert is disabled");
+  else requireSetting(mutationSettings,"allow_release_publish","Release publication/lifecycle changes are disabled");
+ }
  if(action==="list"){
   const qs=new URLSearchParams();if(input.type)qs.set("type",input.type);if(input.channel)qs.set("channel",input.channel);qs.set("product","orbitfs_base");qs.set("include_archived","true");
   return licenseManagerRequest("/releases?"+qs.toString());
@@ -321,7 +339,11 @@ async function chooseInstallation(snapshot:any,installationId?:string){
 export async function updateCommand(input:{action:string;identity:string;installation_id?:string;release_id?:string;version?:string;channel?:string;reason?:string}){
  await assertTargetEnabled("billing_store");
  const action=String(input.action||"status").toLowerCase(),snapshot=await customerLicenseSnapshot(input.identity),license=selectLicense(snapshot),install=await chooseInstallation(snapshot,input.installation_id);
- if(["apply","retry","rollback"].includes(action))await assertMutation("billing_store");
+ if(["apply","retry","rollback"].includes(action)){
+  const mutationSettings=await assertMutation("billing_store");
+  if(action==="rollback")requireSetting(mutationSettings,"allow_update_rollback","Customer update rollback is disabled");
+  else requireSetting(mutationSettings,"allow_update_apply","Customer update apply/retry is disabled");
+ }
  const latest=await licenseManagerRequest("/updater",{method:"POST",body:JSON.stringify({product:"orbitfs_base",channel:input.channel||install.release_channel||"stable",type:"update",release_id:input.release_id})});
  const release=latest?.release||null,manifest=release?.manifest||{},components=Array.isArray(manifest.components)?manifest.components.map((x:any)=>String(x).toLowerCase()):[];
  const entitled=Object.entries(license.components||license?.metadata?.license_policy?.components||{}).filter(([,v])=>Boolean(v)).map(([k])=>k.replace(/^orbitfs_/,""));
