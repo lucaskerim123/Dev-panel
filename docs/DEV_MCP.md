@@ -32,16 +32,15 @@ V2 Billing Store is used for customer/email resolution, customer-to-licence bind
 
 The `show_dev` tool returns `ui://dev-panel/v1.html` as an MCP App resource.
 
-The UI supports inline, fullscreen and PiP display modes. UI buttons call the same MCP tools that are available through normal chat commands. Fullscreen includes prepare, service deployment, customer licence, customer update, release and live-job controls; PiP follows an active workflow.
+The UI supports inline, fullscreen and PiP display modes. Chat/model access is intentionally read-only. State-changing MCP tools are app-only and are invoked from explicit owner controls inside the embedded Dev Panel UI. Fullscreen includes prepare, service deployment, customer licence, customer update, release and live-job controls; PiP follows an active workflow. Opening the UI does not authorize a mutation, and mutation buttons require an additional confirmation before execution.
 
 Typical use:
 
 - `@Dev show dev`
-- `@Dev prepare both`
+- `@Dev show dev` then use the UI for prepare/build/deploy/release/update/licence mutations
 - `@Dev check person@example.com license`
-- `@Dev suspend person@example.com`
 - `@Dev show Engine status`
-- `@Dev quick deploy License Manager`
+- `@Dev show workflow logs`
 
 ## Tools
 
@@ -83,7 +82,7 @@ Reads a customer licence by email, customer number, account ID or licence ID. Bi
 ### `license_change`
 Owner-only licence mutation. Actions include suspend, unsuspend/restore, revoke, rotate, component changes, installation unlock, runtime revalidation and customer licence linking.
 
-Normal customer licence actions do not add an extra Dev MCP confirmation step.
+Customer licence mutations are app-only and require explicit confirmation in the embedded Dev Panel UI.
 
 ### `diagnose`
 Combined Base/Engine/License Manager/Billing Store diagnostic snapshot, optionally including a customer.
@@ -143,3 +142,14 @@ The Dev Panel MCP Controls page now manages:
 These settings only gate the single private `/devmcp` path. They do not create local licence, release or deployment authority.
 
 The MCP remains structured: no generic shell, arbitrary SQL, arbitrary URL proxy, or secret reader.
+
+
+## Control boundary
+
+The MCP is deliberately split by caller surface:
+
+- Model/chat-visible tools are read-only: `show_dev`, `status`, `license`, `diagnose`, and `logs`.
+- Mutation-capable tools such as `prepare`, `deploy`, `release`, `release_build`, `update`, `license_change`, and `lockdown` are app-only.
+- Opening the Dev Panel, asking to inspect/fix code, or asking for a plan does not grant mutation authority.
+- A state-changing UI action requires an explicit owner click plus confirmation.
+- Custom License Manager and V2 Billing Store production deploy workflows are manual-only. Dev Panel is the only project permitted to deploy automatically from a push to `main`.
