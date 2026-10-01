@@ -196,7 +196,19 @@ function render(data){
  const anyAction=!base.preparedCurrent||!engine.preparedCurrent||!lmCurrent||!bsCurrent;
  text("overall",anyFailure?"Failure":anyAction?"Action needed":"Latest");stateClass("overall",anyFailure?"red":anyAction?"blue":"green");
 }
+function mutationPrompt(name,args={}){
+ if(name==="prepare")return "Prepare "+String(args?.target||"release")+"? This dispatches the guarded preparation workflow.";
+ if(name==="deploy"&&String(args?.action||"status")!=="status")return "Run "+String(args?.action||"deployment").replaceAll("_"," ")+" for "+String(args?.target||"service")+"?";
+ if(name==="release"&&!["list","get","manifest","validation","source","build","failures","compare"].includes(String(args?.action||"")))return "Apply release action "+String(args?.action||"change")+"?";
+ if(name==="release_build"&&String(args?.action||"")==="build")return "Build and package the "+String(args?.target||"release")+" release?";
+ if(name==="update"&&["apply","retry","rollback"].includes(String(args?.action||"")))return "Apply customer update action "+String(args?.action)+"?";
+ if(name==="license_change")return "Change this customer licence?";
+ if(name==="lockdown"&&["lock","unlock"].includes(String(args?.action||"")))return String(args?.action)==="lock"?"Lock down the Licence Manager API?":"Unlock the Licence Manager API?";
+ return "";
+}
 async function call(name,args={}){
+ const prompt=mutationPrompt(name,args);
+ if(prompt&&!window.confirm(prompt))throw new Error("Action cancelled.");
  document.body.classList.add("busy");
  try{
   if(!window.openai?.callTool)throw new Error("ChatGPT tool bridge is unavailable.");
