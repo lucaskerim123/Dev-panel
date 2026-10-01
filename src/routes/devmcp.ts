@@ -1,6 +1,6 @@
 import {createFileRoute} from "@tanstack/react-router";
 import {
- customerLicenseSnapshot,deployService,diagnostics,getMcpSettings,licenseChange,licenseView,
+ customerLicenseSnapshot,deployService,diagnostics,getMcpSettings,licenseChange,licenseManagerLockdownControl,licenseView,
  prepareRelease,releaseBranchState,releaseCommand,systemOverview,updateCommand,workflowDetail
 } from "@/lib/dev-mcp.server";
 import {DEV_PANEL_UI_URI,devPanelUiResource} from "@/lib/dev-mcp-ui";
@@ -31,13 +31,14 @@ const tools:any[]=[
  {name:"update",title:"Customer update",description:"Inspect, plan, dry-run, apply, retry, or roll back an OrbitFS customer update. Resolve the customer by email when possible and use Billing Store only for customer/install execution while License Manager stays authoritative for release and licence state.",inputSchema:{type:"object",properties:{action:{type:"string",enum:["status","available","inspect","compatibility","plan","dry_run","apply","retry","rollback"]},identity:{type:"string"},installation_id:{type:"string"},release_id:{type:"string"},version:{type:"string"},channel:{type:"string"},reason:{type:"string"}},required:["action","identity"]},securitySchemes:writeSecurity,annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:metaSecurity(writeSecurity)},
  {name:"license",title:"Customer licence",description:"Read authoritative customer/licence information by email, customer number, licence id, or account id. Billing Store resolves customer linkage when needed; Custom License Manager supplies licence status, components, installations, runtime state, pulse and history.",inputSchema:{type:"object",properties:{identity:{type:"string"},view:{type:"string",enum:["summary","all","runtime","installations","entitlements","components","pulse","events","history","eligibility"]},license_id:{type:"string"}},required:["identity"]},securitySchemes:readSecurity,annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},_meta:metaSecurity(readSecurity)},
  {name:"license_change",title:"Change customer licence",description:"Owner-only licence control by customer email or other identity. Use directly for suspend, unsuspend, restore, revoke, rotate, component access, installation unlock, runtime revalidation, or linking a licence to a Billing Store customer. Normal customer licence actions do not require a second confirmation.",inputSchema:{type:"object",properties:{identity:{type:"string"},action:{type:"string",enum:["suspend","unsuspend","restore","activate","revoke","rotate","unlock_installation","force_revalidation","set_component","set_components","link"]},license_id:{type:"string"},installation_id:{type:"string"},component:{type:"string"},enabled:{type:"boolean"},components:{type:"object",additionalProperties:{type:"boolean"}},reason:{type:"string"}},required:["identity","action"]},securitySchemes:authoritySecurity,annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:metaSecurity(authoritySecurity)},
+ {name:"lockdown",title:"Licence Manager emergency lockdown",description:"Emergency kill switch for the Custom Licence Manager API. Use for lockdown, kill/shut down the licence manager API, lockdown status, or owner recovery/unlock. Lockdown leaves only the dedicated status/recovery path available; unlock uses the separate recovery credential.",inputSchema:{type:"object",properties:{action:{type:"string",enum:["status","lock","unlock"]},reason:{type:"string"},message:{type:"string"}},required:["action"]},securitySchemes:authoritySecurity,annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:metaSecurity(authoritySecurity)},
  {name:"diagnose",title:"Dev diagnostics",description:"Run a combined Dev Panel diagnostic snapshot for Base, Engine, License Manager, Billing Store, and optionally one customer identity.",inputSchema:{type:"object",properties:{identity:{type:"string"}}},securitySchemes:readSecurity,annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},_meta:metaSecurity(readSecurity)},
  {name:"logs",title:"Workflow details",description:"Read the latest or selected GitHub Actions run and job/step state for Base, Engine, License Manager, or Billing Store.",inputSchema:{type:"object",properties:{target:{type:"string",enum:["base","engine","license_manager","billing_store"]},run_id:{type:"number"}},required:["target"]},securitySchemes:readSecurity,annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},_meta:metaSecurity(readSecurity)}
 ];
 const scopesByTool:Record<string,string[]>={
  show_dev:["dev.read"],status:["dev.read"],license:["dev.read"],diagnose:["dev.read"],logs:["dev.read"],
  prepare:["dev.write"],deploy:["dev.write"],release:["dev.write"],update:["dev.write"],
- license_change:["dev.write","authority.write"]
+ license_change:["dev.write","authority.write"],lockdown:["dev.write","authority.write"]
 };
 
 function toolEnabled(settings:any,name:string){
@@ -64,6 +65,7 @@ async function callTool(name:string,args:any,auth:any){
  if(name==="update")return toolResult(await updateCommand(args||{}));
  if(name==="license")return toolResult(await licenseView(String(args?.identity||""),String(args?.view||"summary"),args?.license_id?String(args.license_id):undefined));
  if(name==="license_change")return toolResult(await licenseChange({...args,identity:String(args?.identity||"")}));
+ if(name==="lockdown")return toolResult(await licenseManagerLockdownControl({action:String(args?.action||"status") as any,reason:args?.reason?String(args.reason):undefined,message:args?.message?String(args.message):undefined}));
  if(name==="diagnose")return toolResult(await diagnostics(args?.identity?String(args.identity):undefined));
  if(name==="logs")return toolResult(await workflowDetail({target:String(args?.target||"") as any,run_id:args?.run_id?Number(args.run_id):undefined}));
  throw new Error("Unknown MCP tool");
@@ -74,7 +76,7 @@ async function handlePost(request:Request){
  const auth=await authenticateMcpOAuth(request);if(!auth||auth.valid!==true)return unauthorized();
  const body=await request.json().catch(()=>null);if(!body||body.jsonrpc!=="2.0"||typeof body.method!=="string")return rpcError(body?.id??null,-32600,"Invalid Request",400);
  const id=body.id??null;
- if(body.method==="initialize")return rpc(id,{protocolVersion:"2025-11-25",capabilities:{tools:{listChanged:false},resources:{subscribe:false,listChanged:false}},serverInfo:{name:"private-dev-panel",title:"Private Dev Panel",version:"1.0.0"},instructions:"Private owner-only developer controls. Use show_dev when the user asks to open the Dev Panel. Use prepare for base/engine release branch preparation. Customer licence commands should accept email identities when possible."});
+ if(body.method==="initialize")return rpc(id,{protocolVersion:"2025-11-25",capabilities:{tools:{listChanged:false},resources:{subscribe:false,listChanged:false}},serverInfo:{name:"private-dev-panel",title:"Private Dev Panel",version:"1.0.0"},instructions:"Private owner-only developer controls. Use show_dev when the user asks for dev, showdev, opendev, openui, open dev, open dev ui, or the Dev Panel. Use prepare for base/engine release branch preparation. Use lockdown for emergency License Manager API shutdown/recovery. Customer licence commands should accept email identities when possible."});
  if(body.method==="notifications/initialized"||body.method==="notifications/cancelled")return new Response(null,{status:202,headers:cors()});
  if(body.method==="ping")return rpc(id,{});
  if(body.method==="tools/list"){const settings=await getMcpSettings();return rpc(id,{tools:visibleTools(settings)});}
