@@ -1,10 +1,10 @@
 import {useCallback,useEffect,useState} from "react";
 import {
  Activity,AppWindow,Boxes,ChevronDown,Copy,KeyRound,Link2,LockKeyhole,Play,RefreshCw,
- Server,ShieldCheck,SlidersHorizontal,Square,Trash2,Unplug,Workflow
+ Server,ShieldAlert,ShieldCheck,SlidersHorizontal,Square,Trash2,Unplug,Workflow
 } from "lucide-react";
 import {
- getMcpConnectionsForPanel,getMcpSettingsForPanel,manageMcpConnectionForPanel,updateMcpSettingsForPanel
+ getLicenseManagerLockdownForPanel,getMcpConnectionsForPanel,getMcpSettingsForPanel,manageMcpConnectionForPanel,setLicenseManagerLockdownForPanel,updateMcpSettingsForPanel
 } from "@/lib/dev-mcp.server";
 
 type SettingItem=readonly [string,string,string];
@@ -88,6 +88,8 @@ export function McpControlsWorkspace({session}:{session:any}){
  const [settings,setSettings]=useState<any>(null);
  const [runtime,setRuntime]=useState<any>(null);
  const [connections,setConnections]=useState<any>({clients:[],activeTokens:0});
+ const [lockdown,setLockdown]=useState<any>(null);
+ const [lockdownError,setLockdownError]=useState("");
  const [oauthError,setOauthError]=useState("");
  const [busy,setBusy]=useState("");
  const [error,setError]=useState("");
@@ -104,6 +106,9 @@ export function McpControlsWorkspace({session}:{session:any}){
   try{
    setConnections(await getMcpConnectionsForPanel({data:{token:session.token}}));
   }catch(x:any){setOauthError(x?.message||"OAuth connection details unavailable")}
+  try{
+   setLockdown(await getLicenseManagerLockdownForPanel({data:{token:session.token}}));setLockdownError("");
+  }catch(x:any){setLockdownError(x?.message||"Lockdown state unavailable")}
  },[session.token]);
  useEffect(()=>{void load()},[load]);
 
@@ -125,6 +130,13 @@ export function McpControlsWorkspace({session}:{session:any}){
   setBusy("revoke-all");
   try{await manageMcpConnectionForPanel({data:{token:session.token,all:true}});await refreshConnections();setNotice("All MCP OAuth sessions revoked.")}
   catch(x:any){setOauthError(x?.message||"Unable to revoke sessions")}finally{setBusy("")}
+ }
+ async function lockdownAction(action:"lock"|"unlock"){
+  setBusy("lockdown:"+action);setError("");setNotice("");
+  try{
+   const result=await setLicenseManagerLockdownForPanel({data:{token:session.token,action,reason:action==="lock"?"Emergency lockdown from Dev Panel":"Owner recovery from Dev Panel"}});
+   setLockdown(result);setNotice(action==="lock"?"Licence Manager API locked down.":"Licence Manager API unlocked.");
+  }catch(x:any){setLockdownError(x?.message||"Unable to change lockdown state")}finally{setBusy("")}
  }
 
  const endpoint=runtime?.endpoint||"https://dev.incendiarynetworks.cc/devmcp";
@@ -152,6 +164,24 @@ export function McpControlsWorkspace({session}:{session:any}){
      <button disabled={busy==="enabled"||!settings} onClick={()=>void toggle("enabled",!running)} className={running?"button-secondary":"button-primary"}>
       {running?<><Square size={13}/>Stop MCP</>:<><Play size={13}/>Start MCP</>}
      </button>
+    </div>
+   </div>
+  </section>
+
+  <section className={"release-surface border "+(lockdown?.locked?"border-red-400/50 bg-red-400/5":"border-border")}>
+   <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="flex items-start gap-3">
+     <span className={"orbit-section-icon "+(lockdown?.locked?"text-red-300":"")}><ShieldAlert size={15}/></span>
+     <div>
+      <div className="flex flex-wrap items-center gap-2"><strong className="text-sm">Licence Manager Emergency Lockdown</strong><span className={"orbit-status-pill "+(lockdown?.locked?"border-red-400/40 bg-red-400/10 text-red-200":"orbit-status-tone-success")}>{lockdown?.locked?"LOCKED":"AVAILABLE"}</span></div>
+      <p className="mt-1 max-w-2xl text-[11px] leading-5 text-muted-foreground">Lockdown fails closed: normal Licence Manager API/panel traffic is blocked. Only the dedicated lockdown status and recovery route remain available.</p>
+      {lockdownError&&<p className="mt-2 text-[11px] text-red-300">{lockdownError}</p>}
+     </div>
+    </div>
+    <div className="flex shrink-0 gap-2">
+     {lockdown?.locked?
+      <button disabled={busy==="lockdown:unlock"} className="button-primary" onClick={()=>void lockdownAction("unlock")}><Play size={13}/>Unlock API</button>:
+      <button disabled={busy==="lockdown:lock"} className="inline-flex items-center gap-2 rounded-lg border border-red-400/40 bg-red-400/10 px-3 py-2 text-xs font-semibold text-red-200" onClick={()=>void lockdownAction("lock")}><Square size={13}/>Lock Down API</button>}
     </div>
    </div>
   </section>
