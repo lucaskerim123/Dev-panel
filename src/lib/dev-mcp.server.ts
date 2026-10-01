@@ -30,17 +30,22 @@ function required(name:string){const value=process.env[name];if(!value)throw new
 function db(){return createClient(required("SUPABASE_URL"),required("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false,autoRefreshToken:false}})}
 function compactSettings(row:any){return {...DEFAULT_MCP_SETTINGS,...Object.fromEntries(Object.keys(DEFAULT_MCP_SETTINGS).filter(k=>row?.[k]!==undefined).map(k=>[k,Boolean(row[k])]))}}
 export async function getMcpSettings(){
- const {data,error}=await db().from("dev_mcp_settings").select("*").eq("id",true).maybeSingle();
- if(error){if(error.code==="42P01")return {...DEFAULT_MCP_SETTINGS,storageReady:false};throw new Error("Unable to load MCP settings")}
- return {...compactSettings(data),storageReady:true};
+ try{
+  const {data,error}=await db().from("dev_mcp_settings").select("*").eq("id",true).maybeSingle();
+  if(error)return {...DEFAULT_MCP_SETTINGS,storageReady:false,storageError:String(error.message||error.code||"MCP settings storage unavailable")};
+  if(!data)return {...DEFAULT_MCP_SETTINGS,storageReady:false,storageError:"MCP settings row is missing"};
+  return {...compactSettings(data),storageReady:true,storageError:null};
+ }catch(error:any){
+  return {...DEFAULT_MCP_SETTINGS,storageReady:false,storageError:String(error?.message||"MCP settings storage unavailable")};
+ }
 }
 export async function updateMcpSettings(actor:any,patch:Record<string,unknown>){
  const clean:any={updated_by:actor.id,updated_at:new Date().toISOString()};
  for(const key of Object.keys(DEFAULT_MCP_SETTINGS))if(typeof patch?.[key]==="boolean")clean[key]=patch[key];
  if(Object.keys(clean).length<=2)throw new Error("No valid MCP settings supplied");
- const {data,error}=await db().from("dev_mcp_settings").update(clean).eq("id",true).select("*").single();
- if(error)throw new Error("Unable to update MCP settings");
- return {...compactSettings(data),storageReady:true};
+ const {data,error}=await db().from("dev_mcp_settings").upsert({id:true,...clean},{onConflict:"id"}).select("*").single();
+ if(error)throw new Error("Unable to update MCP settings: "+String(error.message||error.code||"storage error"));
+ return {...compactSettings(data),storageReady:true,storageError:null};
 }
 export const getMcpSettingsForPanel=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOwner(data.token);
