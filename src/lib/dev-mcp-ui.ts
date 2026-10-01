@@ -10,7 +10,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
 :root{color-scheme:light dark;--bg:transparent;--surface:color-mix(in srgb,Canvas 94%,CanvasText 6%);--surface2:color-mix(in srgb,Canvas 88%,CanvasText 12%);--border:color-mix(in srgb,CanvasText 18%,transparent);--text:CanvasText;--muted:color-mix(in srgb,CanvasText 58%,transparent);--good:#22a06b;--warn:#b7791f;--bad:#c93756}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 body{padding:10px}.shell{max-width:760px;margin:0 auto}.card{border:1px solid var(--border);background:var(--surface);border-radius:18px;overflow:hidden}.head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--border)}.mark{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--surface2);font-weight:800}.grow{flex:1}.title{font-weight:800}.sub{font-size:11px;color:var(--muted)}.pill{font-size:10px;font-weight:800;border:1px solid var(--border);border-radius:999px;padding:5px 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}.stat{border:1px solid var(--border);background:var(--surface2);border-radius:13px;padding:11px;min-height:76px}.stat b{display:block;margin-top:6px;font-size:13px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:5px}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
-.section{border-top:1px solid var(--border);padding:12px}.section h2{font-size:12px;margin:0 0 9px}.row{display:flex;gap:7px;flex-wrap:wrap}.btn{appearance:none;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 11px;font-weight:700;font-size:11px;cursor:pointer}.btn.primary{background:var(--text);color:Canvas;border-color:var(--text)}.btn.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));color:var(--bad)}.btn:disabled{opacity:.55;cursor:not-allowed}.field{display:flex;gap:7px}.field input{min-width:0;flex:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 10px;outline:none}.result{margin-top:9px;border:1px solid var(--border);background:color-mix(in srgb,var(--surface2) 75%,transparent);border-radius:11px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:230px;overflow:auto}.hidden{display:none}.full-only{display:none}.fullscreen .full-only{display:block}.fullscreen .grid{grid-template-columns:repeat(4,1fr)}.fullscreen .shell{max-width:980px}.customerActions{margin-top:8px}.busy{opacity:.7;pointer-events:none}
+.section{border-top:1px solid var(--border);padding:12px}.section h2{font-size:12px;margin:0 0 9px}.row{display:flex;gap:7px;flex-wrap:wrap}.btn{appearance:none;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 11px;font-weight:700;font-size:11px;cursor:pointer}.btn.primary{background:var(--text);color:Canvas;border-color:var(--text)}.btn.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));color:var(--bad)}.btn:disabled{opacity:.55;cursor:not-allowed}.field{display:flex;gap:7px}.field input{min-width:0;flex:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 10px;outline:none}.result{margin-top:9px;border:1px solid var(--border);background:color-mix(in srgb,var(--surface2) 75%,transparent);border-radius:11px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:230px;overflow:auto}.hidden{display:none}.full-only{display:none}.fullscreen .full-only{display:block}.fullscreen .grid{grid-template-columns:repeat(4,1fr)}.fullscreen .shell{max-width:980px}.customerActions{margin-top:8px}.busy{opacity:.7;pointer-events:none}.pip .grid,.pip .section{display:none}.pip #liveSection{display:block}.pip .card{border-radius:16px}.pip #liveResult{max-height:180px}
 @media(max-width:520px){body{padding:0}.card{border-radius:0;border-left:0;border-right:0}.grid{grid-template-columns:1fr 1fr}.fullscreen .grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
@@ -63,6 +63,10 @@ body{padding:10px}.shell{max-width:760px;margin:0 auto}.card{border:1px solid va
    </div>
    <div class="result hidden" id="serviceResult"></div>
   </div>
+  <div class="section hidden" id="liveSection">
+   <h2>Live job</h2>
+   <div class="result" id="liveResult">Waiting for workflow state…</div>
+  </div>
   <div class="section">
    <div class="row">
     <button class="btn" id="refresh">Refresh</button>
@@ -74,7 +78,7 @@ body{padding:10px}.shell{max-width:760px;margin:0 auto}.card{border:1px solid va
 </div>
 <script>
 const $=id=>document.getElementById(id);
-let current=window.openai?.toolOutput||{},lastRun=null;
+let current=window.openai?.toolOutput||{},lastRun=null,lastRunTarget=null,liveTimer=null;
 function short(v){return v?String(v).slice(0,8):"—"}
 function text(el,value){$(el).textContent=value==null?"—":String(value)}
 function showResult(id,value){const el=$(id);el.classList.remove("hidden");el.textContent=typeof value==="string"?value:JSON.stringify(value,null,2)}
@@ -94,8 +98,12 @@ async function call(name,args={}){
   if(!window.openai?.callTool)throw new Error("ChatGPT tool bridge is unavailable.");
   const result=await window.openai.callTool(name,args);
   const value=unpack(result);
-  if(value?.run)lastRun=value.run;if(value?.results){const run=value.results.find?.(x=>x.run)?.run;if(run)lastRun=run}
-  if(lastRun)$("pin").classList.remove("hidden");
+  if(value?.run){lastRun=value.run;lastRunTarget=args?.target||null}
+  if(value?.results){
+   const item=value.results.find?.(x=>x.run);
+   if(item?.run){lastRun=item.run;lastRunTarget=item.target||args?.target||null}
+  }
+  if(lastRun&&lastRunTarget)$("pin").classList.remove("hidden");
   return value;
  }finally{document.body.classList.remove("busy")}
 }
@@ -105,8 +113,21 @@ document.querySelectorAll("[data-license-action]").forEach(btn=>btn.addEventList
 document.querySelectorAll("[data-deploy]").forEach(btn=>btn.addEventListener("click",async()=>{const [target,action]=btn.dataset.deploy.split(":");try{showResult("serviceResult",await call("deploy",{target,action}))}catch(e){showResult("serviceResult",{error:e.message})}}));
 $("refresh").addEventListener("click",async()=>{try{const r=await call("status",{scope:"all"});render(r)}catch(e){showResult("prepareResult",{error:e.message})}});
 $("fullscreen").addEventListener("click",async()=>{if(window.openai?.requestDisplayMode)await window.openai.requestDisplayMode({mode:"fullscreen"})});
-$("pin").addEventListener("click",async()=>{if(window.openai?.requestDisplayMode)await window.openai.requestDisplayMode({mode:"pip"})});
-function applyMode(){document.body.classList.toggle("fullscreen",window.openai?.displayMode==="fullscreen")}
+async function refreshLive(){
+ if(!lastRun?.id||!lastRunTarget||!window.openai?.callTool)return;
+ try{
+  const value=unpack(await window.openai.callTool("logs",{target:lastRunTarget,run_id:Number(lastRun.id)}));
+  $("liveSection").classList.remove("hidden");
+  const run=value?.run||{},jobs=value?.jobs||[];
+  const lines=[lastRunTarget+" · run #"+(run.run_number||run.id||lastRun.id)+" · "+(run.status||"unknown")+(run.conclusion?" / "+run.conclusion:"")];
+  for(const job of jobs)lines.push((job.conclusion==="success"?"✓":job.conclusion==="failure"?"✕":"…")+" "+job.name+" · "+job.status+(job.conclusion?" / "+job.conclusion:""));
+  $("liveResult").textContent=lines.join("\n");
+  if(run.status==="completed"&&liveTimer){clearInterval(liveTimer);liveTimer=null}
+ }catch(e){$("liveSection").classList.remove("hidden");$("liveResult").textContent="Live job read failed: "+e.message}
+}
+function startLive(){void refreshLive();if(liveTimer)clearInterval(liveTimer);liveTimer=setInterval(()=>void refreshLive(),4000)}
+$("pin").addEventListener("click",async()=>{if(window.openai?.requestDisplayMode)await window.openai.requestDisplayMode({mode:"pip"});startLive()});
+function applyMode(){const mode=window.openai?.displayMode;document.body.classList.toggle("fullscreen",mode==="fullscreen");document.body.classList.toggle("pip",mode==="pip");if(mode==="pip"&&lastRun&&!liveTimer)startLive()}
 window.addEventListener("openai:set_globals",()=>{applyMode();if(window.openai?.toolOutput)render(window.openai.toolOutput)});
 applyMode();render(current);
 </script>
