@@ -201,7 +201,7 @@ export async function customerLicenseSnapshot(identity:string){
   const ident=norm(identity);
   return ident&&(norm(lid(x))===ident||norm(x.customer_external_id)===ident||norm(x.external_reference)===ident||norm(x.license_key_last4)===ident);
  });
- return {identity,billing:{found:Boolean(customer),customer,profile:billing?.profile||null,orders,bindings:billing?.bindings||[],installations:billing?.installations||[],error:billing?.error||null},licenses,licenseCount:licenses.length,unlinked:Boolean(customer)&&!linked.size};
+ return {identity,billing:{found:Boolean(customer),customer,profile:billing?.profile||null,orders,orderItems:billing?.orderItems||[],bindings:billing?.bindings||[],installations:billing?.installations||[],providerConnections:billing?.providerConnections||[],error:billing?.error||null},licenses,licenseCount:licenses.length,unlinked:Boolean(customer)&&!linked.size};
 }
 function selectLicense(snapshot:any,licenseId?:string){
  const matches=Array.isArray(snapshot?.licenses)?snapshot.licenses:[];
