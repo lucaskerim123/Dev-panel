@@ -201,7 +201,126 @@ These actions should require stronger confirmation than read-only commands.
 
 ---
 
-## 6. Billing Store support
+## 6. Licence Manager emergency lockdown
+
+This is a **global hard lockdown**, not maintenance mode and not a restricted API mode.
+
+When enabled, the Licence Manager must lock out **all customer installations and customer websites that depend on Licence Manager authority**. Customers must not be able to continue into the normal OrbitFS website/application while the global lockdown is active.
+
+### Commands
+
+- `license_manager_lockdown_status`
+  - Return whether global lockdown is active, who activated it, when it started, and the operator-supplied reason/message.
+
+- `enable_license_manager_lockdown`
+  - Immediately place the entire Licence Manager authority into emergency lockdown.
+  - Owner-only.
+  - Requires an explicit confirmation and reason.
+
+- `disable_license_manager_lockdown`
+  - Remove the emergency lockdown through the isolated recovery route.
+  - Owner-only.
+  - Must be available even while every normal Licence Manager route is blocked.
+
+### Lockdown behaviour
+
+While global lockdown is active, block **everything** except the lockdown state and the route required to remove lockdown.
+
+This includes blocking:
+
+- Customer website/application access where Licence Manager authority is required.
+- Customer installation licence validation.
+- Runtime licence checks.
+- Runtime pulse/heartbeat.
+- Installation registration and activation.
+- Entitlement/component checks.
+- Installation lock/unlock operations through normal APIs.
+- Update eligibility and update authorization.
+- Release eligibility and release APIs.
+- Deployer authorization.
+- Updater authorization.
+- Billing Store integration.
+- Managed API keys.
+- Integration API keys.
+- Admin mutation APIs.
+- Normal internal service-to-service API access.
+- Any other normal Licence Manager API route.
+
+### Only things that remain available
+
+- Global lockdown state/status.
+- The isolated owner recovery route used to disable lockdown.
+
+No other customer, admin, integration, updater, deployer, Billing Store, or runtime route should continue operating during global lockdown.
+
+### Customer-facing result
+
+Global lockdown must clearly tell affected customers that OrbitFS is locked by the authority service rather than pretending their licence has expired or been revoked.
+
+The customer website/application should show a dedicated lockdown screen/message such as:
+
+> OrbitFS is temporarily locked by system administration. Access is currently unavailable.
+
+The response/state must be distinguishable from:
+
+- licence expired
+- licence suspended
+- licence revoked
+- invalid installation
+- ordinary service failure
+
+This prevents installations from treating an emergency authority lockdown as a permanent licence state change.
+
+### Recovery boundary
+
+The unlock path must be deliberately isolated from the normal Licence Manager API surface.
+
+It should:
+
+- require owner authorization;
+- expose no general licensing functionality;
+- expose no customer data mutation;
+- expose no deployment/update commands;
+- only read lockdown state and remove the lockdown;
+- write an audit event when lockdown is enabled or disabled.
+
+---
+
+## 7. Normal admin lockout message
+
+Normal customer or installation lockouts are different from the global emergency lockdown.
+
+When an admin intentionally locks or suspends an individual licence/installation, the admin should be able to provide a **custom customer-facing lock message**.
+
+### Applies to
+
+- `suspend_license`
+- `lock_installation`
+
+### Features
+
+- Optional custom lock title.
+- Custom lock message/reason.
+- Internal admin reason can remain separate from the customer-facing message.
+- Customer website/application displays the configured lock message instead of a generic error.
+- Lock message remains attached to the authoritative Licence Manager lock/suspension state.
+- Restoring/unlocking the licence removes the customer lock screen on the next successful authority check.
+
+Example customer-facing state:
+
+> **Access locked**
+>
+> Your OrbitFS installation has been locked by an administrator.
+>
+> Please contact support regarding your account.
+
+The exact message may be customised by the admin performing the lock.
+
+This normal per-customer lockout must **not** be confused with the global emergency lockdown above.
+
+---
+
+## 8. Billing Store support
 
 Only include Billing Store commands that help operate or diagnose the OrbitFS system.
 
@@ -225,7 +344,7 @@ Only include Billing Store commands that help operate or diagnose the OrbitFS sy
 
 ---
 
-## 7. Core settings
+## 9. Core settings
 
 Keep settings small and security-focused.
 
@@ -245,6 +364,8 @@ Keep settings small and security-focused.
 - Automatic post-deploy health check.
 - Automatic rollback on failed verification: **off by default**.
 - Emergency Dev Control kill switch.
+- Licence Manager global emergency lockdown control.
+- Dedicated owner-only Licence Manager lockdown recovery path.
 
 ---
 
@@ -345,8 +466,9 @@ If a future command cannot be described as a narrow, auditable OrbitFS operation
 9. `health_check` and `full_diagnostics`.
 10. Updater status/preparation/execution.
 11. Licence Manager read-only commands.
-12. Guarded Licence Manager mutation commands.
-13. Billing Store diagnostic commands.
-14. Additional commands only when a real operational need appears.
+12. Licence Manager global emergency lockdown + isolated unlock route.
+13. Guarded Licence Manager mutation commands, including customer-facing admin lock messages.
+14. Billing Store diagnostic commands.
+15. Additional commands only when a real operational need appears.
 
 The rule for V1 is simple: **build the commands that replace real manual work first, and leave everything else out until it proves useful.**
