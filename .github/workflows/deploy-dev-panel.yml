@@ -78,8 +78,26 @@ jobs:
           if(project.projectId!==process.env.VERCEL_PROJECT_ID) throw new Error('Vercel project mismatch');
           NODE
 
-      - name: Build production
-        run: vercel build --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
+      - name: Install app dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Vercel production artifact
+        env:
+          VERCEL: "1"
+          ORBITFS_VERCEL_BUILD: "1"
+        run: bun run build
+
+      - name: Verify Vercel build output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .vercel/output/config.json
+          test -d .vercel/output/functions -o -d .vercel/output/static
+          node - <<'NODE'
+          const fs=require('fs');
+          const config=JSON.parse(fs.readFileSync('.vercel/output/config.json','utf8'));
+          if(Number(config.version)!==3) throw new Error('Unexpected Vercel Build Output API version');
+          NODE
 
       - name: Deploy production
         run: vercel deploy --prebuilt --archive=tgz --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
