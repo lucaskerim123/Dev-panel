@@ -7,8 +7,8 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Dev Panel</title>
 <style>
-:root{color-scheme:light dark;--bg:transparent;--surface:color-mix(in srgb,Canvas 94%,CanvasText 6%);--surface2:color-mix(in srgb,Canvas 88%,CanvasText 12%);--border:color-mix(in srgb,CanvasText 18%,transparent);--text:CanvasText;--muted:color-mix(in srgb,CanvasText 58%,transparent);--good:#22a06b;--warn:#b7791f;--bad:#c93756}
-*{box-sizing:border-box}html{height:100%;overflow:hidden}body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:10px 10px calc(110px + env(safe-area-inset-bottom))}.shell{max-width:760px;margin:0 auto;min-height:100%}.card{border:1px solid var(--border);background:var(--surface);border-radius:18px;overflow:hidden}.head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--border)}.mark{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--surface2);font-weight:800}.grow{flex:1}.title{font-weight:800}.sub{font-size:11px;color:var(--muted)}.pill{font-size:10px;font-weight:800;border:1px solid var(--border);border-radius:999px;padding:5px 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}.stat{border:1px solid var(--border);background:var(--surface2);border-radius:13px;padding:11px;min-height:76px}.stat b{display:block;margin-top:6px;font-size:13px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:5px}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+:root{color-scheme:light dark;--bg:transparent;--surface:color-mix(in srgb,Canvas 94%,CanvasText 6%);--surface2:color-mix(in srgb,Canvas 88%,CanvasText 12%);--border:color-mix(in srgb,CanvasText 18%,transparent);--text:CanvasText;--muted:color-mix(in srgb,CanvasText 58%,transparent);--good:#22a06b;--info:#3b82f6;--ready:#f59e0b;--bad:#ef476f}
+*{box-sizing:border-box}html{height:100%;overflow:hidden}body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:10px 10px calc(110px + env(safe-area-inset-bottom))}.shell{max-width:760px;margin:0 auto;min-height:100%}.card{border:1px solid var(--border);background:var(--surface);border-radius:18px;overflow:hidden}.head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--border)}.mark{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--surface2);font-weight:800}.grow{flex:1}.title{font-weight:800}.sub{font-size:11px;color:var(--muted)}.pill{font-size:10px;font-weight:800;border:1px solid var(--border);border-radius:999px;padding:5px 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}.stat{border:1px solid var(--border);background:var(--surface2);border-radius:13px;padding:11px;min-height:82px;transition:border-color .18s,background .18s,box-shadow .18s}.stat b{display:block;margin-top:6px;font-size:13px}.stat.state-red{border-color:color-mix(in srgb,var(--bad) 58%,var(--border));background:color-mix(in srgb,var(--bad) 10%,var(--surface2));box-shadow:inset 3px 0 0 var(--bad)}.stat.state-blue{border-color:color-mix(in srgb,var(--info) 58%,var(--border));background:color-mix(in srgb,var(--info) 10%,var(--surface2));box-shadow:inset 3px 0 0 var(--info)}.stat.state-orange{border-color:color-mix(in srgb,var(--ready) 58%,var(--border));background:color-mix(in srgb,var(--ready) 10%,var(--surface2));box-shadow:inset 3px 0 0 var(--ready)}.stat.state-green{border-color:color-mix(in srgb,var(--good) 58%,var(--border));background:color-mix(in srgb,var(--good) 10%,var(--surface2));box-shadow:inset 3px 0 0 var(--good)}.miniState.state-red{color:var(--bad)}.miniState.state-blue{color:var(--info)}.miniState.state-orange{color:var(--ready)}.miniState.state-green{color:var(--good)}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:5px}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
 .section{border-top:1px solid var(--border);padding:12px}.section h2{font-size:12px;margin:0 0 9px}.sectionLead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.sectionLead h2{margin:0}.miniState{font-size:9px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.08em}.row{display:flex;gap:7px;flex-wrap:wrap}.opsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.opsGrid .btn{width:100%;padding:10px 7px}.btn{appearance:none;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 11px;font-weight:700;font-size:11px;cursor:pointer}.btn.primary{background:var(--text);color:Canvas;border-color:var(--text)}.btn.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));color:var(--bad)}.btn:disabled{opacity:.55;cursor:not-allowed}.field{display:flex;gap:7px}.field input{min-width:0;flex:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:10px;padding:9px 10px;outline:none}.result{margin-top:9px;border:1px solid var(--border);background:color-mix(in srgb,var(--surface2) 75%,transparent);border-radius:11px;padding:10px;font-size:11px;white-space:pre-wrap;max-height:230px;overflow:auto}.hidden{display:none}.full-only{display:none}.fullscreen .full-only{display:block}.fullscreen .grid{grid-template-columns:repeat(4,1fr)}.fullscreen .shell{max-width:980px}.fullscreen{padding-bottom:calc(150px + env(safe-area-inset-bottom))}.customerActions{margin-top:8px}.busy{opacity:.7;pointer-events:none}.pip .grid,.pip .section{display:none}.pip #liveSection{display:block}.pip .card{border-radius:16px}.pip #liveResult{max-height:180px}
 @media(max-width:520px){body{padding:0 0 calc(120px + env(safe-area-inset-bottom))}.card{border-radius:0;border-left:0;border-right:0}.grid{grid-template-columns:1fr 1fr}.fullscreen .grid{grid-template-columns:1fr 1fr}.opsGrid{grid-template-columns:repeat(3,minmax(0,1fr))}.opsGrid .btn{font-size:10px;padding:9px 5px}}
 </style>
@@ -23,10 +23,10 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
    <span class="pill" id="overall">Loading</span>
   </div>
   <div class="grid">
-   <div class="stat"><span class="sub">Base</span><b id="baseState">—</b><span class="sub" id="baseDetail"></span></div>
-   <div class="stat"><span class="sub">Engine</span><b id="engineState">—</b><span class="sub" id="engineDetail"></span></div>
-   <div class="stat"><span class="sub">Licence Manager</span><b id="lmState">—</b><span class="sub" id="lmDetail"></span></div>
-   <div class="stat"><span class="sub">Billing Store</span><b id="bsState">—</b><span class="sub" id="bsDetail"></span></div>
+   <div class="stat" id="baseCard"><span class="sub">Base release</span><b id="baseState">—</b><span class="sub" id="baseDetail"></span></div>
+   <div class="stat" id="engineCard"><span class="sub">Engine update</span><b id="engineState">—</b><span class="sub" id="engineDetail"></span></div>
+   <div class="stat" id="lmCard"><span class="sub">Licence Manager</span><b id="lmState">—</b><span class="sub" id="lmDetail"></span></div>
+   <div class="stat" id="bsCard"><span class="sub">V2 Billing Store</span><b id="bsState">—</b><span class="sub" id="bsDetail"></span></div>
   </div>
   <div class="section">
    <div class="sectionLead"><h2>Prepare release branches</h2><span class="miniState" id="releaseFreshness">Checking releases</span></div>
@@ -106,22 +106,46 @@ const $=id=>document.getElementById(id);
 let current=window.openai?.toolOutput||{},lastRun=null,lastRunTarget=null,liveTimer=null;
 function short(v){return v?String(v).slice(0,8):"—"}
 function text(el,value){$(el).textContent=value==null?"—":String(value)}
+function stateClass(el,state){const node=$(el);if(!node)return;node.classList.remove("state-red","state-blue","state-orange","state-green");if(state)node.classList.add("state-"+state)}
+function newestRun(...runs){return runs.filter(Boolean).sort((a,b)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null}
 function showResult(id,value){const el=$(id);el.classList.remove("hidden");el.textContent=typeof value==="string"?value:JSON.stringify(value,null,2)}
 function unpack(result){return result?.structuredContent||result?.content?.find?.(x=>x.type==="text")?.text||result}
 function render(data){
  current=data||{};
  const base=data?.base||{},engine=data?.engine||{},lm=data?.licenseManager||{},bs=data?.billingStore||{};
  const baseAhead=Number(base.commitsAhead||0),engineAhead=Number(engine.commitsAhead||0);
- text("baseState",base.disabled?"Disabled":base.preparedCurrent?"Release current":"Release behind");text("baseDetail",base.disabled?"":(base.preparedCurrent?short(base.releaseSha||base.currentSha):(baseAhead+" commit"+(baseAhead===1?"":"s")+" to prepare")));
- text("engineState",engine.disabled?"Disabled":engine.preparedCurrent?"Update current":"Update behind");text("engineDetail",engine.disabled?"":(engine.preparedCurrent?short(engine.releaseSha||engine.currentSha):(engineAhead+" commit"+(engineAhead===1?"":"s")+" to prepare")));
- const lmHealth=lm?.health,lmCurrent=Boolean(lm?.service?.productionCurrent),bsCurrent=Boolean(bs?.productionCurrent);
- const lmMain=lm?.service?.currentSha,lmProd=lm?.service?.lastSuccessful?.head_sha,bsMain=bs?.currentSha,bsProd=bs?.lastSuccessful?.head_sha;
- text("lmState",lm?.disabled?"Disabled":!lmCurrent?"Deploy pending":lmHealth?.ok===false?"Issue":"Deploy current");text("lmDetail",lm?.disabled?"":("main "+short(lmMain)+" · prod "+short(lmProd)));
- text("bsState",bs?.disabled?"Disabled":!bsCurrent?"Deploy pending":bs?.ok===false?"Issue":"Deploy current");text("bsDetail",bs?.disabled?"":("main "+short(bsMain)+" · prod "+short(bsProd)));
- text("releaseFreshness",base.preparedCurrent&&engine.preparedCurrent?"Releases current":(baseAhead+engineAhead)+" commits to prepare");
- text("lmDeployState",lm?.disabled?"Disabled":!lmCurrent?"Deploy pending":lmHealth?.ok===false?"Issue":"Current");
- text("bsDeployState",bs?.disabled?"Disabled":!bsCurrent?"Deploy pending":bs?.ok===false?"Issue":"Current");
- const healthy=!base?.error&&!engine?.error&&lmHealth?.ok!==false&&bs?.ok!==false;text("overall",healthy?"Ready":"Check systems");
+ const basePrepareFailed=!base.preparedCurrent&&base.latestPrepare?.status==="completed"&&base.latestPrepare?.conclusion==="failure";
+ const enginePrepareFailed=!engine.preparedCurrent&&engine.latestPrepare?.status==="completed"&&engine.latestPrepare?.conclusion==="failure";
+ const baseColor=base.disabled?null:base.preparedCurrent?"orange":basePrepareFailed?"red":"blue";
+ const engineColor=engine.disabled?null:engine.preparedCurrent?"orange":enginePrepareFailed?"red":"blue";
+ text("baseState",base.disabled?"Disabled":base.preparedCurrent?"Ready to package":basePrepareFailed?"Prepare failed":"Prepare required");
+ text("baseDetail",base.disabled?"":(base.preparedCurrent?("release "+short(base.preparedSha)):basePrepareFailed?"Last prepare workflow failed":(baseAhead+" commit"+(baseAhead===1?"":"s")+" ahead")));
+ text("engineState",engine.disabled?"Disabled":engine.preparedCurrent?"Ready to package":enginePrepareFailed?"Prepare failed":"Prepare required");
+ text("engineDetail",engine.disabled?"":(engine.preparedCurrent?("release "+short(engine.preparedSha)):enginePrepareFailed?"Last prepare workflow failed":(engineAhead+" commit"+(engineAhead===1?"":"s")+" ahead")));
+ stateClass("baseCard",baseColor);stateClass("engineCard",engineColor);
+
+ const lmService=lm?.service||{},lmHealth=lm?.health,lmCurrent=Boolean(lmService.productionCurrent),bsCurrent=Boolean(bs?.productionCurrent);
+ const lmAttempt=newestRun(lmService.latestDeploy,lmService.latestQuickDeploy),bsAttempt=newestRun(bs?.latestDeploy,bs?.latestQuickDeploy);
+ const lmFailed=lmAttempt?.status==="completed"&&lmAttempt?.conclusion==="failure";
+ const bsFailed=bsAttempt?.status==="completed"&&bsAttempt?.conclusion==="failure";
+ const lmMain=lmService.currentSha,lmProd=lmService.lastSuccessful?.head_sha,bsMain=bs?.currentSha,bsProd=bs?.lastSuccessful?.head_sha;
+ const lmColor=lm?.disabled?null:lmFailed?"red":lmCurrent?"green":"blue";
+ const bsColor=bs?.disabled?null:bsFailed?"red":bsCurrent?"green":"blue";
+ text("lmState",lm?.disabled?"Disabled":lmFailed?"Deploy failed":lmCurrent?"Latest deployed":"Update available");
+ text("lmDetail",lm?.disabled?"":(lmFailed?("failed "+short(lmAttempt?.head_sha)):("main "+short(lmMain)+" · prod "+short(lmProd))));
+ text("bsState",bs?.disabled?"Disabled":bsFailed?"Deploy failed":bsCurrent?"Latest deployed":"Update available");
+ text("bsDetail",bs?.disabled?"":(bsFailed?("failed "+short(bsAttempt?.head_sha)):("main "+short(bsMain)+" · prod "+short(bsProd))));
+ stateClass("lmCard",lmColor);stateClass("bsCard",bsColor);
+
+ const releasesReady=base.preparedCurrent&&engine.preparedCurrent;
+ const releaseFailed=basePrepareFailed||enginePrepareFailed;
+ text("releaseFreshness",releaseFailed?"Prepare failed":releasesReady?"Ready to package":(baseAhead+engineAhead)+" commits to prepare");
+ stateClass("releaseFreshness",releaseFailed?"red":releasesReady?"orange":"blue");
+ text("lmDeployState",lm?.disabled?"Disabled":lmFailed?"Failed":lmCurrent?"Latest":"Update available");stateClass("lmDeployState",lmColor);
+ text("bsDeployState",bs?.disabled?"Disabled":bsFailed?"Failed":bsCurrent?"Latest":"Update available");stateClass("bsDeployState",bsColor);
+ const anyFailure=basePrepareFailed||enginePrepareFailed||lmFailed||bsFailed;
+ const anyAction=!base.preparedCurrent||!engine.preparedCurrent||!lmCurrent||!bsCurrent;
+ text("overall",anyFailure?"Failure":anyAction?"Action needed":"Latest");stateClass("overall",anyFailure?"red":anyAction?"blue":"green");
 }
 async function call(name,args={}){
  document.body.classList.add("busy");
