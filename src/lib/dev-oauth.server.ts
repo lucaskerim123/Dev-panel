@@ -115,7 +115,7 @@ export async function authorizeOwner(input:Record<string,string>,email:string,pa
   scopes:request.scopes,resource:request.resource,code_challenge:request.challenge,expires_at:expiresAt,
  });
  if(error)throw new Error("Unable to issue OAuth authorization code");
- await db().from("dev_control_audit").insert({actor_id:owner.id,actor_email:owner.email,action:"oauth.authorized",target:"dev_mcp",detail:{client_id:request.clientId,scopes:request.scopes}});
+
  return {code,owner,...request};
 }
 
