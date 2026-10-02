@@ -292,7 +292,7 @@ function Index() {
     } finally { setBusy(""); }
   };
 
-  const start = async (type: ReleaseType) => {
+  const start = async (type: ReleaseType, options?:{repackage?:boolean;repackageReleaseId?:string|null}) => {
     restoredRunRef.current = true;
     setBusy("start"); setError(""); setNotice("");
     try {
@@ -303,6 +303,8 @@ function Index() {
           changelogTemplate,
           inspectedSourceSha:String(baseline?.head||""),
           inspectedPublishedBaselineSha:baseline?.publishedBaselineSha??null,
+          repackage:Boolean(options?.repackage),
+          repackageReleaseId:options?.repackageReleaseId||null,
         }
       });
       setReviewOpen(false);
@@ -375,11 +377,11 @@ function Index() {
             {tab === "base" && <Composer key={"base-"+releasePageEpoch} type="base" releases={data.base.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
-              onInspect={() => inspect("base")} onStart={() => start("base")} run={runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("base",d,a)} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
+              onInspect={() => inspect("base")} onStart={(options:any) => start("base",options)} run={runRepo === (data.base.repositories?.base?.workerRepo || "lucaskerim123/Dev-panel") ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("base",d,a)} drafts={data.base.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "engine" && <Composer key={"engine-"+releasePageEpoch} type="engine" releases={data.engine.releases||[]} session={session} {...composerProps({ channel, setChannel:changeReleaseChannel, version, setVersion, notes, setNotes, files, commits, baseline,
               setFiles, setCommits, setBaseline, components, setComponents, minBase, setMinBase, protocol, setProtocol, busy, reviewOpen, setReviewOpen, availableChannels,
               changelogTemplate, setChangelogTemplate, changelogDraft, setChangelogDraft })}
-              onInspect={() => inspect("engine")} onStart={() => start("engine")} run={runRepo === "lucaskerim123/V1-vercel-engine" ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
+              onInspect={() => inspect("engine")} onStart={(options:any) => start("engine",options)} run={runRepo === "lucaskerim123/V1-vercel-engine" ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "activity" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "operations" && <OperationsWorkspace session={session} />}
             {tab === "mcp-controls" && <McpControlsWorkspace session={session} />}
