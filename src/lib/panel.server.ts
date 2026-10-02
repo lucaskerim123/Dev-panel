@@ -453,7 +453,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // A handed-off Stage 1 snapshot is not authoritative. When its License Manager
  // record has been cleared, do not display it as a current release or draft.
  // An explicit new build reconciles and removes the orphan after checking its run.
- const authoritativeRows=(Array.isArray(releases?.releases)?releases.releases:[]);
+ const authoritativeRows=(Array.isArray(releases?.releases)?releases.releases.filter((row:any)=>row&&typeof row==="object"):[]);
  const authoritativeKeys=new Set(authoritativeRows.filter((r:any)=>!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
@@ -500,7 +500,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  }
  const releaseDrafts=visibleDrafts.filter((draft:any)=>String(draft.status||"")!=="handed_off"||authoritativeKeys.has(String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase())||Boolean((grouped.get(draft.id)||[]).some((a:any)=>a.status==="success"&&a.run_id))).map((draft:any)=>({...draft,attempts:grouped.get(draft.id)||[]}));
  const availableChannels=Array.isArray(channels?.channels)?channels.channels.filter((x:any)=>x?.enabled===true).map((x:any)=>String(x.channel).trim().toLowerCase()).filter(Boolean):[];
- return {releases:releases?.releases||[],drafts:releaseDrafts,channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
+ return {releases:authoritativeRows,drafts:Array.isArray(releaseDrafts)?releaseDrafts:[],channels:availableChannels,selectedChannel:channel,masterUrl:await configuredMasterUrl(),product,repositories:{base:{repo:BASE_REPO,ref:BASE_REF,workerRepo:BASE_WORKER_REPO,workerRef:BASE_WORKER_REF,workflow:BASE_WORKFLOW},engine:{repo:ENGINE_REPO,ref:ENGINE_REF,workflow:ENGINE_WORKFLOW}}};
 });
 
 
