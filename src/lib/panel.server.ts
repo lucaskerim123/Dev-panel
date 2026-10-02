@@ -453,22 +453,28 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // A handed-off Stage 1 snapshot is not authoritative. When its License Manager
  // record has been cleared, do not display it as a current release or draft.
  // An explicit new build reconciles and removes the orphan after checking its run.
- const authoritativeKeys=new Set((Array.isArray(releases?.releases)?releases.releases:[]).filter((r:any)=>!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ const authoritativeRows=(Array.isArray(releases?.releases)?releases.releases:[]);
+ const authoritativeKeys=new Set(authoritativeRows.filter((r:any)=>!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
- const publishedKeys=new Set((releases?.releases||[]).filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ const publishedKeys=new Set(authoritativeRows.filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
  const visibleDrafts=(drafts||[]).filter((d:any)=>Boolean(d?.inputs?.repackage)||!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
  // Refresh persisted in-flight attempts from GitHub, rather than assuming
  // that the browser stayed open long enough to save the completion event.
  for(const draft of visibleDrafts){
   const draftKey=String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase();
+  const repackageSourceId=String(draft?.inputs?.repackageReleaseId||"").trim();
+  const repackageSourceRevision=Number(draft?.inputs?.repackageRevision||0);
+  const authoritativeReceipt=repackageSourceId
+   ? authoritativeRows.some((r:any)=>!r.archived_at&&String(r.version||"")===String(draft.version||"")&&String(r.channel||"").toLowerCase()===String(draft.channel||"").toLowerCase()&&String(r.id||"")!==repackageSourceId&&(String(r.supersedes_release_id||"")===repackageSourceId||Number(r.revision||0)>repackageSourceRevision))
+   : authoritativeKeys.has(draftKey);
   // Keep the persisted status inside the existing database constraint.
   // "awaiting_receipt" is a read-only display state derived from a successful
   // recorded GitHub attempt until License Manager returns the actual release.
   const completedAttempt=(grouped.get(draft.id)||[]).find((a:any)=>
    String(a.run_id||"")===String(draft.last_run_id||"")&&a.status==="success");
   if(draft.status==="building"&&completedAttempt){
-   if(authoritativeKeys.has(draftKey)){
+   if(authoritativeReceipt){
     const {error:receiptError}=await sb.from("panel_release_drafts").update({status:"handed_off",last_error:null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","building");
     if(receiptError)throw new Error("Unable to reconcile License Manager receipt: "+receiptError.message);
     draft.status="handed_off";
@@ -481,7 +487,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
    const run=await github("/repos/"+workerRepo+"/actions/runs/"+Number(draft.last_run_id));
    const outcome=String(run?.conclusion||"").toLowerCase();
    if(!["success","failure","cancelled","skipped"].includes(outcome))continue;
-   const nextStatus=outcome==="success"?(authoritativeKeys.has(draftKey)?"handed_off":"building"):"draft";
+   const nextStatus=outcome==="success"?(authoritativeReceipt?"handed_off":"building"):"draft";
    const displayStatus=outcome==="success"&&!authoritativeKeys.has(draftKey)?"awaiting_receipt":nextStatus;
    const err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
    const {error:attemptError}=await sb.from("panel_release_attempts").update({status:outcome,completed_at:run.updated_at||new Date().toISOString(),run_url:run.html_url||null,error_summary:err}).eq("draft_id",draft.id).eq("run_id",draft.last_run_id);
@@ -553,6 +559,9 @@ export const prepareReleaseRepackage=createServerFn({method:"POST"}).handler(asy
  const version=String(release.version||"").trim();
  const channel=normalizeChannel(String(release.channel||"stable"));
  if(!version)throw new Error("Published release version is missing.");
+ const registry=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);
+ const current=(Array.isArray(registry?.releases)?registry.releases:[]).filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at&&String(r.review_status||"").toLowerCase()==="approved").sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+ if(String(current?.id||"")!==releaseId)throw new Error("Only the current published release baseline can be repackaged. Refresh the release list and use Repackage on the current release.");
 
  // Reuse the single Stage 1 draft as the permanent build-attempt ledger for
  // this semantic version. License Manager owns immutable package revisions.
@@ -806,7 +815,7 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
  return inspectSourceCore(data);
 });
 
-export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{  readSession(data.token);  const product="orbitfs_base";  const releaseType=data.type==="base"?"base":"update";  const channel=normalizeChannel(data.channel);  const result=await licenseMaster(`/releases?product=${product}&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);  const release=(result?.releases||[]).find((r:any)=>String(r.version)===String(data.version)&&!r.archived_at);  return {release:release||null,product,releaseType,channel};});export const getReleaseRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId?:number}})=>{
+export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{  readSession(data.token);  const product="orbitfs_base";  const releaseType=data.type==="base"?"base":"update";  const channel=normalizeChannel(data.channel);  const result=await licenseMaster(`/releases?product=${product}&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);  const release=(result?.releases||[]).filter((r:any)=>String(r.version)===String(data.version)&&!r.archived_at).sort((a:any,b:any)=>Number(b.revision||1)-Number(a.revision||1)||new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;  return {release,product,releaseType,channel};});export const getReleaseRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId?:number}})=>{
   readSession(data.token);
   const repo=String(data.repo||"").trim();
   if(!allowedRepos.has(repo))throw new Error("Release repository is not allowed");
