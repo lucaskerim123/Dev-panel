@@ -24,7 +24,7 @@ export const DEV_PANEL_UI_HTML=String.raw`<!doctype html>
    <button class="btn" id="closePanel" aria-label="Close Dev Panel">Close</button>
   </div>
   <nav class="pageNav" id="pageNav"><button class="btn active" data-page-btn="overview">Overview</button><button class="btn" data-page-btn="releases">Releases</button><button class="btn" data-page-btn="services">Services</button></nav>
-  <div class="refreshMeta"><span class="statusPulse" id="statusPulse"><i></i><span id="refreshState">Live status</span></span><span id="lastChecked">Not refreshed yet</span></div>
+  <div class="refreshMeta"><span class="statusPulse" id="statusPulse"><i></i><span id="refreshState">Live status</span></span><span id="lastChecked">Not refreshed yet</span></div><div class="result hidden" id="stagedIntent"></div>
   <div class="grid" data-page="overview">
    <div class="stat" id="baseCard"><span class="sub">Base release</span><b id="baseState">—</b><span class="sub" id="baseDetail"></span></div>
    <div class="stat" id="engineCard"><span class="sub">Engine update</span><b id="engineState">—</b><span class="sub" id="engineDetail"></span></div>
@@ -159,8 +159,23 @@ async function refreshReleaseStates(force=false){
 }
 function showPage(page){currentPage=["overview","releases","services"].includes(page)?page:"overview";document.querySelectorAll("[data-page]").forEach(el=>el.classList.toggle("pageHidden",el.dataset.page!==currentPage));document.querySelectorAll("[data-page-btn]").forEach(btn=>btn.classList.toggle("active",btn.dataset.pageBtn===currentPage));try{window.openai?.setWidgetState?.({devPage:currentPage})}catch{}if(currentPage==="releases")void refreshReleaseStates(false);}
 function unpack(result){return result?.structuredContent||result?.content?.find?.(x=>x.type==="text")?.text||result}
+function stageRequestedIntent(requested){
+ if(!requested||requested.intent==="open")return;
+ const intent=String(requested.intent||""),target=String(requested.target||""),action=String(requested.action||"");
+ let page="overview",selector="",label="@Dev "+intent;
+ if(intent==="prepare"){page="releases";selector='[data-call="prepare"][data-target="'+target+'"]';label+=" "+(target||"");}
+ else if(intent==="release_build"){page="releases";selector='[data-release-build="'+target+':'+action+'"]';label+=" "+[target,action].filter(Boolean).join(" ");}
+ else if(intent==="deploy"){page="services";selector='[data-deploy="'+target+':'+action+'"]';label+=" "+[target,action].filter(Boolean).join(" ");}
+ else if(intent==="release"){page="releases";label+=" "+[target,action].filter(Boolean).join(" ");}
+ else if(intent==="update"||intent==="license_change"||intent==="lockdown"){page="overview";label+=" "+[target,action,requested.identity].filter(Boolean).join(" ");}
+ showPage(page);
+ const banner=$("stagedIntent");
+ if(banner){banner.classList.remove("hidden","error");banner.classList.add("ok");banner.textContent=(label.trim()+" staged. Nothing has run. Use the Dev Panel control and confirm to execute.");}
+ if(selector){const button=document.querySelector(selector);if(button){button.focus({preventScroll:true});button.scrollIntoView({block:"center",behavior:"smooth"});}}
+}
 function render(data){
  current=data||{};
+ stageRequestedIntent(data?.requestedIntent);
  const base=data?.base||{},engine=data?.engine||{},lm=data?.licenseManager||{},bs=data?.billingStore||{};
  const baseAhead=Number(base.commitsAhead||0),engineAhead=Number(engine.commitsAhead||0);
  const basePrepareFailed=!base.preparedCurrent&&base.latestPrepare?.status==="completed"&&base.latestPrepare?.conclusion==="failure";
