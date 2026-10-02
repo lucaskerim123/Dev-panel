@@ -132,6 +132,7 @@ export function ReleaseWorkspace(p:any){
  // when the browser missed the original handoff response.
  const pendingVersion=String(activeDraft?.version||p.version||"").trim();
  const pendingChannel=String(activeDraft?.channel||p.channel||"stable").trim().toLowerCase();
+ const repackageMode=Boolean(activeDraft?.inputs?.repackage);
  const repackageSourceId=String(activeDraft?.inputs?.repackageReleaseId||"").trim();
  const repackageSourceRevision=Number(activeDraft?.inputs?.repackageRevision||0);
  const repackageHandoff=!selected&&repackageMode&&pendingVersion?(p.releases||[]).find((r:any)=>
@@ -190,7 +191,6 @@ export function ReleaseWorkspace(p:any){
   snapshot:p.files.filter((x:any)=>fileStatusLabel(x.status)==="snapshot").length,
  };
  const hasSourceChanges=inspected&&(snapshotInspection?p.files.length>0:p.baseline?.hasSourceChanges===true);
- const repackageMode=Boolean(activeDraft?.inputs?.repackage);
  const packageSourceReady=Boolean(hasSourceChanges||(repackageMode&&inspected));
  const publishedBaseVersion=String(p.baseline?.baseBaseline?.version||"").trim();
  const minimumBaseVersion=String(p.minBase||"").trim();
