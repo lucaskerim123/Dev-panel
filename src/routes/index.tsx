@@ -24,7 +24,16 @@ export const Route = createFileRoute("/")({ component: Index });
 type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "mcp-controls" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "api-connections" | "settings";
 type ReleaseType = "base" | "engine";
 
-const EMPTY = { releases: [], channels: [] };
+const EMPTY = { releases: [], drafts: [], channels: [] };
+function normalizedPanelState(value:any){
+  const source=value&&typeof value==="object"?value:{};
+  return {
+    ...source,
+    releases:Array.isArray(source.releases)?source.releases.filter((row:any)=>row&&typeof row==="object"):[],
+    drafts:Array.isArray(source.drafts)?source.drafts.filter((row:any)=>row&&typeof row==="object"):[],
+    channels:Array.isArray(source.channels)?source.channels.map((item:any)=>String(item||"").trim().toLowerCase()).filter(Boolean):[]
+  };
+}
 
 function Index() {
   const [session, setSession] = useState<any>(null);
@@ -72,7 +81,7 @@ function Index() {
         getPanelState({ data: { token: s.token, type: "base", channel } }),
         getPanelState({ data: { token: s.token, type: "engine", channel } }),
       ]);
-      setData({ base, engine });
+      setData({ base:normalizedPanelState(base), engine:normalizedPanelState(engine) });
       // Rehydrate release progress from durable attempts, not browser-only state.
       // A completed GitHub run is still restored so its result and console survive refresh.
       if (!restoredRunRef.current) {
@@ -357,7 +366,10 @@ function Index() {
       finally { setBusy(""); }
     }} />;
 
-  const allReleases = [...(data.base.releases || []), ...(data.engine.releases || [])]
+  const allReleases = [
+    ...(Array.isArray(data?.base?.releases)?data.base.releases:[]),
+    ...(Array.isArray(data?.engine?.releases)?data.engine.releases:[])
+  ]
     .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
   return (
