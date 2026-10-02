@@ -37,7 +37,9 @@ The UI supports inline, fullscreen and PiP display modes. Chat/model access is i
 Typical use:
 
 - `@Dev show dev`
-- `@Dev show dev` then use the UI for prepare/build/deploy/release/update/licence mutations
+- `@Dev prepare both` → stages Prepare Both in the Dev UI; nothing runs until the owner presses the UI control and confirms.
+- `@Dev deploy billing_store` → stages the Billing Store deployment controls; nothing runs automatically.
+- `@Dev release base` → opens/stages the relevant release controls without executing a lifecycle change.
 - `@Dev check person@example.com license`
 - `@Dev show Engine status`
 - `@Dev show workflow logs`
@@ -153,3 +155,16 @@ The MCP is deliberately split by caller surface:
 - Opening the Dev Panel, asking to inspect/fix code, or asking for a plan does not grant mutation authority.
 - A state-changing UI action requires an explicit owner click plus confirmation.
 - Custom License Manager and V2 Billing Store production deploy workflows are manual-only. Dev Panel is the only project permitted to deploy automatically from a push to `main`.
+
+
+## Explicit invocation rule
+
+Dev mutation commands are opt-in, not inferred.
+
+- Ordinary language such as `deploy this`, `prepare it`, `sync the branches`, `fix this`, or `release this` is not a Dev MCP mutation request.
+- Normal repository edits, branch work and code fixes use the normal GitHub integration.
+- Explicit `@Dev ...` requests may only stage a matching intent in the embedded Dev UI.
+- Staging records `executed: false`; it does not call a mutation tool.
+- The owner must still press the matching Dev UI button and accept the confirmation before any state-changing tool is called.
+- Mutation tools remain app-only and are not model-visible.
+- ChatGPT app permissions are configured to ask before Dev writes as an independent safety layer.
