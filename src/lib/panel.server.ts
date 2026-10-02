@@ -457,7 +457,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
  const publishedKeys=new Set((releases?.releases||[]).filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
- const visibleDrafts=(drafts||[]).filter((d:any)=>!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
+ const visibleDrafts=(drafts||[]).filter((d:any)=>Boolean(d?.inputs?.repackage)||!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
  // Refresh persisted in-flight attempts from GitHub, rather than assuming
  // that the browser stayed open long enough to save the completion event.
  for(const draft of visibleDrafts){
@@ -527,7 +527,7 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
    if(existing.archived_at)throw new Error("Restore the draft before editing it.");
    const {data:draft,error}=await sb.from("panel_release_drafts").update({
      version,channel,source_repo:repo,source_ref:ref,source_sha:data.sourceSha||existing.source_sha||null,
-     status:"draft",inputs,updated_at:new Date().toISOString()
+     status:"draft",inputs:{...(existing.inputs||{}),...inputs},updated_at:new Date().toISOString()
    }).eq("id",data.draftId).select("*").single();
    if(error)throw new Error(error.code==="23505"?"A Stage 1 draft already exists for this type, version and channel.":"Unable to update release draft: "+error.message);
    return {draft,created:false};
@@ -538,6 +538,57 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
  }).select("*").single();
  if(error)throw new Error(error.code==="23505"?"A Stage 1 draft already exists for this type, version and channel.":"Unable to create release draft: "+error.message);
  return {draft,created:true};
+});
+
+export const prepareReleaseRepackage=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string}})=>{
+ const actor=readSession(data.token);
+ const releaseId=String(data.releaseId||"").trim();
+ if(!releaseId)throw new Error("Release ID is required.");
+ const result=await licenseMaster(`/releases/${encodeURIComponent(releaseId)}`);
+ const release=result?.release||result;
+ if(!release?.id)throw new Error("Release was not found in License Manager.");
+ if(String(release.status||"").toLowerCase()!=="published"||release.archived_at)throw new Error("Only the current published release can be repackaged.");
+ if(String(release.review_status||"").toLowerCase()!=="approved"||String(release?.manifest?.validation?.status||"").toLowerCase()!=="passed")throw new Error("Only an approved, validated published release can be repackaged.");
+ const releaseType=String(release.release_type||"").toLowerCase()==="update"?"update":"base";
+ const version=String(release.version||"").trim();
+ const channel=normalizeChannel(String(release.channel||"stable"));
+ if(!version)throw new Error("Published release version is missing.");
+
+ // Reuse the single Stage 1 draft as the permanent build-attempt ledger for
+ // this semantic version. License Manager owns immutable package revisions.
+ const sb=authClient();
+ const {data:existing,error:readError}=await sb.from("panel_release_drafts").select("*").eq("release_type",releaseType).eq("version",version).eq("channel",channel).maybeSingle();
+ if(readError)throw new Error("Unable to resolve Stage 1 release history: "+readError.message);
+ if(existing&&["building","awaiting_receipt"].includes(String(existing.status||"").toLowerCase()))throw new Error("This release already has a package build awaiting completion or License Manager receipt.");
+
+ const manifest=release.manifest&&typeof release.manifest==="object"?release.manifest:{};
+ const oldInputs=existing?.inputs&&typeof existing.inputs==="object"?existing.inputs:{};
+ const inputs={
+  ...oldInputs,
+  repackage:true,
+  repackageReleaseId:String(release.id),
+  repackageRevision:Number(release.revision||1),
+  notes:String(oldInputs.notes||release.notes||manifest.customer_notes||""),
+  components:Array.isArray(oldInputs.components)&&oldInputs.components.length?oldInputs.components:(Array.isArray(manifest.components)?manifest.components:(releaseType==="base"?["base"]:[])),
+  minimumBaseVersion:releaseType==="update"?String(oldInputs.minimumBaseVersion||manifest.minimumBaseVersion||""):null,
+  protocol:releaseType==="update"?String(oldInputs.protocol||manifest.minimumEngineDeployerProtocol||"1"):null,
+  changelogTemplate:releaseType==="base"?"base_deployment_log":"update_changelog",
+  changelogDraft:String(oldInputs.changelogDraft||release.notes||manifest.customer_changelog||"")
+ };
+
+ if(existing){
+  const {data:draft,error}=await sb.from("panel_release_drafts").update({
+   status:"draft",archived_at:null,last_error:null,source_repo:release.source_repo||existing.source_repo,source_ref:release.source_ref||existing.source_ref,source_sha:release.source_sha||existing.source_sha||null,inputs,updated_at:new Date().toISOString()
+  }).eq("id",existing.id).select("*").single();
+  if(error)throw new Error("Unable to reopen Stage 1 history for repackaging: "+error.message);
+  return {draft,release,created:false};
+ }
+ const {data:draft,error}=await sb.from("panel_release_drafts").insert({
+  release_type:releaseType,version,channel,source_repo:release.source_repo||(releaseType==="base"?BASE_REPO:ENGINE_REPO),source_ref:release.source_ref||(releaseType==="base"?BASE_REF:ENGINE_REF),source_sha:release.source_sha||null,
+  status:"draft",inputs,created_by:actor.email||actor.id
+ }).select("*").single();
+ if(error)throw new Error("Unable to create Stage 1 repackage history: "+error.message);
+ return {draft,release,created:true};
 });
 
 export const setReleaseDraftArchived=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;draftId:string;archived:boolean}})=>{
@@ -911,11 +962,23 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  };
 });
 
-export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null},actor:any){
+export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null},actor:any){
  const version=data.version.trim();
  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("Version must be valid SemVer, e.g. 1.2.3");
  if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Apex, MCP, or Studio).");
  const channel=normalizeChannel(data.channel);
+ const repackage=Boolean(data.repackage);
+ const repackageReleaseId=String(data.repackageReleaseId||"").trim();
+ let repackageRelease:any=null;
+ if(repackage){
+  if(!repackageReleaseId)throw new Error("Repackage requires the published License Manager release id.");
+  const current=await licenseMaster(`/releases/${encodeURIComponent(repackageReleaseId)}`);
+  repackageRelease=current?.release||current;
+  const expectedType=data.type==="base"?"base":"update";
+  if(!repackageRelease?.id||String(repackageRelease.release_type||"").toLowerCase()!==expectedType||String(repackageRelease.version||"")!==version||normalizeChannel(String(repackageRelease.channel||"stable"))!==channel)throw new Error("Repackage target does not match this release type, version and channel.");
+  if(String(repackageRelease.status||"").toLowerCase()!=="published"||repackageRelease.archived_at)throw new Error("Only a currently published release can be repackaged.");
+  if(String(repackageRelease.review_status||"").toLowerCase()!=="approved"||String(repackageRelease?.manifest?.validation?.status||"").toLowerCase()!=="passed")throw new Error("Repackage target must be approved and validated.");
+ }
  const expectedTemplate = data.type === "base" ? "base_deployment_log" : "update_changelog";
  if (data.changelogTemplate !== expectedTemplate) throw new Error(`Use the ${expectedTemplate === "base_deployment_log" ? "Base Deployment Log" : "Update Changelog"} template for this release type.`);
  const changelogText=String(data.changelogDraft||"").trim();
@@ -952,6 +1015,8 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  const previousRelease = (previousResult?.releases || [])
   .filter((r:any) => r.review_status === "approved" && r.status === "published" && r.source_sha)
   .sort((a:any,b:any) => new Date(b.published_at || b.created_at || 0).getTime() - new Date(a.published_at || a.created_at || 0).getTime())[0];
+ if(previousRelease&&String(previousRelease.version||"")===version&&!repackage)throw new Error(`v${version} is already published in ${channel}. Use Repackage to build another immutable package revision of the same version.`);
+ if(repackage&&String(previousRelease?.id||"")!==repackageReleaseId)throw new Error("Only the authoritative current published baseline can be repackaged. Refresh the release list and re-open Repackage.");
 
  // Stage 1 is authoritative about the source snapshot sent to the worker.
  // Do not trust stale browser state for changed files or the previous commit.
@@ -986,10 +1051,10 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   sourceDiffMeta=diff;
  }
 
- if(!initialRelease&&!initialUpdate&&previousSourceCommit===head){
+ if(!initialRelease&&!initialUpdate&&previousSourceCommit===head&&!repackage){
   throw new Error(`No ${data.type==="base"?"Base":"Update"} source changes detected since the authoritative published baseline. There is nothing new to release.`);
  }
- if(!initialRelease&&!initialUpdate&&!detectedFiles.length){
+ if(!initialRelease&&!initialUpdate&&!detectedFiles.length&&!repackage){
   throw new Error(`No ${data.type==="base"?"Base":"Update"} file changes were detected against the authoritative published baseline. There is nothing new to release.`);
  }
 
@@ -1064,22 +1129,28 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  if(existingError)throw new Error("Unable to resolve release draft: "+existingError.message);
  if(existing&&["archived","rejected"].includes(String(existing.status)))throw new Error("This release draft is closed. Use Start Fresh or a new version before creating another attempt.");
  if(existing&&["building","awaiting_receipt"].includes(String(existing.status)))throw new Error("This release has a build awaiting completion or License Manager receipt.");
+ let reuseHandedOff=false;
  if(existing&&String(existing.status)==="handed_off"){
   // The authoritative release may have been cleared since the previous successful handoff.
   // Reconcile only on an explicit new build, never while merely reading the release list.
   const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
   const matching=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>String(r.version||"")===version);
-  if(matching.length)throw new Error("This release still exists in License Manager. Open its authoritative record or use Start Fresh before rebuilding.");
-  if(existing.last_run_id){
+  if(matching.length){
+   if(!repackage)throw new Error("This release still exists in License Manager. Open its authoritative record or use Repackage for another package revision.");
+   if(!matching.some((r:any)=>String(r.id)===repackageReleaseId&&String(r.status||"").toLowerCase()==="published"))throw new Error("The selected published release is no longer the active repackage target. Refresh and try again.");
+   reuseHandedOff=true;
+  }else{
+   if(existing.last_run_id){
     const previousRun=await github(`/repos/${workerRepo}/actions/runs/${Number(existing.last_run_id)}`);
     if(previousRun?.status!=="completed")throw new Error("The previous release workflow is still active. Wait for it to finish before starting fresh.");
+   }
+   const {error:staleDeleteError}=await sb.from("panel_release_drafts").delete().eq("id",existing.id).eq("status","handed_off");
+   if(staleDeleteError)throw new Error("License Manager has no release, but the old Stage 1 draft could not be cleared: "+staleDeleteError.message);
   }
-  const {error:staleDeleteError}=await sb.from("panel_release_drafts").delete().eq("id",existing.id).eq("status","handed_off");
-  if(staleDeleteError)throw new Error("License Manager has no release, but the old Stage 1 draft could not be cleared: "+staleDeleteError.message);
  }
 
- const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents};
- let draft:any=existing?.status==="handed_off"?null:existing;
+ const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents,repackage,repackageReleaseId:repackage?repackageReleaseId:null,repackageRevision:repackage?Number(repackageRelease?.revision||1):null};
+ let draft:any=existing?.status==="handed_off"?(reuseHandedOff?existing:null):existing;
  if(!draft){
    const {data:created,error:createError}=await sb.from("panel_release_drafts").insert({release_type:releaseType,version,channel,source_repo:repo,source_ref:ref,source_sha:head,status:"draft",inputs:inputSnapshot,created_by:actor.email||actor.id}).select("*").single();
    if(createError)throw new Error("Unable to create release draft: "+createError.message);
@@ -1120,7 +1191,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  }
  return {ok:true,repo:workerRepo,ref:workerRef,sourceRepo:repo,sourceRef:ref,sourceSha:head,workflow,channel,runId:runId||null,draftId:draft.id,attemptNumber};
 }
-export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}&{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null}})=>{
+export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}&{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null}})=>{
  const actor=readSession(data.token);
  return startReleaseCore(data,actor);
 });
