@@ -831,6 +831,8 @@ export const inspectSource=createServerFn({method:"POST"}).handler(async({data}:
 export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{  readSession(data.token);  const product="orbitfs_base";  const releaseType=data.type==="base"?"base":"update";  const channel=normalizeChannel(data.channel);  const result=await licenseMaster(`/releases?product=${product}&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`);  const release=(result?.releases||[]).filter((r:any)=>String(r.version)===String(data.version)&&!r.archived_at).sort((a:any,b:any)=>Number(b.revision||1)-Number(a.revision||1)||new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;  return {release,product,releaseType,channel};});export const getReleaseRun=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;repo:string;runId?:number}})=>{
   readSession(data.token);
   const repo=String(data.repo||"").trim();
+  const profile=await activeGithubProfile();
+  const allowedRepos=new Set([profile.base.repo,profile.devPanel.repo,profile.engine.repo]);
   if(!allowedRepos.has(repo))throw new Error("Release repository is not allowed");
   if(data.runId){
     const run=await github("/repos/"+repo+"/actions/runs/"+data.runId);
@@ -1470,22 +1472,26 @@ const OPERATIONS_CI_WORKFLOW=process.env.OPERATIONS_CI_WORKFLOW||"ci.yml";
 const OPERATIONS_DEPLOY_WORKFLOW=process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml";
 const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml";
 const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml";
-const OPERATIONS_REPOS={
- baseSource:{repo:process.env.BASE_REPO||"lucaskerim123/V1-vercel-base",branch:process.env.BASE_REF||"base-release",label:"V1 Vercel Base",ci:"ci.yml",deploy:"base-release-ci.yml",quickDeploy:"base-release-ci.yml"},
- engineSource:{repo:process.env.ENGINE_REPO||"lucaskerim123/V1-vercel-engine",branch:process.env.ENGINE_REF||"UPDATE_RELEASE",label:"V1 Vercel Engine",ci:"ci.yml",deploy:"publish-engine-release.yml",quickDeploy:"publish-engine-release.yml"},
- licenseManager:{repo:process.env.LICENSE_MANAGER_REPO||"lucaskerim123/Custom-licence-manager",branch:"main",label:"Custom License Manager",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW},
- billingStore:{repo:process.env.BILLING_STORE_REPO||"lucaskerim123/V2_Billing_Store",branch:"main",label:"V2 Billing Store",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:BILLING_STORE_QUICK_DEPLOY_WORKFLOW},
-} as const;
+type OperationsSystem="baseSource"|"engineSource"|"licenseManager"|"billingStore";
 
-type OperationsSystem=keyof typeof OPERATIONS_REPOS;
+async function operationsRepos(){
+ const profile=await activeGithubProfile();
+ return {
+  baseSource:{repo:profile.base.repo,branch:profile.base.releaseRef,label:"V1 Vercel Base",ci:"ci.yml",deploy:"base-release-ci.yml",quickDeploy:"base-release-ci.yml"},
+  engineSource:{repo:profile.engine.repo,branch:profile.engine.releaseRef,label:"V1 Vercel Engine",ci:"ci.yml",deploy:"publish-engine-release.yml",quickDeploy:"publish-engine-release.yml"},
+  licenseManager:{repo:profile.licenseManager.repo,branch:profile.licenseManager.branch,label:"Custom License Manager",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW},
+  billingStore:{repo:profile.billingStore.repo,branch:profile.billingStore.branch,label:"V2 Billing Store",ci:OPERATIONS_CI_WORKFLOW,deploy:OPERATIONS_DEPLOY_WORKFLOW,quickDeploy:BILLING_STORE_QUICK_DEPLOY_WORKFLOW},
+ } as const;
+}
 
 function requireOperationsUser(token:string){
  const user=readSession(token);
  if(!["owner","admin","operator"].includes(String(user.role||"").toLowerCase()))throw new Error("Operations access required");
  return user;
 }
-function operationsConfig(system:string){
- const cfg=OPERATIONS_REPOS[system as OperationsSystem];
+async function operationsConfig(system:string){
+ const configs=await operationsRepos();
+ const cfg=configs[system as OperationsSystem];
  if(!cfg)throw new Error("Unknown Operations system");
  return cfg;
 }
@@ -1535,7 +1541,7 @@ function fallbackOperationFailure(job:any,logTail:string){
  if(!unique.length)unique.push("GitHub reported this job as failed, but no console log text was available yet.");
  return {error:unique[unique.length-1],preceding:[],lines:unique};
 }
-async function operationsRunDetail(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem]){
+async function operationsRunDetail(cfg:any){
  const [ciRows,deployRows,quickDeployRows,ref]=await Promise.all([
   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
@@ -1600,7 +1606,8 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
  if(operationsStateCache&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
  const keys:OperationsSystem[]=["licenseManager","billingStore"];
  try{
-  const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(OPERATIONS_REPOS[key])] as const));
+  const configs=await operationsRepos();
+   const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(configs[key])] as const));
   const value={checkedAt:new Date().toISOString(),systems:Object.fromEntries(entries),stale:false};
   operationsStateCache={value,expires:Date.now()+12000};
   return value;
@@ -1612,7 +1619,7 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
  }
 });
 
-async function findOperationsRun(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem],workflow:string,startedAt:number){
+async function findOperationsRun(cfg:any,workflow:string,startedAt:number){
  for(let attempt=0;attempt<8;attempt++){
   const runs=await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/runs?branch=main&per_page=5");
   const run=(runs?.workflow_runs||[]).find((x:any)=>new Date(x.created_at).getTime()>=startedAt-2000);
@@ -1624,7 +1631,7 @@ async function findOperationsRun(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem]
 
 export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem;action:"ci"|"deploy"|"override-deploy"}})=>{
  requireOperationsUser(data.token);
- const cfg=operationsConfig(data.system);
+ const cfg=await operationsConfig(data.system);
  const action=String(data.action||"");
  if(!["ci","deploy","override-deploy"].includes(action))throw new Error("Unknown Operations action");
  const workflow=action==="ci"?cfg.ci:action==="override-deploy"?cfg.quickDeploy:cfg.deploy;
@@ -1661,7 +1668,7 @@ async function operationsAllCompareCommits(repo:string,base:string,head:string){
 }
 export const getOperationsScan=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem}})=>{
  requireOperationsUser(data.token);
- const cfg=operationsConfig(data.system);
+ const cfg=await operationsConfig(data.system);
  const ref=await github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch));
  const currentSha=String(ref?.object?.sha||"");
  if(!currentSha)throw new Error("Unable to resolve main branch for "+cfg.repo+".");
