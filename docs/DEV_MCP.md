@@ -70,7 +70,7 @@ Targets: `license_manager`, `billing_store`.
 
 Actions: `status`, `scan`, `deploy`, `quick_deploy`, `redeploy`, `cancel`, `retry`.
 
-Normal deploy requires a successful Full Scan for the exact current main commit. Quick Deploy is the explicit bypass path already provided by the service workflow. Billing Store Quick Deploy can also target an explicit branch because its existing workflow supports that input. Cancel/retry operate on an explicit GitHub workflow run ID.
+Normal deploy requires a successful Full Scan for the exact current main commit. Quick Deploy is the explicit bypass path already provided by the service workflow. Service deployments and Quick Deploy always target `main`. Cancel/retry operate on an explicit GitHub workflow run ID.
 
 ### `release`
 Reads and controls authoritative License Manager releases. Supports list/get/manifest/validation/source/build/failures/compare and lifecycle controls such as approve, reject, publish, withdraw, archive, restore, promote and rollback.
