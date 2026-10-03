@@ -520,7 +520,18 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // record has been cleared, do not display it as a current release or draft.
  // An explicit new build reconciles and removes the orphan after checking its run.
  const authoritativeRows=(Array.isArray(releases?.releases)?releases.releases.filter((row:any)=>row&&typeof row==="object"):[]);
- const authoritativeKeys=new Set(authoritativeRows.filter((r:any)=>!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ // A rejected License Manager release has been handed back to Dev Panel.
+ // published_at is immutable audit history: a previously published release may be
+ // withdrawn in Billing and then explicitly rejected back to Stage 1 for rework.
+ const returnedRows=authoritativeRows.filter((r:any)=>
+  String(r.review_status||"").toLowerCase()==="rejected"&&
+  String(r?.manifest?.review_handoff?.state||"").toLowerCase()==="returned_to_dev"
+ );
+ const receiptRows=authoritativeRows.filter((r:any)=>{
+   const status=String(r.status||"").toLowerCase();
+   return !r.archived_at&&String(r.review_status||"").toLowerCase()!=="rejected"&&!["withdrawn","superseded","disabled"].includes(status);
+  });
+ const authoritativeKeys=new Set(receiptRows.map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
  const publishedKeys=new Set(authoritativeRows.filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
@@ -531,9 +542,23 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
   const draftKey=String(draft.version||"")+"|"+String(draft.channel||"").toLowerCase();
   const repackageSourceId=String(draft?.inputs?.repackageReleaseId||"").trim();
   const repackageSourceRevision=Number(draft?.inputs?.repackageRevision||0);
+  const returnedReceipt=returnedRows
+   .filter((r:any)=>String(r.version||"")===String(draft.version||"")&&String(r.channel||"").toLowerCase()===String(draft.channel||"").toLowerCase())
+   .sort((a:any,b:any)=>Number(b.revision||1)-Number(a.revision||1)||new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
   const authoritativeReceipt=repackageSourceId
-   ? authoritativeRows.some((r:any)=>!r.archived_at&&String(r.version||"")===String(draft.version||"")&&String(r.channel||"").toLowerCase()===String(draft.channel||"").toLowerCase()&&String(r.id||"")!==repackageSourceId&&(String(r.supersedes_release_id||"")===repackageSourceId||Number(r.revision||0)>repackageSourceRevision))
+   ? receiptRows.some((r:any)=>String(r.version||"")===String(draft.version||"")&&String(r.channel||"").toLowerCase()===String(draft.channel||"").toLowerCase()&&String(r.id||"")!==repackageSourceId&&(String(r.supersedes_release_id||"")===repackageSourceId||Number(r.revision||0)>repackageSourceRevision))
    : authoritativeKeys.has(draftKey);
+  if(returnedReceipt&&!authoritativeReceipt){
+   const reason=String(returnedReceipt?.manifest?.review_handoff?.reason||"").trim();
+   const message="License Manager rejected this candidate and returned it to Dev Panel"+(reason?": "+reason:".");
+   if(String(draft.status||"").toLowerCase()!=="draft"||draft.archived_at||String(draft.last_error||"")!==message){
+    const {error:returnError}=await sb.from("panel_release_drafts").update({
+     status:"draft",archived_at:null,last_error:message,updated_at:new Date().toISOString()
+    }).eq("id",draft.id);
+    if(returnError)throw new Error("Unable to return rejected release to Stage 1: "+returnError.message);
+   }
+   draft.status="draft";draft.archived_at=null;draft.last_error=message;
+  }
   // Keep the persisted status inside the existing database constraint.
   // "awaiting_receipt" is a read-only display state derived from a successful
   // recorded GitHub attempt until License Manager returns the actual release.
@@ -700,7 +725,9 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
   String(r.version||"")===String(existing.version||"")&&
   String(r.channel||"").toLowerCase()===String(existing.channel||"").toLowerCase()&&
   String(r.release_type||releaseType).toLowerCase()===releaseType);
- if(matches.length)throw new Error("License Manager already has this release. Local draft deletion is blocked; open the authoritative release record instead.");
+ const returnedMatches=matches.filter((r:any)=>!r.published_at&&String(r.review_status||"").toLowerCase()==="rejected");
+ const blockingMatches=matches.filter((r:any)=>!returnedMatches.some((returned:any)=>String(returned.id)===String(r.id)));
+ if(blockingMatches.length)throw new Error("License Manager still owns an active or published release for this version. Local draft deletion is blocked; open the authoritative release record instead.");
  const {data:attempts,error:attemptError}=await sb.from("panel_release_attempts").select("run_id,status").eq("draft_id",existing.id);
  if(attemptError)throw new Error("Unable to verify release attempts: "+attemptError.message);
  const workerRepo=releaseType==="base"?BASE_WORKER_REPO:ENGINE_REPO;
@@ -715,11 +742,24 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
    throw new Error("GitHub run #"+attempt.run_id+" is still active. Local draft deletion is blocked.");
   // Give a successful handoff time to appear in the authoritative registry.
   // Never mistake a brief ingestion delay for an orphaned local draft.
-  if(String(run?.conclusion||"").toLowerCase()==="success"){
+  if(String(run?.conclusion||"").toLowerCase()==="success"&&!returnedMatches.length){
    const finishedAt=Date.parse(String(run.updated_at||run.run_started_at||""));
    if(!Number.isFinite(finishedAt)||Date.now()-finishedAt<10*60*1000)
     throw new Error("GitHub succeeded recently. Wait 10 minutes for License Manager intake, refresh, then retry local orphan cleanup if the release still has not appeared.");
   }
+ }
+ // GitHub is now confirmed finished. Permanent License Manager deletion below
+ // remains limited to never-published releases; previously published history must
+ // stay retained even when the Stage 1 draft has been returned for rework.
+ for(const release of returnedMatches){
+  const id=String(release.id||"");
+  if(!id)continue;
+  if(!release.archived_at){
+   await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Rejected candidate returned to Dev Panel and deleted with its Stage 1 draft"})});
+  }
+  const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
+  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of returned rejected release "+id+".");
  }
  const {error}=await sb.from("panel_release_drafts").delete().eq("id",data.draftId);
  if(error)throw new Error("Unable to delete release draft: "+error.message);
@@ -1217,11 +1257,17 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  if(existing&&["building","awaiting_receipt"].includes(String(existing.status)))throw new Error("This release has a build awaiting completion or License Manager receipt.");
  let reuseHandedOff=false;
  if(existing&&String(existing.status)==="handed_off"){
-  // The authoritative release may have been cleared since the previous successful handoff.
-  // Reconcile only on an explicit new build, never while merely reading the release list.
+  // The authoritative release may have been cleared or rejected since the
+  // previous successful handoff. A technical rejection explicitly returns the
+  // never-published candidate to this Stage 1 draft for another build.
   const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
   const matching=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>String(r.version||"")===version);
-  if(matching.length){
+  const returnedOnly=!repackage&&matching.length>0&&matching.every((r:any)=>!r.published_at&&String(r.review_status||"").toLowerCase()==="rejected");
+  if(returnedOnly){
+   const {error:returnError}=await sb.from("panel_release_drafts").update({status:"draft",archived_at:null,last_error:"License Manager rejected this candidate and returned it to Dev Panel.",updated_at:new Date().toISOString()}).eq("id",existing.id);
+   if(returnError)throw new Error("Rejected release was returned by License Manager, but the Stage 1 draft could not be reopened: "+returnError.message);
+   existing.status="draft";existing.archived_at=null;existing.last_error="License Manager rejected this candidate and returned it to Dev Panel.";
+  }else if(matching.length){
    if(!repackage)throw new Error("This release still exists in License Manager. Open its authoritative record or use Repackage for another package revision.");
    if(!matching.some((r:any)=>String(r.id)===repackageReleaseId&&String(r.status||"").toLowerCase()==="published"))throw new Error("The selected published release is no longer the active repackage target. Refresh and try again.");
    reuseHandedOff=true;
