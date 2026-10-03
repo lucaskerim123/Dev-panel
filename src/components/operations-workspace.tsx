@@ -31,6 +31,19 @@ export function OperationsWorkspace({session}:{session:any}){
   finally{if(!silent)setLoading(false)}
  },[session.token]);
 
+ const refreshAll=async()=>{
+  setLoading(true);setError("");
+  try{
+   const [state,...scanResults]=await Promise.all([
+    getOperationsState({data:{token:session.token}}),
+    ...SYSTEMS.map(system=>getOperationsScan({data:{token:session.token,system:system.key as any}}))
+   ]);
+   setData(state);
+   setScans(Object.fromEntries(SYSTEMS.map((system,index)=>[system.key,scanResults[index]])));
+  }catch(x:any){setError(x.message||"Unable to refresh Operations state and repository changes.")}
+  finally{setLoading(false)}
+ };
+
  useEffect(()=>{void load()},[load]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
  useEffect(()=>{const t=setInterval(()=>void load(true),live?15000:60000);return()=>clearInterval(t)},[live,load]);
@@ -65,7 +78,7 @@ export function OperationsWorkspace({session}:{session:any}){
    </div>
    <div className="flex flex-wrap items-center gap-2">
     <span className="orbit-status-chip"><span className={`orbit-dot ${live?"orbit-dot-good":""}`}/>{live?"LIVE MONITORING":"STATUS MONITOR"}</span>
-    <button className="button-secondary" onClick={()=>load()} disabled={loading||!!busy}><RefreshCw size={14} className={loading?"animate-spin":""}/>Refresh</button>
+    <button className="button-secondary" onClick={()=>void refreshAll()} disabled={loading||!!busy}><RefreshCw size={14} className={loading?"animate-spin":""}/>Refresh</button>
    </div>
   </div>
 
