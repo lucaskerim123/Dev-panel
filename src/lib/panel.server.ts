@@ -3,14 +3,19 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import {activeGithubProfile,githubToken} from "@/lib/github-profile";
 
-const GITHUB_PROFILE=activeGithubProfile();
-const BASE_REPO=GITHUB_PROFILE.base.repo;
-const BASE_REF=GITHUB_PROFILE.base.releaseRef;
-const BASE_WORKER_REPO=GITHUB_PROFILE.devPanel.repo;
-const BASE_WORKER_REF=GITHUB_PROFILE.devPanel.branch;
-const ENGINE_REPO=GITHUB_PROFILE.engine.repo;
-const ENGINE_REF=GITHUB_PROFILE.engine.releaseRef;
-const ENGINE_BASELINE_REF=GITHUB_PROFILE.engine.baselineRef;
+async function githubContext(){
+ const profile=await activeGithubProfile();
+ return {
+  BASE_REPO:profile.base.repo,
+  BASE_REF:profile.base.releaseRef,
+  BASE_WORKER_REPO:profile.devPanel.repo,
+  BASE_WORKER_REF:profile.devPanel.branch,
+  ENGINE_REPO:profile.engine.repo,
+  ENGINE_REF:profile.engine.releaseRef,
+  ENGINE_BASELINE_REF:profile.engine.baselineRef,
+  profile
+ };
+}
 const BASE_WORKFLOW=process.env.BASE_RELEASE_WORKER_WORKFLOW||"package-base-release.yml";
 const ENGINE_WORKFLOW=process.env.ENGINE_RELEASE_WORKFLOW||"publish-engine-release.yml";
 
@@ -80,7 +85,6 @@ function compareSemVer(left:string,right:string){
  }
  return 0;
 }
-const allowedRepos=new Set([BASE_REPO,BASE_WORKER_REPO,ENGINE_REPO]);
 
 function detectUpdateComponents(files:any[]){
  const out:string[]=[];
@@ -229,6 +233,7 @@ async function completeSourceDiff(repo:string,from:string,head:string){
 }
 
 async function initialEngineSourceBaseline(head:string){
+ const {ENGINE_REPO,ENGINE_REF}=await githubContext();
  const config=await github(`/repos/${ENGINE_REPO}/contents/release/update-baseline.json?ref=${encodeURIComponent(ENGINE_REF)}`);
  const raw=String(config?.content||"").replace(/\n/g,"");
  let parsed:any={};
@@ -434,6 +439,7 @@ export const testApiConnection=createServerFn({method:"POST"}).handler(async({da
 });
 
 export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
+ const {BASE_REPO,BASE_REF,BASE_WORKER_REPO,BASE_WORKER_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  readSession(data.token);
  const releaseType=data.type==="base"?"base":"update",channel=normalizeChannel(data.channel),product="orbitfs_base";
  const [releases,channels]=await Promise.all([
@@ -507,6 +513,7 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
 
 
 export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;draftId?:string|null;type:"base"|"engine";version:string;channel:string;notes?:string;components?:string[];minimumBaseVersion?:string;protocol?:string;changelogTemplate?:string;changelogDraft?:string;sourceSha?:string|null}})=>{
+ const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
  const version=String(data.version||"").trim();
  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("Version must be valid SemVer, e.g. 1.2.3");
@@ -549,6 +556,7 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
 });
 
 export const prepareReleaseRepackage=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string}})=>{
+ const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
  const releaseId=String(data.releaseId||"").trim();
  if(!releaseId)throw new Error("Release ID is required.");
@@ -620,6 +628,7 @@ export const setReleaseDraftArchived=createServerFn({method:"POST"}).handler(asy
 });
 
 export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;draftId:string}})=>{
+ const {BASE_WORKER_REPO,ENGINE_REPO}=await githubContext();
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to permanently delete a Stage 1 draft.");
  const sb=authClient();
@@ -660,6 +669,7 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
 });
 
 export const deleteReleaseAttempt=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;attemptId:string}})=>{
+ const {BASE_WORKER_REPO,ENGINE_REPO}=await githubContext();
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to delete release attempts.");
  const id=String(data.attemptId||"").trim();
@@ -747,6 +757,7 @@ export const getReleaseLifecycleEvents=createServerFn({method:"POST"}).handler(a
 });
 
 export async function inspectSourceCore(data:{type:"base"|"engine";channel?:string}){
+ const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO,ref=data.type==="base"?BASE_REF:ENGINE_REF;
  const releaseType=data.type==="base"?"base":"update";
  const channel=normalizeChannel(data.channel||"stable");
@@ -863,6 +874,7 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
 });
 
 export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine"}})=>{
+ const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to inspect release branch state.");
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
@@ -892,6 +904,7 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
 });
 
 export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";runId?:number|string|null;sourceSha?:string}})=>{
+ const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to inspect a release branch promotion.");
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
@@ -920,6 +933,7 @@ export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async
 });
 
 export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine"}})=>{
+ const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to promote a release branch.");
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
@@ -974,6 +988,7 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
 });
 
 export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null},actor:any){
+ const {BASE_REPO,BASE_REF,BASE_WORKER_REPO,BASE_WORKER_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const version=data.version.trim();
  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("Version must be valid SemVer, e.g. 1.2.3");
  if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Apex, MCP, or Studio).");
@@ -1209,6 +1224,7 @@ export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{
 
 
 export const getControlState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ const {BASE_REPO,BASE_REF,BASE_WORKER_REPO,BASE_WORKER_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  readSession(data.token);
  const [base,updates,channels,audit]=await Promise.all([
   licenseMaster('/releases?product=orbitfs_base&type=base&include_archived=true'),
@@ -1259,6 +1275,7 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
 });
 
 export const startFreshRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{
+ const {BASE_WORKER_REPO,ENGINE_REPO}=await githubContext();
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to start a release fresh.");
  const version=String(data.version||"").trim();
@@ -1342,6 +1359,7 @@ export const getAuditState=createServerFn({method:"POST"}).handler(async({data}:
 });
 
 export const getRepositoryStatus=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  readSession(data.token);
  const configs=[
   {key:"base",repo:BASE_REPO,ref:BASE_REF,workflow:BASE_WORKFLOW},
@@ -1478,7 +1496,7 @@ const operationsGithubTextCache=new Map<string,{value:string;expires:number;stal
 async function operationsGithubText(path:string){
  const cached=operationsGithubTextCache.get(path);
  if(cached&&cached.expires>Date.now())return cached.value;
- const token=githubToken();
+ const token=await githubToken();
  const response=await fetch("https://api.github.com"+path,{headers:{accept:"application/vnd.github+json",authorization:"Bearer "+token,"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28"},cache:"no-store",redirect:"follow"});
  const text=await response.text();
  if(response.ok)operationsGithubTextCache.set(path,{value:text,expires:Date.now()+60000,staleUntil:Date.now()+5*60*1000});
