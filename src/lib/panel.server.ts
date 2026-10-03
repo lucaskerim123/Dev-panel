@@ -1402,8 +1402,21 @@ async function requestJson(url:string,init:RequestInit={}){
  }
  return body;
 }
+const githubReadCache=new Map<string,{value:any;expires:number;staleUntil:number}>();
 async function github(path:string,init:RequestInit={}){
- return requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${required("ORBITFS_RELEASE_DISPATCH_TOKEN")}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+ const method=String(init.method||"GET").toUpperCase();
+ const key=method==="GET"?path:"";
+ const cached=key?githubReadCache.get(key):null;
+ if(cached&&cached.expires>Date.now())return cached.value;
+ try{
+  const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${required("ORBITFS_RELEASE_DISPATCH_TOKEN")}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+  if(key)githubReadCache.set(key,{value,expires:Date.now()+15000,staleUntil:Date.now()+5*60*1000});
+  else githubReadCache.clear();
+  return value;
+ }catch(error){
+  if(cached&&cached.staleUntil>Date.now())return cached.value;
+  throw error;
+ }
 }
 async function licenseMaster(path:string,init:RequestInit={}){
  const base=await configuredMasterUrl();
@@ -1453,12 +1466,17 @@ function operationsConfig(system:string){
 function cleanOperationsRun(run:any){
  return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name}:null;
 }
+const operationsGithubTextCache=new Map<string,{value:string;expires:number;staleUntil:number}>();
 async function operationsGithubText(path:string){
+ const cached=operationsGithubTextCache.get(path);
+ if(cached&&cached.expires>Date.now())return cached.value;
  const token=required("ORBITFS_RELEASE_DISPATCH_TOKEN");
  const response=await fetch("https://api.github.com"+path,{headers:{accept:"application/vnd.github+json",authorization:"Bearer "+token,"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28"},cache:"no-store",redirect:"follow"});
  const text=await response.text();
+ if(response.ok)operationsGithubTextCache.set(path,{value:text,expires:Date.now()+60000,staleUntil:Date.now()+5*60*1000});
  if(response.status===404&&/\/actions\/jobs\/\d+\/logs(?:\?|$)/.test(path))return "";
  if(!response.ok){
+  if(cached&&cached.staleUntil>Date.now())return cached.value;
   let detail="";
   try{const body=JSON.parse(text);detail=String(body?.message||"")}catch{}
   throw new Error("GitHub API returned HTTP "+response.status+(detail?" · "+detail:"")+" for "+path+".");
