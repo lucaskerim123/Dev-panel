@@ -1403,17 +1403,23 @@ async function requestJson(url:string,init:RequestInit={}){
  return body;
 }
 const githubReadCache=new Map<string,{value:any;expires:number;staleUntil:number}>();
+let githubRateLimitedUntil=0;
 async function github(path:string,init:RequestInit={}){
  const method=String(init.method||"GET").toUpperCase();
  const key=method==="GET"?path:"";
  const cached=key?githubReadCache.get(key):null;
  if(cached&&cached.expires>Date.now())return cached.value;
+ if(method==="GET"&&githubRateLimitedUntil>Date.now()){
+  if(cached&&cached.staleUntil>Date.now())return cached.value;
+  throw new Error("GitHub API rate limit is cooling down; live status will resume automatically.");
+ }
  try{
   const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${required("ORBITFS_RELEASE_DISPATCH_TOKEN")}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
   if(key)githubReadCache.set(key,{value,expires:Date.now()+15000,staleUntil:Date.now()+5*60*1000});
   else githubReadCache.clear();
   return value;
- }catch(error){
+ }catch(error:any){
+  if(/rate limit/i.test(String(error?.message||error)))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+60000);
   if(cached&&cached.staleUntil>Date.now())return cached.value;
   throw error;
  }
@@ -1476,6 +1482,10 @@ async function operationsGithubText(path:string){
  if(response.ok)operationsGithubTextCache.set(path,{value:text,expires:Date.now()+60000,staleUntil:Date.now()+5*60*1000});
  if(response.status===404&&/\/actions\/jobs\/\d+\/logs(?:\?|$)/.test(path))return "";
  if(!response.ok){
+  if(response.status===403||response.status===429){
+   const reset=Number(response.headers.get("x-ratelimit-reset")||0)*1000;
+   githubRateLimitedUntil=Math.max(githubRateLimitedUntil,reset>Date.now()?reset:Date.now()+60000);
+  }
   if(cached&&cached.staleUntil>Date.now())return cached.value;
   let detail="";
   try{const body=JSON.parse(text);detail=String(body?.message||"")}catch{}
