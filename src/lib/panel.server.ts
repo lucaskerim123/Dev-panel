@@ -1488,18 +1488,19 @@ function fallbackOperationFailure(job:any,logTail:string){
  return {error:unique[unique.length-1],preceding:[],lines:unique};
 }
 async function operationsRunDetail(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem]){
- const [ciRows,deployRows,quickDeployRows,deploySuccessRows,quickDeploySuccessRows,ref]=await Promise.all([
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+ const [ciRows,deployRows,quickDeployRows,ref]=await Promise.all([
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
   github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
  ]);
- const ciRun=ciRows?.workflow_runs?.[0]||null;
- const deployRun=deployRows?.workflow_runs?.[0]||null;
- const quickDeployRun=quickDeployRows?.workflow_runs?.[0]||null;
- const successfulDeployments=[deploySuccessRows?.workflow_runs?.[0],quickDeploySuccessRows?.workflow_runs?.[0]].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
+ const ciRuns=Array.isArray(ciRows?.workflow_runs)?ciRows.workflow_runs:[];
+ const deployRuns=Array.isArray(deployRows?.workflow_runs)?deployRows.workflow_runs:[];
+ const quickDeployRuns=Array.isArray(quickDeployRows?.workflow_runs)?quickDeployRows.workflow_runs:[];
+ const ciRun=ciRuns[0]||null;
+ const deployRun=deployRuns[0]||null;
+ const quickDeployRun=quickDeployRuns[0]||null;
+ const successfulDeployments=[...deployRuns,...quickDeployRuns].filter((run:any)=>run?.status==="completed"&&run?.conclusion==="success").sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
  const deployedRun=successfulDeployments[0]||null;
  const candidates=[ciRun,deployRun,quickDeployRun].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
  const run=candidates.find((x:any)=>x.status!=="completed")||candidates[0]||null;
@@ -1544,10 +1545,23 @@ async function operationsRunDetail(cfg:(typeof OPERATIONS_REPOS)[OperationsSyste
  return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:cleanOperationsRun(run),ciRun:cleanOperationsRun(ciRun),deployRun:cleanOperationsRun(deployRun),quickDeployRun:cleanOperationsRun(quickDeployRun),latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:cleanOperationsRun(latestAttempt),jobs,failure,chatPrompt,monitoring:run.name||"Workflow"};
 }
 
+let operationsStateCache:{value:any;expires:number}|null=null;
+
 export const getOperationsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
- const entries=await Promise.all((Object.keys(OPERATIONS_REPOS) as OperationsSystem[]).map(async key=>[key,await operationsRunDetail(OPERATIONS_REPOS[key])] as const));
- return {checkedAt:new Date().toISOString(),systems:Object.fromEntries(entries)};
+ if(operationsStateCache&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
+ const keys:OperationsSystem[]=["licenseManager","billingStore"];
+ try{
+  const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(OPERATIONS_REPOS[key])] as const));
+  const value={checkedAt:new Date().toISOString(),systems:Object.fromEntries(entries),stale:false};
+  operationsStateCache={value,expires:Date.now()+12000};
+  return value;
+ }catch(error:any){
+  if(operationsStateCache){
+   return {...operationsStateCache.value,stale:true,warning:"GitHub API is temporarily unavailable or rate-limited; showing the last known Operations state.",checkedAt:new Date().toISOString()};
+  }
+  throw error;
+ }
 });
 
 async function findOperationsRun(cfg:(typeof OPERATIONS_REPOS)[OperationsSystem],workflow:string,startedAt:number){
@@ -1581,6 +1595,7 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
  }
  const startedAt=Date.now();
  await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main"})});
+ operationsStateCache=null;
  const run=await findOperationsRun(cfg,workflow,startedAt);
  return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
 });
