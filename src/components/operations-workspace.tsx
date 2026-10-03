@@ -33,7 +33,7 @@ export function OperationsWorkspace({session}:{session:any}){
 
  useEffect(()=>{void load()},[load]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
- useEffect(()=>{const t=setInterval(()=>void load(true),live?3000:15000);return()=>clearInterval(t)},[live,load]);
+ useEffect(()=>{const t=setInterval(()=>void load(true),live?15000:60000);return()=>clearInterval(t)},[live,load]);
 
  const action=async(system:string,actionType:"ci"|"deploy"|"override-deploy")=>{
   const systemLabel=SYSTEMS.find(x=>x.key===system)?.label||system;
@@ -134,7 +134,7 @@ export function OperationsWorkspace({session}:{session:any}){
 
       <div className="border-t">
        <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>setConsoleOpen(v=>({...v,[system.key]:!isConsoleOpen}))}>
-        <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output":`Workflow status refreshes every ${live?"3":"15"} seconds`}</p></div></div>
+        <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output":`Workflow status refreshes every ${live?"15":"60"} seconds`}</p></div></div>
         <div className="flex items-center gap-2"><Pill text={run?.status==="completed"?"CLOSED":run?"LIVE":"IDLE"}/>{isConsoleOpen?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
        </button>
        {isConsoleOpen&&<div className="border-t bg-black/20 p-3">
