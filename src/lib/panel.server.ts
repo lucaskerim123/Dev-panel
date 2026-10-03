@@ -1635,12 +1635,14 @@ export const getOperationsScan=createServerFn({method:"POST"}).handler(async({da
  const ref=await github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch));
  const currentSha=String(ref?.object?.sha||"");
  if(!currentSha)throw new Error("Unable to resolve main branch for "+cfg.repo+".");
- const [deploySuccess,ciSuccess]=await Promise.all([
+ const [deploySuccess,quickSuccess]=await Promise.all([
   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
  ]);
- const deployedRun=deploySuccess?.workflow_runs?.[0]||null;
- const baselineSha=deployedRun?.head_sha||ciSuccess?.workflow_runs?.[0]?.head_sha||null;
+ const normalRun=deploySuccess?.workflow_runs?.[0]||null,quickRun=quickSuccess?.workflow_runs?.[0]||null;
+ const deployedRun=[normalRun,quickRun].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+ const baselineSha=deployedRun?.head_sha||null;
+ const baselineSource=deployedRun===quickRun?"quick-deployment":deployedRun?"production-deployment":"no-production-deployment";
  let commits:any[]=[],changedFiles:any[]=[];
  if(baselineSha&&baselineSha!==currentSha){
   commits=await operationsAllCompareCommits(cfg.repo,baselineSha,currentSha);
@@ -1649,6 +1651,10 @@ export const getOperationsScan=createServerFn({method:"POST"}).handler(async({da
   const baseMap=new Map(baseFiles.map((x:any)=>[x.path,x])),currentMap=new Map(currentFiles.map((x:any)=>[x.path,x]));
   for(const path of new Set([...baseMap.keys(),...currentMap.keys()])){const before:any=baseMap.get(path),after:any=currentMap.get(path);if(!before)changedFiles.push({path,status:"added",sha:after.sha,size:after.size??null});else if(!after)changedFiles.push({path,status:"deleted",sha:null,size:null});else if(before.sha!==after.sha||before.mode!==after.mode)changedFiles.push({path,status:"modified",sha:after.sha,size:after.size??null})}
   changedFiles.sort((a,b)=>a.path.localeCompare(b.path));
+ }else if(!baselineSha){
+  const currentCommit=await github("/repos/"+cfg.repo+"/commits/"+currentSha);
+  const currentFiles=await operationsFullTree(cfg.repo,currentCommit.commit.tree.sha);
+  changedFiles=currentFiles.map((item:any)=>({path:item.path,status:"added",sha:item.sha,size:item.size??null})).sort((a:any,b:any)=>a.path.localeCompare(b.path));
  }
- return {key:data.system,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,baselineSha,baselineSource:deployedRun?"production-deployment":"successful-ci",productionCurrent:!!deployedRun&&currentSha===deployedRun.head_sha,updateAvailable:currentSha!==baselineSha,commits:commits.map((c:any)=>({sha:c.sha,html_url:c.html_url,message:String(c.commit?.message||"").split("\n")[0],author:c.commit?.author?.name||c.author?.login||"Unknown",date:c.commit?.author?.date||c.commit?.committer?.date||null})).reverse(),commitCount:commits.length,changedFiles,changedFileCount:changedFiles.length,completeFileScan:true,checkedAt:new Date().toISOString()};
+ return {key:data.system,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,baselineSha,baselineSource,productionCurrent:!!deployedRun&&currentSha===deployedRun.head_sha,updateAvailable:!baselineSha||currentSha!==baselineSha,commits:commits.map((c:any)=>({sha:c.sha,html_url:c.html_url,message:String(c.commit?.message||"").split("\n")[0],author:c.commit?.author?.name||c.author?.login||"Unknown",date:c.commit?.author?.date||c.commit?.committer?.date||null})).reverse(),commitCount:commits.length,changedFiles,changedFileCount:changedFiles.length,completeFileScan:true,checkedAt:new Date().toISOString()};
 });
