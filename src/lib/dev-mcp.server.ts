@@ -182,7 +182,7 @@ async function serviceState(target:ServiceTarget){
  const active=[...scans,...deploys,...quicks].filter((x:any)=>x&&x.status!=="completed").sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime())[0]||null;
  return {target,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,latestScan:scans[0]||null,latestDeploy:deploys[0]||null,latestQuickDeploy:quicks[0]||null,lastSuccessful:successful[0]||null,productionCurrent:Boolean(currentSha&&successful[0]?.head_sha===currentSha),activeRun:active};
 }
-export async function deployService(target:ServiceTarget,action:"status"|"scan"|"deploy"|"quick_deploy"|"redeploy"|"cancel"|"retry",options:{branch?:string;run_id?:number}={}){
+export async function deployService(target:ServiceTarget,action:"status"|"scan"|"deploy"|"quick_deploy"|"redeploy"|"cancel"|"retry",options:{run_id?:number}={}){
  if(action==="status"){await assertTargetEnabled(target);return serviceState(target);}
  const mutationSettings=await assertMutation(target);
  if(action==="scan")requireSetting(mutationSettings,"allow_service_scan","Service scans are disabled");
@@ -207,19 +207,9 @@ export async function deployService(target:ServiceTarget,action:"status"|"scan"|
  }
  if(action==="redeploy"&&before.lastSuccessful?.head_sha!==before.currentSha)throw new Error("Production is behind main. Redeploy would change the running version; use deploy or quick_deploy instead.");
  const startedAt=Date.now(),dispatch:any={ref:cfg.branch};
- if(action==="quick_deploy"){
-  const requestedBranch=String(options.branch||"main").trim()||"main";
-  if(target==="billing_store"){
-   dispatch.inputs=requestedBranch==="main"||requestedBranch==="CustomDesign/Run"
-    ?{branch:requestedBranch}
-    :{branch:"main",custom_branch:requestedBranch};
-  }else if(requestedBranch!=="main"){
-   throw new Error("Custom branch Quick Deploy is only supported by Billing Store.");
-  }
- }
  await github("/repos/"+cfg.repo+"/actions/workflows/"+encodeURIComponent(workflow)+"/dispatches",{method:"POST",body:JSON.stringify(dispatch)});
  const run=await findRun(cfg.repo,workflow,cfg.branch,startedAt);
- return {ok:true,target,action,sourceSha:before.currentSha,branch:options.branch||cfg.branch,workflow,run,message:cfg.label+" "+action.replaceAll("_"," ")+" queued."};
+ return {ok:true,target,action,sourceSha:before.currentSha,branch:cfg.branch,workflow,run,message:cfg.label+" "+action.replaceAll("_"," ")+" queued."};
 }
 
 export async function licenseManagerRequest(path:string,init:RequestInit={}){
