@@ -70,14 +70,23 @@ export const manageMcpConnectionForPanel=createServerFn({method:"POST"}).handler
 
 function cleanRun(run:any){return run?{id:Number(run.id),name:run.name,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,head_branch:run.head_branch,event:run.event,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url}:null}
 const githubReadCache=new Map<string,{value:any;expires:number;staleUntil:number}>();
+let githubRateLimitedUntil=0;
 async function github(path:string,init:RequestInit={}){
  const method=String(init.method||"GET").toUpperCase();
  const key=method==="GET"?path:"";
  const cached=key?githubReadCache.get(key):null;
  if(cached&&cached.expires>Date.now())return cached.value;
+ if(method==="GET"&&githubRateLimitedUntil>Date.now()){
+  if(cached&&cached.staleUntil>Date.now())return cached.value;
+  throw new Error("GitHub API rate limit is cooling down; retry after the reset window.");
+ }
  const response=await fetch("https://api.github.com"+path,{...init,headers:{accept:"application/vnd.github+json",authorization:"Bearer "+required("ORBITFS_RELEASE_DISPATCH_TOKEN"),"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28","content-type":"application/json",...(init.headers||{})},cache:"no-store"});
  const text=await response.text();let body:any=null;try{body=text?JSON.parse(text):null}catch{}
  if(!response.ok){
+  if(response.status===403||response.status===429){
+   const reset=Number(response.headers.get("x-ratelimit-reset")||0)*1000;
+   githubRateLimitedUntil=Math.max(githubRateLimitedUntil,reset>Date.now()?reset:Date.now()+60000);
+  }
   if(cached&&cached.staleUntil>Date.now())return cached.value;
   throw new Error(body?.message||("GitHub API returned HTTP "+response.status));
  }
