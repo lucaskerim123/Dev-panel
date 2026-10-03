@@ -161,7 +161,7 @@ function Index() {
     };
     // Even completed runs need one fetch after refresh to restore jobs and final logs.
     void poll();
-    const timer = completedAlready ? null : setInterval(poll, 3000);
+    const timer = completedAlready ? null : setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 15000);
     return () => { stopped = true; if(timer)clearInterval(timer); };
   }, [run?.id, runRepo, session?.token]);
 
@@ -189,7 +189,7 @@ function Index() {
         if (!stopped) setError(x?.message || "Unable to read the License Manager handoff state.");
       }
     };
-    timer = setInterval(poll, 5000);
+    timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 30000);
     void poll();
     return () => { stopped = true; if (timer) clearInterval(timer); };
   }, [run?.id, runRepo, session?.token, runVersion, runChannel]);
