@@ -60,6 +60,11 @@ export function OperationsWorkspace({session}:{session:any}){
   catch(x:any){setError(x.message||"Unable to load repository sync state.")}
  },[session.token]);
 
+ const refreshRepositoryChecks=useCallback(async(force=false)=>{
+  const rows=await Promise.all(SYSTEMS.map(async system=>[system.key,await getOperationsScan({data:{token:session.token,system:system.key,force}})] as const));
+  setScans(current=>({...current,...Object.fromEntries(rows)}));
+ },[session.token]);
+
  const loadConsole=useCallback(async(system:string,silent=false)=>{
   if(!silent)setConsoleBusy(v=>({...v,[system]:true}));
   try{
@@ -72,17 +77,15 @@ export function OperationsWorkspace({session}:{session:any}){
  const refreshAll=async()=>{
   setLoading(true);setError("");
   try{
-   const loadedScanKeys=Object.keys(scans);
    const openConsoleKeys=SYSTEMS.map(s=>s.key).filter(key=>consoleOpen[key]);
-   const [state,sync,scanRows,consoleRows]=await Promise.all([
+   const [state,sync,consoleRows]=await Promise.all([
     getOperationsState({data:{token:session.token,force:true}}),
     getRepositorySyncState({data:{token:session.token}}),
-    Promise.all(loadedScanKeys.map(async key=>[key,await getOperationsScan({data:{token:session.token,system:key as any,force:true}})] as const)),
     Promise.all(openConsoleKeys.map(async key=>[key,await getOperationsRunDetail({data:{token:session.token,system:key as any}})] as const)),
-   ]);
+    refreshRepositoryChecks(true),
+   ]).then(([state,sync,consoleRows])=>[state,sync,consoleRows] as const);
    applyState(state);
    setSyncState(sync);
-   if(scanRows.length)setScans(current=>({...current,...Object.fromEntries(scanRows)}));
    if(consoleRows.length)setData((current:any)=>({...current,systems:{...(current.systems||{}),...Object.fromEntries(consoleRows)}}));
   }catch(x:any){setError(x.message||"Unable to refresh Operations status.")}
   finally{setLoading(false)}
@@ -90,6 +93,11 @@ export function OperationsWorkspace({session}:{session:any}){
 
  useEffect(()=>{void load()},[load]);
  useEffect(()=>{void loadSync()},[loadSync]);
+ useEffect(()=>{
+  void refreshRepositoryChecks(false).catch(()=>undefined);
+  const t=setInterval(()=>{if(document.visibilityState==="visible")void refreshRepositoryChecks(false).catch(()=>undefined)},25*60*1000);
+  return()=>clearInterval(t);
+ },[refreshRepositoryChecks]);
  const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
  useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void loadSync()},60000);return()=>clearInterval(t)},[syncLive,loadSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
