@@ -967,7 +967,7 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
  let sourceEquivalent=Boolean(releaseSha&&releaseSha===sourceSha);
  if(!sourceEquivalent&&releaseSha&&sourceSha){
   const comparison=await github(`/repos/${repo}/compare/${encodeURIComponent(releaseSha)}...${encodeURIComponent(sourceSha)}`).catch(()=>null);
-  sourceEquivalent=Boolean(comparison&&Array.isArray(comparison.files)&&comparison.files.length===0);
+  sourceEquivalent=Boolean(comparison&&Number(comparison.ahead_by||0)===0);
  }
  return {
   ok:true,repo,sourceRef,releaseRef,sourceSha,releaseSha,
@@ -1005,7 +1005,7 @@ export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async
   branchMatches=Boolean(expected&&releaseSha===expected);
   if(!branchMatches&&expected&&releaseSha){
    const comparison=await github(`/repos/${repo}/compare/${encodeURIComponent(releaseSha)}...${encodeURIComponent(expected)}`).catch(()=>null);
-   branchMatches=Boolean(comparison&&Array.isArray(comparison.files)&&comparison.files.length===0);
+   branchMatches=Boolean(comparison&&Number(comparison.ahead_by||0)===0);
   }
  }
  return {ok:true,repo,releaseRef,runId:run?.id||null,runUrl:run?.html_url||null,status:status||"unknown",conclusion:conclusion||null,completed,releaseSha,branchMatches,sourceSha:sourceSha||String(run?.head_sha||"")||null};
