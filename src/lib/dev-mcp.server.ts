@@ -121,7 +121,7 @@ export async function releaseBranchState(target:ReleaseTarget){
  let compare:any=null;
  if(preparedSha&&currentSha&&preparedSha!==currentSha)compare=await github("/repos/"+cfg.repo+"/compare/"+preparedSha+"..."+currentSha).catch(()=>null);
  const latestPrepare=cleanRun((runs?.workflow_runs||[])[0]||null);
- const preparedCurrent=Boolean(currentSha&&preparedSha&&(preparedSha===currentSha||(compare&&Array.isArray(compare.files)&&compare.files.length===0)));
+ const preparedCurrent=Boolean(currentSha&&preparedSha&&(preparedSha===currentSha||(compare&&Number(compare.ahead_by||0)===0)));
  return {
   target,label:cfg.label,repo:cfg.repo,sourceBranch:cfg.branch,releaseBranch:cfg.releaseRef,
   currentSha,preparedSha,preparedCurrent,
