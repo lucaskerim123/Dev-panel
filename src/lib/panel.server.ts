@@ -48,7 +48,7 @@ async function officialMasterConnections(force=false){
  }catch{}
  if(!connections.length)connections=[{service_key:"license_manager",label:"Primary License Manager API",base_url:TRUSTED_MASTER_BOOTSTRAP_URL,enabled:true,priority:10,settings:{bootstrap:true}}];
  connections.sort((a:any,b:any)=>Number(a.priority||100)-Number(b.priority||100));
- officialApiRegistryCache={expires:Date.now()+30_000,connections};
+ officialApiRegistryCache={expires:Date.now()+20*60*1000,connections};
  return connections;
 }
 let configuredMasterUrlCache:{value:string;expires:number}|null=null;
@@ -62,7 +62,7 @@ async function configuredMasterUrl(force=false){
   const saved=normalizeOfficialMasterUrl(String(data?.selected_url||""));
   if(saved&&allowed.has(saved))selected=saved;
  }catch{}
- configuredMasterUrlCache={value:selected,expires:Date.now()+60_000};
+ configuredMasterUrlCache={value:selected,expires:Date.now()+20*60*1000};
  return selected;
 }
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
