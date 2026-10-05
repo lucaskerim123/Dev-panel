@@ -1670,27 +1670,35 @@ function fallbackOperationFailure(job:any,logTail:string){
  if(!unique.length)unique.push("GitHub reported this job as failed, but no console log text was available yet.");
  return {error:unique[unique.length-1],preceding:[],lines:unique};
 }
-async function operationsRunDetail(cfg:any){
- const [ciRows,deployRows,quickDeployRows,ref]=await Promise.all([
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.ci+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
-  github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=10"),
-  github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
+async function operationsRunDetail(cfg:any,force=false){
+ const read=(path:string)=>github(path,force?{cache:"no-store"}:{});
+ const [runRows,ref]=await Promise.all([
+  read("/repos/"+cfg.repo+"/actions/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=50"),
+  read("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
  ]);
- const ciRuns=Array.isArray(ciRows?.workflow_runs)?ciRows.workflow_runs:[];
- const deployRuns=Array.isArray(deployRows?.workflow_runs)?deployRows.workflow_runs:[];
- const quickDeployRuns=Array.isArray(quickDeployRows?.workflow_runs)?quickDeployRows.workflow_runs:[];
+ const allRuns=Array.isArray(runRows?.workflow_runs)?runRows.workflow_runs:[];
+ const forWorkflow=(workflow:string)=>allRuns.filter((run:any)=>String(run?.path||"").endsWith("/"+workflow));
+ const ciRuns=forWorkflow(cfg.ci);
+ const deployRuns=forWorkflow(cfg.deploy);
+ const quickDeployRuns=forWorkflow(cfg.quickDeploy);
  const ciRun=ciRuns[0]||null;
  const deployRun=deployRuns[0]||null;
  const quickDeployRun=quickDeployRuns[0]||null;
- const successfulDeployments=[...deployRuns,...quickDeployRuns].filter((run:any)=>run?.status==="completed"&&run?.conclusion==="success").sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
+ let successfulDeployments=[...deployRuns,...quickDeployRuns].filter((run:any)=>run?.status==="completed"&&run?.conclusion==="success").sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
+ if(!successfulDeployments.length){
+  const [deploySuccess,quickSuccess]=await Promise.all([
+   read("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+   read("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch="+encodeURIComponent(cfg.branch)+"&status=success&per_page=1"),
+  ]);
+  successfulDeployments=[deploySuccess?.workflow_runs?.[0],quickSuccess?.workflow_runs?.[0]].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
+ }
  const deployedRun=successfulDeployments[0]||null;
  const run=selectOperationsRun({ciRun,deployRun,quickDeployRun}) as any;
  const currentSha=String(ref?.object?.sha||"");
  const deployedSha=String(deployedRun?.head_sha||"");
  const productionCurrent=!!currentSha&&!!deployedSha&&currentSha===deployedSha;
  if(!run)return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:null,latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:null,jobs:[],failure:null,chatPrompt:null,monitoring:"Workflow"};
- const jobsResult=await github("/repos/"+cfg.repo+"/actions/runs/"+run.id+"/jobs?per_page=100");
+ const jobsResult=await read("/repos/"+cfg.repo+"/actions/runs/"+run.id+"/jobs?per_page=100");
  const jobs=await Promise.all((jobsResult?.jobs||[]).map(async(job:any)=>{
   let failure:any=null,logTail="",logError="";
   if(job.status==="completed"){
@@ -1729,17 +1737,19 @@ async function operationsRunDetail(cfg:any){
 
 let operationsStateCache:{profile:"primary"|"fallback";value:any;expires:number}|null=null;
 
-export const getOperationsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+export const getOperationsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;force?:boolean}})=>{
  requireOperationsUser(data.token);
  await requireLocalGithubProfileActive();
  const profile=localGithubProfileName();
- if(operationsStateCache&&operationsStateCache.profile===profile&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
+ if(!data.force&&operationsStateCache&&operationsStateCache.profile===profile&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
  const keys:OperationsSystem[]=["licenseManager","billingStore"];
  try{
   const configs=await operationsRepos();
-  const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(configs[key])] as const));
-  const value={checkedAt:new Date().toISOString(),profile,systems:Object.fromEntries(entries),stale:false};
-  operationsStateCache={profile,value,expires:Date.now()+12000};
+  const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(configs[key],Boolean(data.force))] as const));
+  const systems=Object.fromEntries(entries);
+  const live=keys.some(key=>systems[key]?.run?.status&&systems[key].run.status!=="completed");
+  const value={checkedAt:new Date().toISOString(),profile,systems,stale:false};
+  operationsStateCache={profile,value,expires:Date.now()+(live?25000:120000)};
   return value;
  }catch(error:any){
   if(operationsStateCache&&operationsStateCache.profile===profile){
@@ -1785,11 +1795,21 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
  return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
 });
 
-async function operationsFullTree(repo:string,treeSha:string,prefix=""){
- const root=await github("/repos/"+repo+"/git/trees/"+treeSha);
- const files:any[]=[];
- for(const item of root?.tree||[]){const path=prefix?prefix+"/"+item.path:item.path;if(item.type==="tree")files.push(...await operationsFullTree(repo,item.sha,path));else files.push({...item,path})}
- return files;
+async function operationsFullTree(repo:string,treeSha:string){
+ const recursive=await github("/repos/"+repo+"/git/trees/"+encodeURIComponent(treeSha)+"?recursive=1");
+ if(!recursive?.truncated){
+  return (recursive?.tree||[]).filter((item:any)=>item.type!=="tree").map((item:any)=>({...item,path:String(item.path||"")}));
+ }
+ const walk=async(sha:string,prefix=""):Promise<any[]>=>{
+  const root=await github("/repos/"+repo+"/git/trees/"+encodeURIComponent(sha));
+  const groups=await Promise.all((root?.tree||[]).map(async(item:any)=>{
+   const path=prefix?prefix+"/"+item.path:item.path;
+   if(item.type==="tree")return walk(String(item.sha),path);
+   return [{...item,path}];
+  }));
+  return groups.flat();
+ };
+ return walk(treeSha);
 }
 async function operationsAllCompareCommits(repo:string,base:string,head:string){
  const all:any[]=[];

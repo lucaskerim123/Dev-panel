@@ -25,12 +25,24 @@ export function OperationsWorkspace({session}:{session:any}){
  const [scanOpen,setScanOpen]=useState<Record<string,boolean>>({});
  const [syncState,setSyncState]=useState<any>(null);
 
- const load=useCallback(async(silent=false)=>{
+ const applyState=useCallback((r:any)=>{
+  setData(r);
+  setScans(previous=>{
+   const next:Record<string,any>={};
+   for(const [key,scan] of Object.entries(previous)){
+    const system=r.systems?.[key];
+    if((scan as any)?.currentSha===system?.currentSha&&((scan as any)?.baselineSha||null)===(system?.deployedSha||null))next[key]=scan;
+   }
+   return next;
+  });
+ },[]);
+
+ const load=useCallback(async(silent=false,force=false)=>{
   if(!silent)setLoading(true);
-  try{const r=await getOperationsState({data:{token:session.token}});setData(r);setError("")}
+  try{const r=await getOperationsState({data:{token:session.token,force}});applyState(r);setError("")}
   catch(x:any){setError(x.message||"Unable to load Operations state.")}
   finally{if(!silent)setLoading(false)}
- },[session.token]);
+ },[session.token,applyState]);
 
  const loadSync=useCallback(async()=>{
   try{const r=await getRepositorySyncState({data:{token:session.token}});setSyncState(r)}
@@ -38,35 +50,24 @@ export function OperationsWorkspace({session}:{session:any}){
  },[session.token]);
 
  const refreshAll=async()=>{
-  setLoading(true);setError("");void loadSync();
+  setLoading(true);setError("");
   try{
-   const [state,...scanResults]=await Promise.all([
-    getOperationsState({data:{token:session.token}}),
-    ...SYSTEMS.map(system=>getOperationsScan({data:{token:session.token,system:system.key as any}}))
+   const [state,sync]=await Promise.all([
+    getOperationsState({data:{token:session.token,force:true}}),
+    getRepositorySyncState({data:{token:session.token}})
    ]);
-   setData(state);
-   setScans(Object.fromEntries(SYSTEMS.map((system,index)=>[system.key,scanResults[index]])));
-  }catch(x:any){setError(x.message||"Unable to refresh Operations state and repository changes.")}
+   applyState(state);
+   setSyncState(sync);
+  }catch(x:any){setError(x.message||"Unable to refresh Operations status.")}
   finally{setLoading(false)}
  };
 
  useEffect(()=>{void load()},[load]);
- useEffect(()=>{
-  let alive=true;
-  Promise.all(SYSTEMS.map(async system=>{
-   try{return [system.key,await getOperationsScan({data:{token:session.token,system:system.key as any}})] as const}
-   catch{return [system.key,null] as const}
-  })).then(entries=>{
-   if(!alive)return;
-   setScans(Object.fromEntries(entries.filter(([,value])=>Boolean(value))));
-  });
-  return()=>{alive=false};
- },[session.token]);
  useEffect(()=>{void loadSync()},[loadSync]);
  const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
- useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>void loadSync(),15000);return()=>clearInterval(t)},[syncLive,loadSync]);
+ useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>void loadSync(),30000);return()=>clearInterval(t)},[syncLive,loadSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
- useEffect(()=>{const t=setInterval(()=>void load(true),live?15000:60000);return()=>clearInterval(t)},[live,load]);
+ useEffect(()=>{if(!live)return;const t=setInterval(()=>void load(true),30000);return()=>clearInterval(t)},[live,load]);
 
  const action=async(system:string,actionType:"ci"|"deploy"|"override-deploy")=>{
   const systemLabel=SYSTEMS.find(x=>x.key===system)?.label||system;
@@ -77,7 +78,7 @@ export function OperationsWorkspace({session}:{session:any}){
    const r=await runOperation({data:{token:session.token,system:system as any,action:actionType}});
    setNotice(r.message||"Workflow queued.");
    setConsoleOpen(v=>({...v,[system]:true}));
-   await load(true);
+   await load(true,true);
   }catch(x:any){setError(x.message||"Unable to start workflow.")}
   finally{setBusy("")}
  };
@@ -199,7 +200,7 @@ export function OperationsWorkspace({session}:{session:any}){
 
       <div className="border-t">
        <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>setConsoleOpen(v=>({...v,[system.key]:!isConsoleOpen}))}>
-        <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output":`Workflow status refreshes every ${live?"15":"60"} seconds`}</p></div></div>
+        <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output":run?"Workflow status refreshes every 30 seconds while active":"No background polling while idle"}</p></div></div>
         <div className="flex items-center gap-2"><Pill text={run?.status==="completed"?"CLOSED":run?"LIVE":"IDLE"}/>{isConsoleOpen?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
        </button>
        {isConsoleOpen&&<div className="border-t bg-black/20 p-3">
@@ -223,7 +224,7 @@ export function OperationsWorkspace({session}:{session:any}){
 
       <div className="border-t">
        <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>scan?setScanOpen(v=>({...v,[system.key]:!v[system.key]})):loadScan(system.key)} disabled={busy===system.key+"scan"}>
-        <div className="flex items-center gap-2"><FileCode2 size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">REPOSITORY CHANGE SCAN</p><p className="mt-1 text-[9px] text-muted-foreground">Compare current main against the last successful production deployment.</p></div></div>
+        <div className="flex items-center gap-2"><FileCode2 size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">REPOSITORY CHANGE SCAN</p><p className="mt-1 text-[9px] text-muted-foreground">Loaded only when opened. Compare current main against the last successful production deployment.</p></div></div>
         <div className="flex items-center gap-2">{busy===system.key+"scan"?<Loader2 size={14} className="animate-spin"/>:scan&&<Pill text={scan.updateAvailable?`${scan.changedFileCount} FILES`:"CURRENT"}/>} {scanOpen[system.key]?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
        </button>
        {scan&&!scanOpen[system.key]&&<div className="border-t px-4 py-2 text-[10px] text-muted-foreground">{scan.updateAvailable?<><b className="text-amber-200">Not latest.</b> {scan.changedFileCount} changed file{scan.changedFileCount===1?"":"s"} since the production baseline.</>:<><b className="text-emerald-200">Latest.</b> Production matches current main.</>}</div>}
