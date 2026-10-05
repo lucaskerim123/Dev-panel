@@ -171,13 +171,15 @@ function Index() {
     };
     // Even completed runs need one fetch after refresh to restore jobs and final logs.
     void poll();
-    const timer = completedAlready ? null : setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 15000);
+    const timer = completedAlready ? null : setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 60000);
     return () => { stopped = true; if(timer)clearInterval(timer); };
   }, [run?.id, runRepo, session?.token]);
 
   useEffect(() => {
     if (!run?.id || !runRepo || !session || !runVersion) return;
+    if (String(run.status||"")!=="completed" || String(run.conclusion||"").toLowerCase()!=="success") return;
     let stopped = false;
+    let attempts = 0;
     let timer: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       try {
@@ -188,23 +190,22 @@ function Index() {
           data: { token: session.token, type, version: runVersion, channel: runChannel }
         });
         if (stopped) return;
+        attempts++;
         if (r.release) {
           setHandoff(r.release);
           await load(session, true);
-          // A published release has completed its handoff. Stop polling the
-          // obsolete candidate, but preserve GitHub run details for inspection.
-          if (String(r.release.status || "").toLowerCase() === "published" && timer) {
-            clearInterval(timer); timer = null;
-          }
+          if (timer) { clearInterval(timer); timer = null; }
+        } else if (attempts>=20 && timer) {
+          clearInterval(timer); timer = null;
         }
       } catch (x:any) {
         if (!stopped) setError(x?.message || "Unable to read the License Manager handoff state.");
       }
     };
-    timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 30000);
+    timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 60000);
     void poll();
     return () => { stopped = true; if (timer) clearInterval(timer); };
-  }, [run?.id, runRepo, session?.token, runVersion, runChannel]);
+  }, [run?.id, run?.status, run?.conclusion, runRepo, session?.token, runVersion, runChannel]);
 
   const stats = useMemo(() => {
     const all = [...(data.base.releases || []), ...(data.engine.releases || [])];
