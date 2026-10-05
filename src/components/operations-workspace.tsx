@@ -27,7 +27,17 @@ export function OperationsWorkspace({session}:{session:any}){
  const [syncState,setSyncState]=useState<any>(null);
 
  const applyState=useCallback((r:any)=>{
-  setData(r);
+  setData((current:any)=>{
+   const systems={...(r.systems||{})};
+   for(const key of Object.keys(systems)){
+    const previous=current?.systems?.[key];
+    const incoming=systems[key];
+    if(previous?.detailsLoaded&&String(previous?.run?.id||"")===String(incoming?.run?.id||"")){
+     systems[key]={...incoming,jobs:previous.jobs||[],failure:previous.failure||null,chatPrompt:previous.chatPrompt||null,detailsLoaded:true};
+    }
+   }
+   return {...r,systems};
+  });
   setScans(previous=>{
    const next:Record<string,any>={};
    for(const [key,scan] of Object.entries(previous)){
@@ -62,12 +72,18 @@ export function OperationsWorkspace({session}:{session:any}){
  const refreshAll=async()=>{
   setLoading(true);setError("");
   try{
-   const [state,sync]=await Promise.all([
+   const loadedScanKeys=Object.keys(scans);
+   const openConsoleKeys=SYSTEMS.map(s=>s.key).filter(key=>consoleOpen[key]);
+   const [state,sync,scanRows,consoleRows]=await Promise.all([
     getOperationsState({data:{token:session.token,force:true}}),
-    getRepositorySyncState({data:{token:session.token}})
+    getRepositorySyncState({data:{token:session.token}}),
+    Promise.all(loadedScanKeys.map(async key=>[key,await getOperationsScan({data:{token:session.token,system:key as any,force:true}})] as const)),
+    Promise.all(openConsoleKeys.map(async key=>[key,await getOperationsRunDetail({data:{token:session.token,system:key as any}})] as const)),
    ]);
    applyState(state);
    setSyncState(sync);
+   if(scanRows.length)setScans(current=>({...current,...Object.fromEntries(scanRows)}));
+   if(consoleRows.length)setData((current:any)=>({...current,systems:{...(current.systems||{}),...Object.fromEntries(consoleRows)}}));
   }catch(x:any){setError(x.message||"Unable to refresh Operations status.")}
   finally{setLoading(false)}
  };
@@ -78,12 +94,6 @@ export function OperationsWorkspace({session}:{session:any}){
  useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void loadSync()},60000);return()=>clearInterval(t)},[syncLive,loadSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
  useEffect(()=>{if(!live)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void load(true)},60000);return()=>clearInterval(t)},[live,load]);
- const liveConsoleKey=SYSTEMS.map(s=>s.key).find(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status&&data.systems[key].run.status!=="completed")||null;
- useEffect(()=>{
-  if(!liveConsoleKey)return;
-  const t=setInterval(()=>{if(document.visibilityState==="visible")void loadConsole(liveConsoleKey,true)},60000);
-  return()=>clearInterval(t);
- },[liveConsoleKey,loadConsole]);
 
  const action=async(system:string,actionType:"ci"|"deploy"|"override-deploy")=>{
   const systemLabel=SYSTEMS.find(x=>x.key===system)?.label||system;
