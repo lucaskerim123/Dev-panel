@@ -152,6 +152,7 @@ function Index() {
     if (!run?.id || !runRepo || !session) return;
     const completedAlready=["success", "failure", "cancelled", "skipped"].includes(String(run.conclusion || ""));
     let stopped = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       try {
         const r = await getReleaseRun({ data: { token: session.token, repo: runRepo, runId: run.id } });
@@ -163,6 +164,7 @@ function Index() {
           setError(detail);
         }
         if (["success", "failure", "cancelled", "skipped"].includes(conclusion)) {
+          if (timer) { clearInterval(timer); timer = null; }
           await load(session, true);
         }
       } catch (x:any) {
@@ -171,7 +173,7 @@ function Index() {
     };
     // Even completed runs need one fetch after refresh to restore jobs and final logs.
     void poll();
-    const timer = completedAlready ? null : setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 60000);
+    if (!completedAlready) timer = setInterval(()=>{if(document.visibilityState==="visible")void poll()}, 60000);
     return () => { stopped = true; if(timer)clearInterval(timer); };
   }, [run?.id, runRepo, session?.token]);
 
