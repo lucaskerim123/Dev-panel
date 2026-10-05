@@ -1812,6 +1812,7 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
  const startedAt=Date.now();
  await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main"})});
  operationsStateCache=null;
+ operationsScanCache.delete(localGithubProfileName()+":"+data.system);
  const run=await findOperationsRun(cfg,workflow,startedAt);
  return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
 });
@@ -1837,8 +1838,13 @@ async function operationsAllCompareCommits(repo:string,base:string,head:string){
  for(let page=1;page<=100;page++){const rows=await github("/repos/"+repo+"/compare/"+base+"..."+head+"?per_page=100&page="+page);const commits=rows?.commits||[];all.push(...commits);if(commits.length<100)break}
  return all;
 }
-export const getOperationsScan=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem}})=>{
+const operationsScanCache=new Map<string,{value:any;expires:number}>();
+export const getOperationsScan=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem;force?:boolean}})=>{
  requireOperationsUser(data.token);
+ const profile=localGithubProfileName();
+ const cacheKey=profile+":"+data.system;
+ const cached=operationsScanCache.get(cacheKey);
+ if(!data.force&&cached&&cached.expires>Date.now())return cached.value;
  const cfg=await operationsConfig(data.system);
  const ref=await github("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch));
  const currentSha=String(ref?.object?.sha||"");
@@ -1864,5 +1870,7 @@ export const getOperationsScan=createServerFn({method:"POST"}).handler(async({da
   const currentFiles=await operationsFullTree(cfg.repo,currentCommit.commit.tree.sha);
   changedFiles=currentFiles.map((item:any)=>({path:item.path,status:"added",sha:item.sha,size:item.size??null})).sort((a:any,b:any)=>a.path.localeCompare(b.path));
  }
- return {key:data.system,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,baselineSha,baselineSource,productionCurrent:!!deployedRun&&currentSha===deployedRun.head_sha,updateAvailable:!baselineSha||currentSha!==baselineSha,commits:commits.map((c:any)=>({sha:c.sha,html_url:c.html_url,message:String(c.commit?.message||"").split("\n")[0],author:c.commit?.author?.name||c.author?.login||"Unknown",date:c.commit?.author?.date||c.commit?.committer?.date||null})).reverse(),commitCount:commits.length,changedFiles,changedFileCount:changedFiles.length,completeFileScan:true,checkedAt:new Date().toISOString()};
+ const value={key:data.system,label:cfg.label,repo:cfg.repo,branch:cfg.branch,currentSha,baselineSha,baselineSource,productionCurrent:!!deployedRun&&currentSha===deployedRun.head_sha,updateAvailable:!baselineSha||currentSha!==baselineSha,commits:commits.map((c:any)=>({sha:c.sha,html_url:c.html_url,message:String(c.commit?.message||"").split("\n")[0],author:c.commit?.author?.name||c.author?.login||"Unknown",date:c.commit?.author?.date||c.commit?.committer?.date||null})).reverse(),commitCount:commits.length,changedFiles,changedFileCount:changedFiles.length,completeFileScan:true,checkedAt:new Date().toISOString()};
+ operationsScanCache.set(cacheKey,{value,expires:Date.now()+25*60*1000});
+ return value;
 });
