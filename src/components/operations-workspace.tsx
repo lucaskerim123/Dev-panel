@@ -83,7 +83,7 @@ export function OperationsWorkspace({session}:{session:any}){
     getRepositorySyncState({data:{token:session.token}}),
     Promise.all(openConsoleKeys.map(async key=>[key,await getOperationsRunDetail({data:{token:session.token,system:key as any}})] as const)),
     refreshRepositoryChecks(true),
-   ]).then(([state,sync,consoleRows])=>[state,sync,consoleRows] as const);
+   ]);
    applyState(state);
    setSyncState(sync);
    if(consoleRows.length)setData((current:any)=>({...current,systems:{...(current.systems||{}),...Object.fromEntries(consoleRows)}}));
