@@ -41,7 +41,7 @@ export function ReleaseWorkspace(p:any){
     const next:any=await getReleaseBranchSyncState({data:{token:p.session.token,type:p.type}});
     if(cancelled)return;
     setBranchSync(next);
-    if(next?.active&&!timer)timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refresh()},30000);
+    if(next?.active&&!timer)timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refresh()},60000);
     if(!next?.active&&timer){window.clearInterval(timer);timer=undefined;}
    }catch{if(!cancelled)setBranchSync((current:any)=>current||{error:true});}
   };
@@ -79,7 +79,7 @@ export function ReleaseWorkspace(p:any){
    }catch(x:any){if(!cancelled)setError(x?.message||"Unable to refresh promotion status.");}
   };
   void poll();
-  const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void poll()},15000);
+  const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void poll()},60000);
   return()=>{cancelled=true;window.clearInterval(timer)};
  },[promotionRun?.runId,promotionRun?.sourceSha,promotionRun?.completed,promotionRun?.conclusion,base,p.session.token,p.type,branchSync?.releaseRef,p.baseline?.ref]);
  // A historical run must not hijack a new wizard or an unrelated draft.
