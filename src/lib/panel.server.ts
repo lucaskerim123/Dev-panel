@@ -93,15 +93,6 @@ function detectUpdateComponents(files:any[]){
   const path=String(item?.filename||item?.file||"").toLowerCase().replaceAll("\\","/");
   const migration=path.match(/^supabase\/migrations\/(shared|base|apex|mcp|studio)\/\d{14}_[a-z0-9._-]+\.sql$/i);
   const sourcePath=path.startsWith("src/")||/^(package(-lock)?\.json|tsconfig\.json|vite\.config\.ts|\.npmrc)$/.test(path);
-  if(path.startsWith("updates/base/overlay/")&&!path.endsWith("/.gitkeep")&&!path.endsWith(".gitkeep"))add("base");
-  if(path==="updates/base/delete.txt"){
-   const patch=String(item?.patch||"");
-   const addsRealDeletion=patch.split("\n").some((line:string)=>line.startsWith("+")&&!line.startsWith("+++")&&Boolean(line.slice(1).trim())&&!line.slice(1).trim().startsWith("#"));
-   // A complete tree diff can detect this file even when GitHub omits patch
-   // metadata after its compare-file cap. In that case prefer a conservative
-   // Base target rather than silently missing a deletion instruction.
-   if(addsRealDeletion||(!patch&&String(item?.status||"").toLowerCase()!=="removed"))add("base");
-  }
   if(migration&&migration[1]!=="shared")add(migration[1].toLowerCase());
   if(path.includes("/addons/apex/"))add("apex");
   if(path.includes("/addons/mcp/"))add("mcp");
@@ -478,7 +469,18 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
  // Published state belongs to License Manager; never present that version/channel
  // as an editable Stage 1 draft even when GitHub completion polling was missed.
  const publishedKeys=new Set(authoritativeRows.filter((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at).map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
- const visibleDrafts=(drafts||[]).filter((d:any)=>Boolean(d?.inputs?.repackage)||!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
+ const registryKeys=new Set(authoritativeRows.map((r:any)=>String(r.version||"")+"|"+String(r.channel||"").toLowerCase()));
+ const orphanedHandoffs=(drafts||[]).filter((d:any)=>
+  String(d.status||"").toLowerCase()==="handed_off"&&
+  !registryKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase())
+ );
+ const orphanIds=new Set(orphanedHandoffs.map((d:any)=>String(d.id)));
+ for(const orphan of orphanedHandoffs){
+  await sb.from("panel_release_events").delete().eq("release_version",String(orphan.version||"")).eq("release_type",String(orphan.release_type||"")).eq("channel",String(orphan.channel||"stable").toLowerCase());
+  await sb.from("panel_release_drafts").delete().eq("id",orphan.id);
+ }
+ const activeDrafts=(drafts||[]).filter((d:any)=>!orphanIds.has(String(d.id)));
+ const visibleDrafts=activeDrafts.filter((d:any)=>Boolean(d?.inputs?.repackage)||!publishedKeys.has(String(d.version||"")+"|"+String(d.channel||"").toLowerCase()));
  // Refresh persisted in-flight attempts from GitHub, rather than assuming
  // that the browser stayed open long enough to save the completion event.
  for(const draft of visibleDrafts){
@@ -616,7 +618,7 @@ export const prepareReleaseRepackage=createServerFn({method:"POST"}).handler(asy
   notes:String(oldInputs.notes||release.notes||manifest.customer_notes||""),
   components:Array.isArray(oldInputs.components)&&oldInputs.components.length?oldInputs.components:(Array.isArray(manifest.components)?manifest.components:(releaseType==="base"?["base"]:[])),
   minimumBaseVersion:releaseType==="update"?String(oldInputs.minimumBaseVersion||manifest.minimumBaseVersion||""):null,
-  protocol:releaseType==="update"?String(oldInputs.protocol||manifest.minimumEngineDeployerProtocol||"1"):null,
+  protocol:releaseType==="update"?String(oldInputs.protocol||manifest.minimumUpdaterProtocol||manifest.minimumEngineDeployerProtocol||"2"):null,
   changelogTemplate:releaseType==="base"?"base_deployment_log":"update_changelog",
   changelogDraft:String(oldInputs.changelogDraft||release.notes||manifest.customer_changelog||"")
  };
@@ -660,17 +662,17 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
  const sb=authClient();
  const {data:existing,error:readError}=await sb.from("panel_release_drafts").select("*").eq("id",data.draftId).single();
  if(readError||!existing)throw new Error("Release draft was not found.");
- // Only local orphan cleanup: never delete a draft backed by a
- // License Manager release, and never delete any unfinished GitHub run.
+ // Published is the only protected release state. Any authoritative
+ // candidate that is not currently published may be deleted with its Stage 1 draft.
  const releaseType=String(existing.release_type||"")==="base"?"base":"update";
  const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(String(existing.channel||"stable"))}&type=${releaseType}&include_archived=true`);
  const matches=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>
   String(r.version||"")===String(existing.version||"")&&
   String(r.channel||"").toLowerCase()===String(existing.channel||"").toLowerCase()&&
   String(r.release_type||releaseType).toLowerCase()===releaseType);
- const returnedMatches=matches.filter((r:any)=>!r.published_at&&String(r.review_status||"").toLowerCase()==="rejected");
- const blockingMatches=matches.filter((r:any)=>!returnedMatches.some((returned:any)=>String(returned.id)===String(r.id)));
- if(blockingMatches.length)throw new Error("License Manager still owns an active or published release for this version. Local draft deletion is blocked; open the authoritative release record instead.");
+ const publishedMatches=matches.filter((r:any)=>String(r.status||"").toLowerCase()==="published");
+ if(publishedMatches.length)throw new Error("This version is currently published. Unpublish or withdraw it before deleting the Stage 1 draft.");
+ const deletableMatches=matches.filter((r:any)=>String(r.status||"").toLowerCase()!=="published");
  const {data:attempts,error:attemptError}=await sb.from("panel_release_attempts").select("run_id,status").eq("draft_id",existing.id);
  if(attemptError)throw new Error("Unable to verify release attempts: "+attemptError.message);
  const workerRepo=releaseType==="base"?BASE_WORKER_REPO:ENGINE_REPO;
@@ -685,24 +687,19 @@ export const deleteReleaseDraft=createServerFn({method:"POST"}).handler(async({d
    throw new Error("GitHub run #"+attempt.run_id+" is still active. Local draft deletion is blocked.");
   // Give a successful handoff time to appear in the authoritative registry.
   // Never mistake a brief ingestion delay for an orphaned local draft.
-  if(String(run?.conclusion||"").toLowerCase()==="success"&&!returnedMatches.length){
+  if(String(run?.conclusion||"").toLowerCase()==="success"&&!deletableMatches.length){
    const finishedAt=Date.parse(String(run.updated_at||run.run_started_at||""));
    if(!Number.isFinite(finishedAt)||Date.now()-finishedAt<10*60*1000)
     throw new Error("GitHub succeeded recently. Wait 10 minutes for License Manager intake, refresh, then retry local orphan cleanup if the release still has not appeared.");
   }
  }
- // GitHub is now confirmed finished. Permanent License Manager deletion below
- // remains limited to never-published releases; previously published history must
- // stay retained even when the Stage 1 draft has been returned for rework.
- for(const release of returnedMatches){
+ // GitHub is now confirmed finished. Delete every authoritative candidate that
+ // is not currently published. Published rows were rejected above.
+ for(const release of deletableMatches){
   const id=String(release.id||"");
   if(!id)continue;
-  if(!release.archived_at){
-   await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Rejected candidate returned to Dev Panel and deleted with its Stage 1 draft"})});
-  }
-  const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
-  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
-  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of returned rejected release "+id+".");
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",reason:"Deleted with Stage 1 draft because release is not currently published"})});
+  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of non-published release "+id+".");
  }
  const {error}=await sb.from("panel_release_drafts").delete().eq("id",data.draftId);
  if(error)throw new Error("Unable to delete release draft: "+error.message);
@@ -734,7 +731,19 @@ export const deleteReleaseAttempt=createServerFn({method:"POST"}).handler(async(
   }).eq("id",id);
  }
  if(["queued","in_progress"].includes(status))throw new Error("A running release attempt cannot be deleted.");
- if(status==="success"||String(draft.status||"").toLowerCase()==="handed_off")throw new Error("The successful handoff attempt is retained. Delete only stale failed, cancelled or skipped attempts.");
+ const releaseType=String(draft.release_type||"")==="base"?"base":"update";
+ const authoritative=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(String(draft.channel||"stable"))}&type=${releaseType}&include_archived=true`);
+ const matching=(Array.isArray(authoritative?.releases)?authoritative.releases:[]).filter((r:any)=>
+  String(r.version||"")===String(draft.version||"")&&
+  String(r.channel||"").toLowerCase()===String(draft.channel||"").toLowerCase()&&
+  String(r.release_type||releaseType).toLowerCase()===releaseType);
+ if(matching.some((r:any)=>String(r.status||"").toLowerCase()==="published"))throw new Error("This version is currently published. Unpublish or withdraw it before deleting release attempts.");
+ for(const release of matching.filter((r:any)=>String(r.status||"").toLowerCase()!=="published")){
+  const releaseId=String(release.id||"");
+  if(!releaseId)continue;
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(releaseId)}`,{method:"POST",body:JSON.stringify({action:"delete",reason:"Release attempt deleted from Dev/Control Centre"})});
+  if(deleted?.deleted!==true)throw new Error("License Manager did not confirm deletion of non-published release "+releaseId+".");
+ }
 
  const {error:deleteError}=await sb.from("panel_release_attempts").delete().eq("id",id);
  if(deleteError)throw new Error("Unable to delete release attempt: "+deleteError.message);
@@ -933,8 +942,15 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
  const releaseSha=String(releaseBranch?.object?.sha||"");
  if(!/^[a-f0-9]{40}$/i.test(sourceSha))throw new Error(`Could not resolve ${repo}@main.`);
  const allRuns=Array.isArray(runs?.workflow_runs)?runs.workflow_runs:[];
+ const activeCutoff=Date.now()-(30*60*1000);
  const activeRun=allRuns
-  .filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()))
+  .filter((run:any)=>{
+   const status=String(run?.status||"").toLowerCase();
+   const createdAt=new Date(run?.created_at||run?.run_started_at||0).getTime();
+   return ["queued","in_progress","waiting","requested","pending"].includes(status)&&
+    String(run?.head_sha||"")===sourceSha&&
+    Number.isFinite(createdAt)&&createdAt>=activeCutoff;
+  })
   .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  const latestRun=[...allRuns].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  return {
@@ -993,8 +1009,15 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  const releaseSha=String(releaseBranch?.object?.sha||"");
  if(!/^[a-f0-9]{40}$/i.test(sourceSha))throw new Error(`Could not resolve ${repo}@main.`);
 
+ const activeCutoff=Date.now()-(30*60*1000);
  const active=(runs?.workflow_runs||[])
-  .filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()))
+  .filter((run:any)=>{
+   const status=String(run?.status||"").toLowerCase();
+   const createdAt=new Date(run?.created_at||run?.run_started_at||0).getTime();
+   return ["queued","in_progress","waiting","requested","pending"].includes(status)&&
+    String(run?.head_sha||"")===sourceSha&&
+    Number.isFinite(createdAt)&&createdAt>=activeCutoff;
+  })
   .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0];
  if(active){
   return {ok:true,alreadyRunning:true,repo,sourceRef,releaseRef,sourceSha:String(active.head_sha||sourceSha),releaseSha,runId:active.id||null,runUrl:active.html_url||null,status:active.status||"in_progress"};
@@ -1066,7 +1089,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   const minimumBaseVersion=String(data.minimumBaseVersion||"").trim();
   const protocol=Number(data.protocol||"");
   if(!parseSemVer(minimumBaseVersion))throw new Error("Minimum Base version must be valid SemVer.");
-  if(!Number.isInteger(protocol)||protocol<1||protocol>100)throw new Error("Minimum deployer protocol must be an integer from 1 to 100.");
+  if(!Number.isInteger(protocol)||protocol<1||protocol>100)throw new Error("Minimum Updater protocol must be an integer from 1 to 100.");
   const baseChannel=ENGINE_BASE_COMPATIBILITY_CHANNEL;
   const baseResult=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(baseChannel)}&type=base&include_archived=false`);
   const publishedBases=(baseResult?.releases||[]).filter((r:any)=>{
@@ -1169,7 +1192,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   components: selectedComponents,
   minimumBaseVersion: data.type === "engine" ? (data.minimumBaseVersion || "1.0.0") : null,
   baseCompatibilityChannel: data.type === "engine" ? ENGINE_BASE_COMPATIBILITY_CHANNEL : null,
-  minimumDeployerProtocol: data.type === "engine" ? (data.protocol || "1") : null,
+  minimumUpdaterProtocol: data.type === "engine" ? (data.protocol || "2") : null,
   notes: data.notes.trim(),
   changelogTemplate: data.changelogTemplate,
   generatedAt: new Date().toISOString(),
@@ -1184,7 +1207,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   previous_source_commit:previousSourceCommit,
  };
  if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head});
- if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_deployer_protocol:data.protocol||"1"});
+ if(data.type==="engine")Object.assign(inputs,{source_sha:head,apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_updater_protocol:data.protocol||"2"});
  const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
  const dispatchBytes=Buffer.byteLength(dispatchPayload,"utf8");
  if(dispatchBytes>50000){
@@ -1231,10 +1254,10 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
    if(createError)throw new Error("Unable to create release draft: "+createError.message);
    draft=created;
  }
- await sb.from("panel_release_attempts").delete().eq("draft_id",draft.id).in("status",["failure","cancelled","skipped"]);
- const {data:remainingAttempts,error:remainingAttemptsError}=await sb.from("panel_release_attempts").select("attempt_number").eq("draft_id",draft.id).order("attempt_number",{ascending:false}).limit(1);
- if(remainingAttemptsError)throw new Error("Unable to clean stale release attempts: "+remainingAttemptsError.message);
- const attemptNumber=Number(remainingAttempts?.[0]?.attempt_number||0)+1;
+ const {data:attemptRows,error:attemptRowsError}=await sb.from("panel_release_attempts").select("attempt_number").eq("draft_id",draft.id).order("attempt_number",{ascending:false}).limit(1);
+ if(attemptRowsError)throw new Error("Unable to resolve release attempt history: "+attemptRowsError.message);
+ const repackageAttemptFloor=repackage?Number(repackageRelease?.revision||0):0;
+ const attemptNumber=Math.max(repackageAttemptFloor,Number(draft.latest_attempt||0),Number(attemptRows?.[0]?.attempt_number||0))+1;
  const {error:draftUpdateError}=await sb.from("panel_release_drafts").update({status:"building",latest_attempt:attemptNumber,last_error:null,last_run_id:null,last_run_url:null,source_sha:head,inputs:inputSnapshot,updated_at:new Date().toISOString()}).eq("id",draft.id);
  if(draftUpdateError)throw new Error("Unable to prepare release attempt: "+draftUpdateError.message);
  const {data:attemptRow,error:attemptCreateError}=await sb.from("panel_release_attempts").insert({draft_id:draft.id,attempt_number:attemptNumber,status:"queued"}).select("*").single();
@@ -1307,26 +1330,19 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  }
  const expected=`DELETE_RELEASE:${id}:${release.version}`;
 
- let billingWarning="";
- try{
-  await billingStoreReset({
-   releaseIds:[id],
-   version:String(release.version||""),
-   releaseType:String(release.release_type||"").toLowerCase()==="update"?"update":"base",
-   channel:String(release.channel||"stable").toLowerCase()
-  });
- }catch(error:any){
-  billingWarning="Billing presentation cleanup could not be confirmed: "+String(error?.message||"unknown error")+".";
- }
+ await billingStoreReset({
+  releaseIds:[id],
+  version:String(release.version||""),
+  releaseType:String(release.release_type||"").toLowerCase()==="update"?"update":"base",
+  channel:String(release.channel||"stable").toLowerCase()
+ });
 
- const result=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation:expected})});
- return {ok:true,deleted:result?.deleted===true,id,warning:billingWarning||null};
+ const result=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation:expected,reason:"Deleted from Dev/Control Centre"})});
+ return {ok:true,deleted:result?.deleted===true,id,warning:null};
 });
 
-export const startFreshRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{
+export async function clearReleaseStateCore(data:{type:"base"|"engine";version:string;channel:string}){
  const {BASE_WORKER_REPO,ENGINE_REPO}=await githubContext();
- const actor=readSession(data.token);
- if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to start a release fresh.");
  const version=String(data.version||"").trim();
  if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("A valid release version is required.");
  const channel=normalizeChannel(data.channel||"stable");
@@ -1335,7 +1351,7 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
  const result=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
  const releases=(Array.isArray(result?.releases)?result.releases:[]).filter((r:any)=>String(r.version||"")===version&&String(r.channel||"stable").toLowerCase()===channel&&String(r.release_type||"").toLowerCase()===releaseType);
  const published=releases.find((r:any)=>String(r.status||"").toLowerCase()==="published"&&!r.archived_at);
- if(published)throw new Error(`v${version} is currently published. Unpublish it first, then use Start Fresh. The published history will be preserved.`);
+ if(published)throw new Error(`v${version} is currently published. Unpublish or withdraw it first; only the currently published state is protected.`);
  const sb=authClient();
  const {data:drafts,error:draftReadError}=await sb.from("panel_release_drafts").select("id,status,last_run_id").eq("release_type",releaseType).eq("version",version).eq("channel",channel);
  if(draftReadError)throw new Error("Unable to inspect Stage 1 draft state: "+draftReadError.message);
@@ -1348,43 +1364,38 @@ export const startFreshRelease=createServerFn({method:"POST"}).handler(async({da
    }catch{}
   }
  }
- const disposable=releases.filter((release:any)=>!release.published_at);
- const historical=releases.filter((release:any)=>Boolean(release.published_at));
- const reusableHistorical=historical.filter((release:any)=>String(release.status||"").toLowerCase()!=="published"&&!release.archived_at);
- let billingWarning="";
- try{
-  await billingStoreReset({releaseIds:disposable.map((r:any)=>String(r.id)),version,releaseType,channel});
- }catch(error:any){
-  billingWarning="Billing presentation cleanup could not be confirmed: "+String(error?.message||"unknown error")+".";
- }
- for(const release of reusableHistorical){
-  await licenseMaster(`/releases/${encodeURIComponent(String(release.id))}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Preserved published history archived by Dev Panel Start Fresh so the version can be reused"})});
- }
+ const disposable=releases.filter((release:any)=>String(release.status||"").toLowerCase()!=="published");
+
+ // Clear downstream presentation state first. If this cannot be confirmed, stop:
+ // "clear" must never report success with stale Billing Store state left behind.
+ await billingStoreReset({releaseIds:disposable.map((r:any)=>String(r.id)),version,releaseType,channel});
+
  for(const release of disposable){
   const id=String(release.id);
-  const status=String(release.status||"").toLowerCase();
-  if(status!=="draft"&&!release.archived_at){
-   await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Archived automatically before Dev Panel Start Fresh cleanup"})});
-  }
-  const confirmation=`DELETE_RELEASE:${id}:${release.version}`;
-  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",permanent:true,confirmation})});
-  if(deleted?.deleted!==true)throw new Error(`License Manager did not confirm permanent deletion of never-published release ${id}.`);
+  const deleted=await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"delete",reason:"Full Dev/Control Centre clear of non-published release"})});
+  if(deleted?.deleted!==true)throw new Error(`License Manager did not confirm deletion of non-published release ${id}.`);
  }
  const verify=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=true`);
- const remainingNeverPublished=(Array.isArray(verify?.releases)?verify.releases:[]).filter((r:any)=>
+ const remainingDeletable=(Array.isArray(verify?.releases)?verify.releases:[]).filter((r:any)=>
   String(r.version||"")===version&&
   String(r.channel||"stable").toLowerCase()===channel&&
   String(r.release_type||"").toLowerCase()===releaseType&&
-  !r.published_at
+  String(r.status||"").toLowerCase()!=="published"
  );
- if(remainingNeverPublished.length){
-  throw new Error(`Start Fresh did not complete: License Manager still has ${remainingNeverPublished.length} never-published v${version} ${releaseType} release record${remainingNeverPublished.length===1?"":"s"}. Local draft cleanup was stopped.`);
+ if(remainingDeletable.length){
+  throw new Error(`Clear did not complete: License Manager still has ${remainingDeletable.length} non-published v${version} ${releaseType} release record${remainingDeletable.length===1?"":"s"}. Local Dev state was not deleted.`);
  }
  const {error:eventDeleteError}=await sb.from("panel_release_events").delete().eq("release_version",version).eq("release_type",releaseType).eq("channel",channel);
- if(eventDeleteError)throw new Error("Release records were cleared, but Dev Panel lifecycle history could not be reset: "+eventDeleteError.message);
+ if(eventDeleteError)throw new Error("Authoritative release records were cleared, but Dev Panel lifecycle history could not be reset: "+eventDeleteError.message);
  const {error:draftDeleteError}=await sb.from("panel_release_drafts").delete().eq("release_type",releaseType).eq("version",version).eq("channel",channel);
- if(draftDeleteError)throw new Error("Release records were cleared, but the Stage 1 draft could not be reset: "+draftDeleteError.message);
- return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,verifiedLicenseManagerCleanup:true,preservedHistoricalReleases:historical.length,archivedHistoricalReleases:reusableHistorical.length,deletedDrafts:(drafts||[]).length,warning:billingWarning||null};
+ if(draftDeleteError)throw new Error("Authoritative release records were cleared, but the Stage 1 draft/attempt state could not be reset: "+draftDeleteError.message);
+ return {ok:true,version,channel,releaseType,deletedReleases:disposable.length,verifiedLicenseManagerCleanup:true,publishedReleasesPreserved:releases.filter((r:any)=>String(r.status||"").toLowerCase()==="published").length,deletedDrafts:(drafts||[]).length,clearedBillingStore:true,clearedLifecycleEvents:true,clearedAttemptsWithDrafts:true,warning:null};
+}
+
+export const startFreshRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to clear a release.");
+ return clearReleaseStateCore({type:data.type,version:data.version,channel:data.channel});
 });
 
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"withdraw"}})=>{
