@@ -51,8 +51,10 @@ async function officialMasterConnections(force=false){
  officialApiRegistryCache={expires:Date.now()+30_000,connections};
  return connections;
 }
-async function configuredMasterUrl(){
- const official=await officialMasterConnections();
+let configuredMasterUrlCache:{value:string;expires:number}|null=null;
+async function configuredMasterUrl(force=false){
+ if(!force&&configuredMasterUrlCache&&configuredMasterUrlCache.expires>Date.now())return configuredMasterUrlCache.value;
+ const official=await officialMasterConnections(force);
  const allowed=new Set(official.map((row:any)=>String(row.base_url)));
  let selected=allowed.has(TRUSTED_MASTER_BOOTSTRAP_URL)?TRUSTED_MASTER_BOOTSTRAP_URL:String(official[0]?.base_url||TRUSTED_MASTER_BOOTSTRAP_URL);
  try{
@@ -60,6 +62,7 @@ async function configuredMasterUrl(){
   const saved=normalizeOfficialMasterUrl(String(data?.selected_url||""));
   if(saved&&allowed.has(saved))selected=saved;
  }catch{}
+ configuredMasterUrlCache={value:selected,expires:Date.now()+60_000};
  return selected;
 }
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
@@ -418,6 +421,8 @@ export const saveApiConnection=createServerFn({method:"POST"}).handler(async({da
  const now=new Date().toISOString();
  const {error}=await authClient().from("panel_api_connections").upsert({service_key:"license_manager",selected_url:requested,updated_by:actor.email||actor.id,updated_at:now},{onConflict:"service_key"});
  if(error)throw new Error("Unable to save Dev Panel API connection: "+error.message);
+ configuredMasterUrlCache=null;
+ officialApiRegistryCache=null;
  return {ok:true,selectedUrl:requested};
 });
 
@@ -441,12 +446,12 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
   licenseMaster(`/release-channels?include_disabled=false`)
  ]);
  const sb=authClient();
- const {data:drafts,error:draftError}=await sb.from("panel_release_drafts").select("*").eq("release_type",releaseType).eq("channel",channel).order("updated_at",{ascending:false});
+ const {data:drafts,error:draftError}=await sb.from("panel_release_drafts").select("id,release_type,version,channel,source_repo,source_ref,source_sha,status,latest_attempt,last_error,last_run_id,last_run_url,inputs,created_by,created_at,updated_at,archived_at").eq("release_type",releaseType).eq("channel",channel).order("updated_at",{ascending:false});
  if(draftError)throw new Error("Unable to load release drafts: "+draftError.message);
  const ids=(drafts||[]).map((x:any)=>x.id);
  let attempts:any[]=[];
  if(ids.length){
-  const {data:rows,error:attemptError}=await sb.from("panel_release_attempts").select("*").in("draft_id",ids).order("attempt_number",{ascending:false});
+  const {data:rows,error:attemptError}=await sb.from("panel_release_attempts").select("id,draft_id,attempt_number,run_id,run_url,status,error_summary,created_at,completed_at").in("draft_id",ids).order("attempt_number",{ascending:false});
   if(attemptError)throw new Error("Unable to load release attempts: "+attemptError.message);
   attempts=rows||[];
  }
@@ -1525,7 +1530,7 @@ async function github(path:string,init:RequestInit={}){
  }
  try{
   const value=await requestJson(`https://api.github.com${path}`,{...init,headers:{authorization:`Bearer ${await githubToken()}`,"x-github-api-version":"2022-11-28",...(init.headers||{})}});
-  if(key)githubReadCache.set(key,{value,expires:Date.now()+15000,staleUntil:Date.now()+5*60*1000});
+  if(key)githubReadCache.set(key,{value,expires:Date.now()+30_000,staleUntil:Date.now()+5*60*1000});
   else githubReadCache.clear();
   return value;
  }catch(error:any){
@@ -1678,7 +1683,7 @@ function fallbackOperationFailure(job:any,logTail:string){
  if(!unique.length)unique.push("GitHub reported this job as failed, but no console log text was available yet.");
  return {error:unique[unique.length-1],preceding:[],lines:unique};
 }
-async function operationsRunDetail(cfg:any,force=false){
+async function operationsRunDetail(cfg:any,force=false,includeDetails=false){
  const read=(path:string)=>github(path,force?{cache:"no-store"}:{});
  const [runRows,ref]=await Promise.all([
   read("/repos/"+cfg.repo+"/actions/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=50"),
@@ -1705,11 +1710,13 @@ async function operationsRunDetail(cfg:any,force=false){
  const currentSha=String(ref?.object?.sha||"");
  const deployedSha=String(deployedRun?.head_sha||"");
  const productionCurrent=!!currentSha&&!!deployedSha&&currentSha===deployedSha;
- if(!run)return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:null,latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:null,jobs:[],failure:null,chatPrompt:null,monitoring:"Workflow"};
+ const latestAttempt=[deployRun,quickDeployRun].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime())[0]||null;
+ if(!run)return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:null,latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:cleanOperationsRun(latestAttempt),jobs:[],failure:null,chatPrompt:null,monitoring:"Workflow",detailsLoaded:false};
+ if(!includeDetails)return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:cleanOperationsRun(run),ciRun:cleanOperationsRun(ciRun),deployRun:cleanOperationsRun(deployRun),quickDeployRun:cleanOperationsRun(quickDeployRun),latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:cleanOperationsRun(latestAttempt),jobs:[],failure:null,chatPrompt:null,monitoring:run.name||"Workflow",detailsLoaded:false};
  const jobsResult=await read("/repos/"+cfg.repo+"/actions/runs/"+run.id+"/jobs?per_page=100");
  const jobs=await Promise.all((jobsResult?.jobs||[]).map(async(job:any)=>{
   let failure:any=null,logTail="",logError="";
-  if(job.status==="completed"){
+  if(job.status==="completed"&&(run.status==="completed"||job.conclusion==="failure")){
    try{
     const logs=await operationsGithubText("/repos/"+cfg.repo+"/actions/jobs/"+job.id+"/logs");
     if(logs){
@@ -1739,8 +1746,7 @@ async function operationsRunDetail(cfg:any,force=false){
   "Captured error/output:",...failure.lines,"",
   "Trace the root cause in the repository, fix the implementation rather than masking the failure, and run the relevant validation/build checks. Do not deploy automatically.",
  ].join("\n"):null;
- const latestAttempt=[deployRun,quickDeployRun].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime())[0]||null;
- return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:cleanOperationsRun(run),ciRun:cleanOperationsRun(ciRun),deployRun:cleanOperationsRun(deployRun),quickDeployRun:cleanOperationsRun(quickDeployRun),latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:cleanOperationsRun(latestAttempt),jobs,failure,chatPrompt,monitoring:run.name||"Workflow"};
+ return {repo:cfg.repo,label:cfg.label,currentSha,deployedSha,productionCurrent,run:cleanOperationsRun(run),ciRun:cleanOperationsRun(ciRun),deployRun:cleanOperationsRun(deployRun),quickDeployRun:cleanOperationsRun(quickDeployRun),latestDeployment:cleanOperationsRun(deployedRun),latestDeploymentAttempt:cleanOperationsRun(latestAttempt),jobs,failure,chatPrompt,monitoring:run.name||"Workflow",detailsLoaded:true};
 }
 
 let operationsStateCache:{profile:"primary"|"fallback";value:any;expires:number}|null=null;
@@ -1753,11 +1759,11 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
  const keys:OperationsSystem[]=["licenseManager","billingStore"];
  try{
   const configs=await operationsRepos();
-  const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(configs[key],Boolean(data.force))] as const));
+  const entries=await Promise.all(keys.map(async key=>[key,await operationsRunDetail(configs[key],Boolean(data.force),false)] as const));
   const systems=Object.fromEntries(entries);
   const live=keys.some(key=>systems[key]?.run?.status&&systems[key].run.status!=="completed");
   const value={checkedAt:new Date().toISOString(),profile,systems,stale:false};
-  operationsStateCache={profile,value,expires:Date.now()+(live?25000:120000)};
+  operationsStateCache={profile,value,expires:Date.now()+(live?55_000:120_000)};
   return value;
  }catch(error:any){
   if(operationsStateCache&&operationsStateCache.profile===profile){
@@ -1765,6 +1771,13 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
   }
   throw error;
  }
+});
+
+export const getOperationsRunDetail=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem}})=>{
+ requireOperationsUser(data.token);
+ await requireLocalGithubProfileActive();
+ const cfg=await operationsConfig(data.system);
+ return operationsRunDetail(cfg,true,true);
 });
 
 async function findOperationsRun(cfg:any,workflow:string,startedAt:number){
