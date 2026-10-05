@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useState} from "react";
 import {Activity,AlertTriangle,CheckCircle2,ChevronDown,ChevronRight,ExternalLink,FileCode2,Github,Loader2,Play,RefreshCw,Server,ShieldCheck,Terminal,XCircle,Zap} from "lucide-react";
-import {getOperationsState,getOperationsScan,getRepositorySyncState,runOperation,runRepositorySync} from "@/lib/panel.server";
+import {getOperationsState,getOperationsRunDetail,getOperationsScan,getRepositorySyncState,runOperation,runRepositorySync} from "@/lib/panel.server";
 
 const SYSTEMS=[
  {key:"licenseManager",label:"Custom License Manager"},
@@ -21,7 +21,8 @@ export function OperationsWorkspace({session}:{session:any}){
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
  const [collapsed,setCollapsed]=useState<Record<string,boolean>>({});
- const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:true,billingStore:true});
+ const [consoleOpen,setConsoleOpen]=useState<Record<string,boolean>>({licenseManager:false,billingStore:false});
+ const [consoleBusy,setConsoleBusy]=useState<Record<string,boolean>>({});
  const [scanOpen,setScanOpen]=useState<Record<string,boolean>>({});
  const [syncState,setSyncState]=useState<any>(null);
 
@@ -49,6 +50,15 @@ export function OperationsWorkspace({session}:{session:any}){
   catch(x:any){setError(x.message||"Unable to load repository sync state.")}
  },[session.token]);
 
+ const loadConsole=useCallback(async(system:string,silent=false)=>{
+  if(!silent)setConsoleBusy(v=>({...v,[system]:true}));
+  try{
+   const detail=await getOperationsRunDetail({data:{token:session.token,system:system as any}});
+   setData((current:any)=>({...current,systems:{...(current.systems||{}),[system]:detail}}));
+  }catch(x:any){if(!silent)setError(x.message||"Unable to load workflow details.")}
+  finally{if(!silent)setConsoleBusy(v=>({...v,[system]:false}))}
+ },[session.token]);
+
  const refreshAll=async()=>{
   setLoading(true);setError("");
   try{
@@ -65,9 +75,15 @@ export function OperationsWorkspace({session}:{session:any}){
  useEffect(()=>{void load()},[load]);
  useEffect(()=>{void loadSync()},[loadSync]);
  const syncLive=Boolean(syncState?.activeRun&&syncState.activeRun.status!=="completed");
- useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>void loadSync(),30000);return()=>clearInterval(t)},[syncLive,loadSync]);
+ useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void loadSync()},60000);return()=>clearInterval(t)},[syncLive,loadSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
- useEffect(()=>{if(!live)return;const t=setInterval(()=>void load(true),30000);return()=>clearInterval(t)},[live,load]);
+ useEffect(()=>{if(!live)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void load(true)},60000);return()=>clearInterval(t)},[live,load]);
+ const liveConsoleKey=SYSTEMS.map(s=>s.key).find(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status&&data.systems[key].run.status!=="completed")||null;
+ useEffect(()=>{
+  if(!liveConsoleKey)return;
+  const t=setInterval(()=>{if(document.visibilityState==="visible")void loadConsole(liveConsoleKey,true)},60000);
+  return()=>clearInterval(t);
+ },[liveConsoleKey,loadConsole]);
 
  const action=async(system:string,actionType:"ci"|"deploy"|"override-deploy")=>{
   const systemLabel=SYSTEMS.find(x=>x.key===system)?.label||system;
@@ -79,6 +95,7 @@ export function OperationsWorkspace({session}:{session:any}){
    setNotice(r.message||"Workflow queued.");
    setConsoleOpen(v=>({...v,[system]:true}));
    await load(true,true);
+   await loadConsole(system,true);
   }catch(x:any){setError(x.message||"Unable to start workflow.")}
   finally{setBusy("")}
  };
@@ -199,8 +216,8 @@ export function OperationsWorkspace({session}:{session:any}){
       {!productionCurrent&&!s.latestDeployment&&<div className="border-t border-amber-400/20 bg-amber-400/5 px-4 py-3 text-[10px] text-amber-100"><b>Production baseline unavailable.</b> No successful normal or Quick deployment is recorded for this repository yet. Current main is <code>{s.currentSha?.slice(0,12)||"unknown"}</code>; repository changes below are compared as a full snapshot until a successful production deployment exists.</div>}
 
       <div className="border-t">
-       <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>setConsoleOpen(v=>({...v,[system.key]:!isConsoleOpen}))}>
-        <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output":run?"Workflow status refreshes every 30 seconds while active":"No background polling while idle"}</p></div></div>
+       <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>{const next=!isConsoleOpen;setConsoleOpen(v=>({...v,[system.key]:next}));if(next&&!s.detailsLoaded)void loadConsole(system.key)}}>
+        <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output loads only when opened":run?"Workflow summary refreshes every 60 seconds while active":"No background polling while idle"}</p></div></div>
         <div className="flex items-center gap-2"><Pill text={run?.status==="completed"?"CLOSED":run?"LIVE":"IDLE"}/>{isConsoleOpen?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
        </button>
        {isConsoleOpen&&<div className="border-t bg-black/20 p-3">
@@ -208,11 +225,11 @@ export function OperationsWorkspace({session}:{session:any}){
          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           {[["Workflow",s.monitoring||run.name],["Run","#"+run.run_number],["Commit",run.head_sha],["Updated",time(run.updated_at)],["State",runStatus(run)]].map(([k,v])=><div key={k} className="rounded-lg border bg-background/40 p-2"><span className="block text-[9px] uppercase tracking-wider text-muted-foreground">{k}</span><code className="mt-1 block truncate text-[10px]">{v}</code></div>)}
          </div>
-         <div className="mt-3 space-y-2">{(s.jobs||[]).map((job:any)=><article key={job.id} className="rounded-lg border bg-background/30">
+         {consoleBusy[system.key]&&!s.detailsLoaded?<div className="mt-3 rounded-lg border bg-background/30 p-4 text-xs text-muted-foreground"><Loader2 size={13} className="mr-2 inline animate-spin"/>Loading workflow jobs and console output on request…</div>:<div className="mt-3 space-y-2">{(s.jobs||[]).map((job:any)=><article key={job.id} className="rounded-lg border bg-background/30">
           <div className="flex items-center justify-between gap-3 border-b px-3 py-2"><div><p className="text-xs font-semibold">{job.name}</p><p className="mt-1 text-[9px] text-muted-foreground">{job.status} · {job.conclusion||"in progress"} · {duration(job.started_at,job.completed_at)}</p></div><Pill text={job.conclusion==="success"?"PASSED":job.conclusion==="failure"?"FAILED":String(job.status||"").toUpperCase()}/></div>
           <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-3">{(job.steps||[]).map((step:any)=><div key={step.name} className="flex items-start gap-2 bg-card px-3 py-2">{step.conclusion==="success"?<CheckCircle2 size={13} className="mt-0.5 text-emerald-400"/>:step.conclusion==="failure"?<XCircle size={13} className="mt-0.5 text-red-400"/>:<Activity size={13} className="mt-0.5 text-primary"/>}<div className="min-w-0"><p className="truncate text-[10px] font-medium">{step.name}</p><p className="text-[9px] text-muted-foreground">{step.status}{step.conclusion?" · "+step.conclusion:""}</p></div></div>)}</div>
           <details open={job.conclusion==="failure"}><summary className="cursor-pointer border-t px-3 py-2 text-[10px] font-medium text-muted-foreground">{job.conclusion==="failure"?"Failed output":"Console output"} · {job.status==="completed"?"final":"live"}</summary><pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t bg-black/35 p-3 text-[10px] leading-5 text-slate-300">{job.logTail||job.logError||"Waiting for GitHub to expose console output…"}</pre></details>
-         </article>)}</div>
+         </article>)}</div>}
          {s.failure&&<div className="mt-3 rounded-lg border border-red-400/30 bg-red-400/5">
           <div className="flex items-center gap-2 border-b border-red-400/20 px-3 py-2 text-red-200"><AlertTriangle size={14}/><p className="text-xs font-semibold">Failure report</p></div>
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap p-3 text-[10px] leading-5 text-red-100/90">{(s.failure.lines||[]).join("\n")}</pre>
