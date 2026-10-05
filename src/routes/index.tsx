@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ReleaseWorkspace } from "@/components/release-workspace";
 import { OperationsWorkspace } from "@/components/operations-workspace";
 import { McpControlsWorkspace } from "@/components/mcp-controls-workspace";
+import {activeReleaseRunRepository} from "@/lib/release-run-repository.mjs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertCircle, ArrowRight, CheckCircle2, ChevronRight, CircleDot,
@@ -89,11 +90,20 @@ function Index() {
         // overwrite a newly selected release with an older run.
         restoredRunRef.current = true;
         const candidates = [
-          ...(base.drafts || []).map((draft:any) => ({draft, type:"base", repo:base.repositories?.base?.workerRepo || ""})),
-          ...(engine.drafts || []).map((draft:any) => ({draft, type:"engine", repo:engine.repositories?.engine?.repo || ""}))
-        ].filter(({repo}:any)=>Boolean(repo)).flatMap(({draft,type,repo}:any) => (draft.attempts || [])
+          ...(base.drafts || []).map((draft:any) => ({draft,type:"base",activeSourceRepo:base.repositories?.base?.repo || "",activeWorkerRepo:base.repositories?.base?.workerRepo || ""})),
+          ...(engine.drafts || []).map((draft:any) => ({draft,type:"engine",activeSourceRepo:engine.repositories?.engine?.repo || "",activeWorkerRepo:engine.repositories?.engine?.repo || ""}))
+        ].flatMap(({draft,type,activeSourceRepo,activeWorkerRepo}:any) => (draft.attempts || [])
           .filter((attempt:any) => Number(attempt.run_id)>0 && !draft.archived_at)
-          .map((attempt:any) => ({draft,type,repo,attempt})))
+          .map((attempt:any) => ({
+            draft,type,attempt,
+            repo:activeReleaseRunRepository({
+              sourceRepo:draft.source_repo,
+              runUrl:attempt.run_url || draft.last_run_url || "",
+              activeSourceRepo,
+              activeWorkerRepo
+            })
+          })))
+          .filter(({repo}:any)=>Boolean(repo))
           .sort((a:any,b:any) => new Date(b.attempt.created_at || b.draft.updated_at || 0).getTime()-new Date(a.attempt.created_at || a.draft.updated_at || 0).getTime());
         const candidate = candidates.find((x:any) => ["queued","in_progress"].includes(x.attempt.status))
           || candidates.find((x:any) => x.attempt.status==="success" || x.draft.status==="handed_off")
@@ -216,10 +226,19 @@ function Index() {
   };
 
   const resumeReleaseRun = (type: ReleaseType, draft: any, attempt: any) => {
-    const repo = String(type === "base"
+    const activeSourceRepo=String(type==="base"
+      ? (data.base.repositories?.base?.repo || "")
+      : (data.engine.repositories?.engine?.repo || ""));
+    const activeWorkerRepo=String(type==="base"
       ? (data.base.repositories?.base?.workerRepo || "")
       : (data.engine.repositories?.engine?.repo || ""));
-    if(!repo){setError("Active GitHub profile release worker repository is unavailable. Refresh Configuration before resuming this run.");return}
+    const repo=activeReleaseRunRepository({
+      sourceRepo:draft.source_repo,
+      runUrl:attempt.run_url || draft.last_run_url || "",
+      activeSourceRepo,
+      activeWorkerRepo
+    });
+    if(!repo){setError("This release attempt belongs to the inactive GitHub profile. Switch source mode back to inspect that GitHub run; its saved history has not been deleted.");return}
     setRun({
       id: Number(attempt.run_id),
       status: String(attempt.status || "queued"),

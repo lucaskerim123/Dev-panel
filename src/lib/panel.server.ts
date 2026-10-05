@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import {activeGithubProfile,githubProfileDefinitions,githubToken,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
 import {selectOperationsRun} from "@/lib/operations-run-selection.mjs";
+import {activeReleaseRunRepository} from "@/lib/release-run-repository.mjs";
 
 async function githubContext(){
  const profile=await activeGithubProfile();
@@ -519,7 +520,16 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
    continue;
   }
   if(draft.status!=="building"||!draft.last_run_id)continue;
-  const workerRepo=draft.release_type==="base"?BASE_WORKER_REPO:ENGINE_REPO;
+  const activeSourceRepo=draft.release_type==="base"?BASE_REPO:ENGINE_REPO;
+  const activeWorkerRepo=draft.release_type==="base"?BASE_WORKER_REPO:ENGINE_REPO;
+  const persistedAttempt=(grouped.get(draft.id)||[]).find((a:any)=>String(a.run_id||"")===String(draft.last_run_id||""));
+  const workerRepo=activeReleaseRunRepository({
+   sourceRepo:draft.source_repo,
+   runUrl:persistedAttempt?.run_url || draft.last_run_url || "",
+   activeSourceRepo,
+   activeWorkerRepo
+  });
+  if(!workerRepo)continue;
   try{
    const run=await github("/repos/"+workerRepo+"/actions/runs/"+Number(draft.last_run_id));
    const outcome=String(run?.conclusion||"").toLowerCase();
