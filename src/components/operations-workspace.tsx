@@ -32,7 +32,9 @@ export function OperationsWorkspace({session}:{session:any}){
    for(const key of Object.keys(systems)){
     const previous=current?.systems?.[key];
     const incoming=systems[key];
-    if(previous?.detailsLoaded&&String(previous?.run?.id||"")===String(incoming?.run?.id||"")){
+    const sameRun=String(previous?.run?.id||"")===String(incoming?.run?.id||"");
+    const sameRunState=String(previous?.run?.status||"")===String(incoming?.run?.status||"")&&String(previous?.run?.conclusion||"")===String(incoming?.run?.conclusion||"");
+    if(previous?.detailsLoaded&&sameRun&&sameRunState){
      systems[key]={...incoming,jobs:previous.jobs||[],failure:previous.failure||null,chatPrompt:previous.chatPrompt||null,detailsLoaded:true};
     }
    }
@@ -102,6 +104,17 @@ export function OperationsWorkspace({session}:{session:any}){
  useEffect(()=>{if(!syncLive)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void loadSync()},60000);return()=>clearInterval(t)},[syncLive,loadSync]);
  const live=useMemo(()=>SYSTEMS.some(s=>{const r=data.systems?.[s.key]?.run;return r?.status&&r.status!=="completed"}),[data]);
  useEffect(()=>{if(!live)return;const t=setInterval(()=>{if(document.visibilityState==="visible")void load(true)},60000);return()=>clearInterval(t)},[live,load]);
+ const liveConsoleKeys=SYSTEMS.map(s=>s.key).filter(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status&&data.systems[key].run.status!=="completed");
+ const liveConsoleSignature=liveConsoleKeys.join("|");
+ useEffect(()=>{
+  if(!liveConsoleSignature)return;
+  const refresh=()=>{if(document.visibilityState==="visible")for(const key of liveConsoleSignature.split("|").filter(Boolean))void loadConsole(key,true)};
+  void refresh();
+  const t=setInterval(refresh,30000);
+  return()=>clearInterval(t);
+ },[liveConsoleSignature,loadConsole]);
+ const failedConsoleKey=SYSTEMS.map(s=>s.key).find(key=>consoleOpen[key]&&data.systems?.[key]?.run?.status==="completed"&&data.systems[key].run.conclusion==="failure"&&!data.systems[key].detailsLoaded)||"";
+ useEffect(()=>{if(failedConsoleKey)void loadConsole(failedConsoleKey)},[failedConsoleKey,loadConsole]);
 
  const action=async(system:string,actionType:"ci"|"deploy"|"override-deploy")=>{
   const systemLabel=SYSTEMS.find(x=>x.key===system)?.label||system;
@@ -237,7 +250,7 @@ export function OperationsWorkspace({session}:{session:any}){
       <div className="border-t">
        <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/20" onClick={()=>{const next=!isConsoleOpen;setConsoleOpen(v=>({...v,[system.key]:next}));if(next&&!s.detailsLoaded)void loadConsole(system.key)}}>
         <div className="flex items-center gap-2"><Terminal size={14} className="text-primary"/><div><p className="text-[10px] font-bold tracking-[.12em]">LIVE CONSOLE</p><p className="mt-1 text-[9px] text-muted-foreground">{run?.status==="completed"?"Final output loads only when opened":run?"Workflow summary refreshes every 60 seconds while active":"No background polling while idle"}</p></div></div>
-        <div className="flex items-center gap-2"><Pill text={run?.status==="completed"?"CLOSED":run?"LIVE":"IDLE"}/>{isConsoleOpen?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
+        <div className="flex items-center gap-2"><Pill text={!run?"IDLE":isConsoleOpen?(run.status==="completed"?"OPEN":"LIVE"):"CLOSED"}/>{isConsoleOpen?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</div>
        </button>
        {isConsoleOpen&&<div className="border-t bg-black/20 p-3">
         {!run?<div className="p-6 text-center text-xs text-muted-foreground">No workflow run is available yet.</div>:<>
