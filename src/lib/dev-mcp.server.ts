@@ -505,7 +505,7 @@ export async function releaseBuildCommand(input:{action:string;target:ReleaseTar
  const database=await releaseDatabaseInspection(target,inspection);
  const components=target==="engine"?(Array.isArray(inspection?.detectedComponents)?inspection.detectedComponents:[]):["base"];
  const minimumBaseVersion=target==="engine"?String(input.minimum_base_version||inspection?.baseBaseline?.version||"").trim():"";
- const protocol=target==="engine"?String(input.protocol||"1").trim():"";
+ const protocol=target==="engine"?String(input.protocol||"2").trim():"";
  if(action==="inspect")return {ok:true,target,channel,currentVersion,suggestedVersion,selectedVersion:version,sourceSha:inspection.head,hasSourceChanges:inspection.hasSourceChanges===true,changeSummary:inspection.changeSummary||{},components,minimumBaseVersion:minimumBaseVersion||null,protocol:protocol||null,database,message:(target==="base"?"Base":"Update")+" inspected at "+String(inspection.head||"").slice(0,8)+". Next version v"+version+"."};
  if(action==="database")return {ok:database.ok,target,version,sourceSha:inspection.head,database,message:database.message};
  if(action!=="build")throw new Error("Unsupported release build action");

@@ -678,7 +678,7 @@ ${commitLines}
 ${checks}
 
 ## Compatibility
-${base ? "This is a complete Base deployment; normal Base deployment compatibility checks apply." : `Minimum Base version: ${data.minBase || "1.0"}\nMinimum updater/deployer protocol: ${data.protocol || "1"}`}
+${base ? "This is a complete Base deployment; normal Base deployment compatibility checks apply." : `Minimum Base version: ${data.minBase || "1.0"}\nMinimum updater/deployer protocol: ${data.protocol || "2"}`}
 
 ## What happens next?
 The release will be sent to License Master for technical validation. If those checks pass, it moves to the next review stage.

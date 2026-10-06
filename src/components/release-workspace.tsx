@@ -218,7 +218,7 @@ export function ReleaseWorkspace(p:any){
 
  function invalidateInspection(){p.setFiles?.([]);p.setCommits?.([]);p.setBaseline?.(null);p.setReviewOpen?.(false);p.setChangelogDraft?.("")}
  function setReleaseVersion(next:any){const value=String(next||"");p.setVersion?.(value);const draft=String(p.changelogDraft||"");if(!draft)return;const heading=`# OrbitFS ${base?"Base Deployment":"Update"} — v${value.trim()}`;const updated=draft.replace(/^# OrbitFS (?:Base Deployment|Update) — v[^\r\n]+/,heading);if(updated!==draft)p.setChangelogDraft?.(updated)}
- function openNew(){invalidateInspection();setSelected(null);setActiveDraft(null);setReleaseState(null);setMessage("");setError("");p.setVersion?.("");p.setNotes?.("");p.setComponents?.([]);p.setMinBase?.("");p.setProtocol?.("1");p.setChangelogTemplate?.(base?"base_deployment_log":"update_changelog");p.setChangelogDraft?.("");setStage(0);setWorkspace(true)}
+ function openNew(){invalidateInspection();setSelected(null);setActiveDraft(null);setReleaseState(null);setMessage("");setError("");p.setVersion?.("");p.setNotes?.("");p.setComponents?.([]);p.setMinBase?.("");p.setProtocol?.("2");p.setChangelogTemplate?.(base?"base_deployment_log":"update_changelog");p.setChangelogDraft?.("");setStage(0);setWorkspace(true)}
  function openDraft(d:any){
   const input=d.inputs||{};
   // Explicitly select the run belonging to this draft rather than carrying
@@ -229,14 +229,14 @@ export function ReleaseWorkspace(p:any){
    setActiveDraft(d);setSelected(null);setReleaseState(null);setMessage("");setError("");
    p.setVersion?.(d.version);p.setChannel?.(d.channel);
    p.setNotes?.(input.notes||"");p.setComponents?.(Array.isArray(input.components)?input.components:[]);
-   p.setMinBase?.(String(input.minimumBaseVersion||""));p.setProtocol?.(String(input.protocol||"1"));
+   p.setMinBase?.(String(input.minimumBaseVersion||""));p.setProtocol?.(String(input.protocol||"2"));
    p.setChangelogDraft?.(String(input.changelogDraft||""));
    setStage(["handed_off","awaiting_receipt"].includes(String(d.status||"").toLowerCase())?3:2);setWorkspace(true);return;
   }
   invalidateInspection();setSelected(null);setActiveDraft(d);setReleaseState(null);setMessage("");setError("");
   p.setVersion?.(d.version||"");p.setChannel?.(d.channel||"stable");
   p.setNotes?.(input.notes||"");p.setComponents?.(Array.isArray(input.components)?input.components:[]);
-  p.setMinBase?.(String(input.minimumBaseVersion||""));p.setProtocol?.(String(input.protocol||"1"));
+  p.setMinBase?.(String(input.minimumBaseVersion||""));p.setProtocol?.(String(input.protocol||"2"));
   p.setChangelogTemplate?.(input.changelogTemplate||(base?"base_deployment_log":"update_changelog"));
   p.setChangelogDraft?.(String(input.changelogDraft||input.notes||""));
   setStage(1);setWorkspace(true)
