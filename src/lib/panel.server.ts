@@ -1648,6 +1648,143 @@ async function billingStoreReset(input:{releaseIds:string[];version:string;relea
 }
 
 
+const MASTER_DATABASE_REPO=String(process.env.MASTER_DATABASE_REPO||"lucaskerim123/Master-Database-System").trim();
+const MASTER_DATABASE_REF=String(process.env.MASTER_DATABASE_REF||"main").trim()||"main";
+const MASTER_DATABASE_CONTROL_WORKFLOW=String(process.env.MASTER_DATABASE_CONTROL_WORKFLOW||"database-control.yml").trim();
+const MASTER_DATABASE_BUILD_WORKFLOW=String(process.env.MASTER_DATABASE_BUILD_WORKFLOW||"database-system.yml").trim();
+const MASTER_DATABASE_FRESH_INSTALL_WORKFLOW=String(process.env.MASTER_DATABASE_FRESH_INSTALL_WORKFLOW||"fresh-install-main-service.yml").trim();
+const MASTER_DATABASE_MIGRATION_WORKFLOW=String(process.env.MASTER_DATABASE_MIGRATION_WORKFLOW||"apply-main-service-migrations.yml").trim();
+const MASTER_DATABASE_COMPONENTS=["base","engine-shared","mcp","apex","studio"] as const;
+const MASTER_DATABASE_BUILD_TARGETS=["all",...MASTER_DATABASE_COMPONENTS,"license-manager-dev-panel","billing-storefront"] as const;
+
+async function masterDatabaseGithub(path:string,init:RequestInit={}){
+ const token=String(process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
+ if(!token)throw new Error("Master Database GitHub control token is not configured.");
+ return requestJson("https://api.github.com"+path,{
+  ...init,
+  headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}
+ });
+}
+function cleanDatabaseRun(run:any){
+ return run?{
+  id:Number(run.id)||null,
+  name:String(run.name||run.display_title||"Database workflow"),
+  status:String(run.status||"unknown"),
+  conclusion:run.conclusion?String(run.conclusion):null,
+  runNumber:Number(run.run_number)||null,
+  headSha:String(run.head_sha||""),
+  createdAt:run.created_at||null,
+  updatedAt:run.updated_at||null,
+  url:run.html_url||null,
+  event:run.event||null
+ }:null;
+}
+async function databaseWorkflowRuns(workflow:string,limit=8){
+ const result=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(workflow)}/runs?branch=${encodeURIComponent(MASTER_DATABASE_REF)}&per_page=${Math.max(1,Math.min(20,limit))}`,{cache:"no-store"}).catch(()=>({workflow_runs:[]}));
+ return (Array.isArray(result?.workflow_runs)?result.workflow_runs:[]).map(cleanDatabaseRun).filter(Boolean);
+}
+async function latestDispatchedDatabaseRun(workflow:string,startedAt:number){
+ for(let attempt=0;attempt<8;attempt++){
+  await new Promise(resolve=>setTimeout(resolve,650));
+  const runs=await databaseWorkflowRuns(workflow,10);
+  const found=runs.filter((run:any)=>new Date(run.createdAt||0).getTime()>=startedAt-5000).sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime())[0];
+  if(found)return found;
+ }
+ return null;
+}
+
+export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
+ requireOperationsUser(data.token);
+ const [repoInfo,refInfo,buildRuns,controlRuns,freshRuns,migrationRuns,packageSets]=await Promise.all([
+  masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}`),
+  masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`),
+  databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,6),
+  databaseWorkflowRuns(MASTER_DATABASE_CONTROL_WORKFLOW,6),
+  databaseWorkflowRuns(MASTER_DATABASE_FRESH_INSTALL_WORKFLOW,6),
+  databaseWorkflowRuns(MASTER_DATABASE_MIGRATION_WORKFLOW,6),
+  Promise.all(MASTER_DATABASE_COMPONENTS.map(async component=>{
+   const result=await licenseMaster(`/database-packages?component=${encodeURIComponent(component)}`).catch(()=>({packages:[]}));
+   const rows=Array.isArray(result?.packages)?result.packages:Array.isArray(result)?result:[];
+   return {
+    component,
+    packages:rows.map((row:any)=>({
+     id:row.id,
+     component:row.component,
+     schemaVersion:Number(row.database_schema_version||row.databaseSchemaVersion||0),
+     sha256:String(row.package_sha256||row.sha256||""),
+     sourceRepo:String(row.source_repo||row.sourceRepo||""),
+     sourceCommit:String(row.source_commit||row.sourceCommit||""),
+     status:String(row.status||""),
+     createdAt:row.created_at||row.createdAt||null,
+     publishedAt:row.published_at||row.publishedAt||null
+    }))
+   };
+  }))
+ ]);
+ const packages=packageSets.flatMap((set:any)=>set.packages);
+ const current=Object.fromEntries(MASTER_DATABASE_COMPONENTS.map(component=>[
+  component,
+  packages.filter((row:any)=>row.component===component&&row.status==="current").sort((a:any,b:any)=>new Date(b.publishedAt||b.createdAt||0).getTime()-new Date(a.publishedAt||a.createdAt||0).getTime())[0]||null
+ ]));
+ const candidates=packages.filter((row:any)=>row.status==="candidate").sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime());
+ return {
+  ok:true,
+  authority:"License Manager",
+  repo:MASTER_DATABASE_REPO,
+  ref:MASTER_DATABASE_REF,
+  headSha:String(refInfo?.object?.sha||""),
+  repoUrl:repoInfo?.html_url||`https://github.com/${MASTER_DATABASE_REPO}`,
+  workflows:{
+   build:buildRuns,
+   control:controlRuns,
+   freshInstall:freshRuns,
+   migrations:migrationRuns
+  },
+  current,
+  candidates,
+  policies:{
+   productionApply:"manual-only",
+   candidatePublication:"License Manager controlled",
+   customerExecution:"Base Deployer / Update Release",
+   source:"Master Database System"
+  }
+ };
+});
+
+export const runDatabaseSystemBuild=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;component:string;registerCandidate?:boolean;reason?:string}})=>{
+ requireOperationsUser(data.token);
+ const component=String(data.component||"all").trim().toLowerCase();
+ if(!(MASTER_DATABASE_BUILD_TARGETS as readonly string[]).includes(component))throw new Error("Invalid database build target.");
+ const startedAt=Date.now();
+ await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_CONTROL_WORKFLOW)}/dispatches`,{
+  method:"POST",
+  body:JSON.stringify({ref:MASTER_DATABASE_REF,inputs:{
+   component,
+   register_candidate:Boolean(data.registerCandidate),
+   reason:String(data.reason||"Dev Panel manual database build").slice(0,200)
+  }})
+ });
+ const run=await latestDispatchedDatabaseRun(MASTER_DATABASE_CONTROL_WORKFLOW,startedAt);
+ return {ok:true,repo:MASTER_DATABASE_REPO,component,run,message:"Central database build queued."};
+});
+
+export const runMainServiceDatabaseAction=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;service:string;action:"fresh-install"|"migrate";confirmed:boolean}})=>{
+ const actor=readSession(data.token);
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required for main-service database changes.");
+ if(data.confirmed!==true)throw new Error("Explicit confirmation is required for a live main-service database action.");
+ const service=String(data.service||"").trim().toLowerCase();
+ if(!["license-manager-dev-panel","billing-storefront"].includes(service))throw new Error("Invalid main-service database target.");
+ const action=data.action==="fresh-install"?"fresh-install":"migrate";
+ const workflow=action==="fresh-install"?MASTER_DATABASE_FRESH_INSTALL_WORKFLOW:MASTER_DATABASE_MIGRATION_WORKFLOW;
+ const startedAt=Date.now();
+ await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`,{
+  method:"POST",
+  body:JSON.stringify({ref:MASTER_DATABASE_REF,inputs:{service}})
+ });
+ const run=await latestDispatchedDatabaseRun(workflow,startedAt);
+ return {ok:true,repo:MASTER_DATABASE_REPO,service,action,run,message:action==="fresh-install"?"Fresh-install database workflow queued.":"Forward database migration workflow queued."};
+});
+
 const OPERATIONS_CI_WORKFLOW=process.env.OPERATIONS_CI_WORKFLOW||"ci.yml";
 const OPERATIONS_DEPLOY_WORKFLOW=process.env.OPERATIONS_DEPLOY_WORKFLOW||"production-deploy.yml";
 const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml";

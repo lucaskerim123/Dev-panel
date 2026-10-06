@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ReleaseWorkspace } from "@/components/release-workspace";
 import { OperationsWorkspace } from "@/components/operations-workspace";
 import { McpControlsWorkspace } from "@/components/mcp-controls-workspace";
+import { DatabaseSystemWorkspace } from "@/components/database-system-workspace";
 import {activeReleaseRunRepository} from "@/lib/release-run-repository.mjs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -22,7 +23,7 @@ import {
 
 export const Route = createFileRoute("/")({ component: Index });
 
-type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "mcp-controls" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "api-connections" | "settings";
+type Tab = "overview" | "releases" | "base" | "engine" | "activity" | "operations" | "database" | "mcp-controls" | "channels" | "portal" | "repositories" | "monitoring" | "audit" | "access" | "api-connections" | "settings";
 type ReleaseType = "base" | "engine";
 
 const EMPTY = { releases: [], drafts: [], channels: [] };
@@ -421,6 +422,7 @@ function Index() {
               onInspect={() => inspect("engine")} onStart={(options:any) => start("engine",options)} run={Boolean(data.engine.repositories?.engine?.repo)&&runRepo === data.engine.repositories.engine.repo ? run : null} runRepo={runRepo} runVersion={runVersion} runChannel={runChannel} handoff={handoff} onResumeRun={(d:any,a:any)=>resumeReleaseRun("engine",d,a)} drafts={data.engine.drafts||[]} connected={masterConnected} onChanged={()=>load(session,true)} />}
             {tab === "activity" && <MonitoringPage releases={allReleases} run={run} connected={masterConnected} session={session} />}
             {tab === "operations" && <OperationsWorkspace session={session} />}
+            {tab === "database" && <DatabaseSystemWorkspace session={session} />}
             {tab === "mcp-controls" && <McpControlsWorkspace session={session} />}
             {tab === "repositories" && <RepositoriesPage data={data} session={session} onBase={() => navigateTab("base")} onEngine={() => navigateTab("engine")} />}
             {tab === "channels" && <ChannelsPage channels={availableChannels} data={data} session={session} />}
@@ -501,6 +503,7 @@ const NAV_GROUPS = [
     ["base","Base Releases","Build, package & handoff",Rocket],
     ["engine","Update Releases","Detect, package & handoff",Layers3],
     ["operations","Operations","Secondary service operations",Terminal],
+    ["database","Database","Master DB build & deploy control",Boxes],
   ]},
   {label:"Networking",items:[
     ["mcp-controls","MCP Controls","Private ChatGPT / Codex control",KeyRound],
