@@ -1110,6 +1110,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  const workerRepo=data.type==="base"?BASE_WORKER_REPO:ENGINE_REPO;
  const workerRef=data.type==="base"?BASE_WORKER_REF:ENGINE_REF;
  const workflow=data.type==="base"?BASE_WORKFLOW:ENGINE_WORKFLOW;
+ let updateBaseSource:any=null;
  if (data.type === "engine") {
   const minimumBaseVersion=String(data.minimumBaseVersion||"").trim();
   const protocol=Number(data.protocol||"");
@@ -1124,6 +1125,39 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   if(!publishedBases.length){
    const available=(baseResult?.releases||[]).filter((r:any)=>r.status==="published"&&r.review_status==="approved"&&!r.archived_at).map((r:any)=>String(r.version||"")).filter(Boolean);
    throw new Error(`Minimum Base ${minimumBaseVersion} requires an approved published Base at or above that version in ${baseChannel}.${available.length?` Available: ${available.join(", ")}.`:""}`);
+  }
+  const requestedBase=(data.components||[]).map((value:string)=>String(value||"").trim().toLowerCase()).includes("base");
+  if(requestedBase){
+   const baselineBase=publishedBases[0];
+   const baselineSourceRepo=String(baselineBase?.source_repo||"").trim();
+   const baselineSourceRef=String(baselineBase?.source_ref||"").trim();
+   const baselineSourceCommit=String(baselineBase?.source_sha||"").trim();
+   if(baselineSourceRepo!==BASE_REPO||baselineSourceRef!==BASE_REF||!/^[a-f0-9]{40}$/i.test(baselineSourceCommit)){
+    throw new Error("The compatible published Base does not have a valid source identity for the active Base release branch.");
+   }
+   const baseBranch=await github(`/repos/${BASE_REPO}/git/ref/heads/${encodeURIComponent(BASE_REF)}`);
+   const baseHead=String(baseBranch?.object?.sha||"").trim();
+   if(!/^[a-f0-9]{40}$/i.test(baseHead))throw new Error(`Could not resolve ${BASE_REPO}@${BASE_REF} for the Base target.`);
+   if(baseHead===baselineSourceCommit)throw new Error(`Base was selected, but ${BASE_REF} matches published Base v${baselineBase.version}. Make Base changes first or deselect Base.`);
+   const baseDiff=await completeSourceDiff(BASE_REPO,baselineSourceCommit,baseHead);
+   if(!baseDiff.files.length)throw new Error(`Base was selected, but no Base files changed between published v${baselineBase.version} and ${BASE_REF}.`);
+   updateBaseSource={
+    repository:BASE_REPO,
+    ref:BASE_REF,
+    commit:baseHead,
+    baselineReleaseId:String(baselineBase.id||""),
+    baselineVersion:String(baselineBase.version||""),
+    baselineSourceCommit,
+    changedFiles:baseDiff.files.map((file:any)=>({
+     filename:String(file?.filename||""),
+     status:String(file?.status||"modified"),
+     additions:Number(file?.additions||0),
+     deletions:Number(file?.deletions||0),
+     changes:Number(file?.changes||0)
+    })),
+    changeSummary:baseDiff.summary||sourceChangeSummary(baseDiff.files),
+    diffComplete:baseDiff.diffComplete===true
+   };
   }
  }
  const previousResult = data.type === "base"
@@ -1217,6 +1251,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   minimumBaseVersion: data.type === "engine" ? (data.minimumBaseVersion || "1.0.0") : null,
   baseCompatibilityChannel: data.type === "engine" ? ENGINE_BASE_COMPATIBILITY_CHANNEL : null,
   minimumUpdaterProtocol: data.type === "engine" ? (data.protocol || "2") : null,
+  baseSource: data.type === "engine" && selectedComponents.includes("base") ? updateBaseSource : null,
   notes: data.notes.trim(),
   changelogTemplate: data.changelogTemplate,
   generatedAt: new Date().toISOString(),
@@ -1231,7 +1266,20 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   previous_source_commit:previousSourceCommit,
  };
  if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head});
- if(data.type==="engine")Object.assign(inputs,{source_sha:head,base:String(selectedComponents.includes("base")),apex:String(selectedComponents.includes("apex")),mcp:String(selectedComponents.includes("mcp")),studio:String(selectedComponents.includes("studio")),minimum_base_version:data.minimumBaseVersion||"1.0.0",base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,minimum_updater_protocol:data.protocol||"2"});
+ if(data.type==="engine")Object.assign(inputs,{
+  source_sha:head,
+  base:String(selectedComponents.includes("base")),
+  apex:String(selectedComponents.includes("apex")),
+  mcp:String(selectedComponents.includes("mcp")),
+  studio:String(selectedComponents.includes("studio")),
+  minimum_base_version:data.minimumBaseVersion||"1.0.0",
+  base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,
+  minimum_updater_protocol:data.protocol||"2",
+  base_source_sha:selectedComponents.includes("base")?String(updateBaseSource?.commit||""):"",
+  base_source_repo:selectedComponents.includes("base")?String(updateBaseSource?.repository||""):"",
+  base_source_ref:selectedComponents.includes("base")?String(updateBaseSource?.ref||""):"",
+  base_previous_source_commit:selectedComponents.includes("base")?String(updateBaseSource?.baselineSourceCommit||""):""
+ });
  const dispatchPayload=JSON.stringify({ref:workerRef,inputs});
  const dispatchBytes=Buffer.byteLength(dispatchPayload,"utf8");
  if(dispatchBytes>50000){
@@ -1271,7 +1319,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   }
  }
 
- const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents,repackage,repackageReleaseId:repackage?repackageReleaseId:null,repackageRevision:repackage?Number(repackageRelease?.revision||1):null};
+ const inputSnapshot={type:data.type,version,channel,notes:data.notes.trim(),changelogDraft:generatedChangelog,components:selectedComponents,minimumBaseVersion:data.minimumBaseVersion||null,baseCompatibilityChannel:data.type==="engine"?ENGINE_BASE_COMPATIBILITY_CHANNEL:null,protocol:data.protocol||null,changelogTemplate:data.changelogTemplate,sourceSha:head,changedFiles:detectedFiles.map(compactDispatchFile),detectedSourceChanges:detectedFiles.length,changeSummary:sourceDiffMeta.summary||sourceChangeSummary(detectedFiles),sourceDiffComplete:sourceDiffMeta.diffComplete===true,detectedComponents,baseSource:selectedComponents.includes("base")?updateBaseSource:null,repackage,repackageReleaseId:repackage?repackageReleaseId:null,repackageRevision:repackage?Number(repackageRelease?.revision||1):null};
  let draft:any=existing?.status==="handed_off"?(reuseHandedOff?existing:null):existing;
  if(!draft){
    const {data:created,error:createError}=await sb.from("panel_release_drafts").insert({release_type:releaseType,version,channel,source_repo:repo,source_ref:ref,source_sha:head,status:"draft",inputs:inputSnapshot,created_by:actor.email||actor.id}).select("*").single();
