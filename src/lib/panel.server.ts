@@ -312,7 +312,7 @@ export const login=createServerFn({method:"POST"}).handler(async({data}:{data:{e
 
 
 export const getAccessState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
- const actor=readSession(data.token);\n if(data.confirmedManualAction!==true)throw new Error("Release source preparation is manual-only. Use the Dev Panel Prepare latest source control to run it.");
+ const actor=readSession(data.token);
  const sb=authClient();
  if(String(actor.role).toLowerCase()!=="owner") return {users:[],groups:[],ownerOnly:true,permissions:GROUP_PERMISSIONS};
  const [{data:users,error:usersError},{data:groups,error:groupsError},{data:memberships,error:membershipError}]=await Promise.all([
@@ -1025,6 +1025,7 @@ export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async
 export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";confirmedManualAction?:boolean}})=>{
  const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
+ if(data.confirmedManualAction!==true)throw new Error("Release source preparation is manual-only. Use the Dev Panel Prepare latest source control to run it.");
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to promote a release branch.");
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
  const releaseRef=data.type==="base"?BASE_REF:ENGINE_REF;
