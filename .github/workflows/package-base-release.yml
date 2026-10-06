@@ -222,13 +222,21 @@ jobs:
 
           list="$(curl --fail-with-body --silent --show-error             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"             "${LICENSE_MASTER_URL%/}/database-packages?component=base")"
           package_id="$(jq -r '[.packages[]? | select(.source_repo=="lucaskerim123/Master-Database-System" and (.status=="candidate" or .status=="current"))] | sort_by(.database_schema_version,.created_at) | last | .id // empty' <<<"$list")"
-          test -n "$package_id" || { echo "::error::No Master Database Base package candidate/current is registered in License Manager."; exit 1; }
 
-          response="$(curl --fail-with-body --silent --show-error             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"             "${LICENSE_MASTER_URL%/}/database-packages/$package_id")"
-          test "$(jq -r '.package.sourceRepo // empty' <<<"$response")" = "lucaskerim123/Master-Database-System" || {
-            echo "::error::Resolved Base database package is not sourced from Master-Database-System."
-            exit 1
-          }
+          if [ -n "$package_id" ]; then
+            response="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
+              "${LICENSE_MASTER_URL%/}/database-packages/$package_id")"
+            echo "Using Master Database Base package: $package_id"
+          else
+            echo "::warning::No Master Database Base package is registered yet; using License Manager's last current immutable Base package fallback."
+            response="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
+              "${LICENSE_MASTER_URL%/}/database-packages/base/current")"
+            package_id="$(jq -r '.package.id // empty' <<<"$response")"
+            test -n "$package_id" || { echo "::error::No current Base database package fallback is available."; exit 1; }
+          fi
+
 
           PACKAGE_RESPONSE="$response" node - <<'NODE'
           const fs=require("fs"),path=require("path"),crypto=require("crypto");
