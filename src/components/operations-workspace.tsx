@@ -224,6 +224,7 @@ export function OperationsWorkspace({session}:{session:any}){
          <div className="flex flex-wrap justify-end gap-2">
           {deployRun?.html_url&&<a className="button-secondary" href={deployRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last deploy</a>}
           <button className="button-primary" onClick={()=>action(system.key,"deploy")} disabled={!!busy||!fullCurrent||productionCurrent}>{busy===system.key+"deploy"?<Loader2 size={13} className="animate-spin"/>:<Zap size={13}/>}Deploy</button>
+          {quickRun?.html_url&&<a className="button-secondary" href={quickRun.html_url} target="_blank" rel="noreferrer"><ExternalLink size={13}/>Last quick deploy</a>}
           <button className="button-secondary border-red-400/30 text-red-200" onClick={()=>action(system.key,"override-deploy")} disabled={!!busy}>{busy===system.key+"override-deploy"?<Loader2 size={13} className="animate-spin"/>:<AlertTriangle size={13}/>}Quick Deploy</button>
          </div>
         </div>
