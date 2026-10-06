@@ -320,7 +320,7 @@ function Index() {
           ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · locked bootstrap snapshot · ${r.files.length} tracked files · targets: ${detectedComponents.join(", ")||"none"}.`
           : r.hasSourceChanges
             ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · ${r.files.length} file changes since published ${type==="base"?"Base":"Update"} baseline · +${summary.added||0} added · ~${summary.modified||0} modified · −${summary.deleted||0} deleted${summary.renamed?` · ${summary.renamed} renamed`:""}${type==="engine"&&detectedComponents.length?` · targets: ${detectedComponents.join(", ")}`:""}.`
-            : `${r.repo}@${r.ref} is already up to date with the published ${type==="base"?"Base":"Update"} baseline. No added, modified, deleted or renamed files were detected; a new release is blocked until source changes exist.`);
+            : type==="engine" ? `${r.repo}@${r.ref} matches the published Update baseline. No Engine/add-on source changes were detected; you can still select BASE and the worker will capture current base-release changes before packaging.` : `${r.repo}@${r.ref} is already up to date with the published Base baseline. No added, modified, deleted or renamed files were detected; a new release is blocked until source changes exist.`);
     } catch (x: any) {
       setError(x.message || "Unable to inspect source.");
     } finally { setBusy(""); }
