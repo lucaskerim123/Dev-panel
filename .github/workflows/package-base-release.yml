@@ -220,30 +220,44 @@ jobs:
           node -e 'const u=new URL(process.env.LICENSE_MASTER_URL); if(u.protocol!=="https:"||u.pathname!=="/api/v1"||u.search||u.hash) throw new Error("LICENSE_MASTER_URL must target /api/v1 over HTTPS");'
           mkdir -p release-package supabase/migrations
 
-          list="$(curl --fail-with-body --silent --show-error             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN"             "${LICENSE_MASTER_URL%/}/database-packages?component=base")"
-          package_id="$(jq -r '[.packages[]? | select(.source_repo=="lucaskerim123/Master-Database-System" and (.status=="candidate" or .status=="current"))] | sort_by(.database_schema_version,.created_at) | last | .id // empty' <<<"$list")"
+          list_file="$(mktemp)"
+          package_response_file="$(mktemp)"
+          trap 'rm -f "$list_file" "$package_response_file"' EXIT
+
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
+            -o "$list_file" \
+            "${LICENSE_MASTER_URL%/}/database-packages?component=base"
+          package_id="$(jq -r '[.packages[]? | select(.source_repo=="lucaskerim123/Master-Database-System" and (.status=="candidate" or .status=="current"))] | sort_by(.database_schema_version,.created_at) | last | .id // empty' "$list_file")"
+          package_origin="master"
 
           if [ -n "$package_id" ]; then
-            response="$(curl --fail-with-body --silent --show-error \
+            curl --fail-with-body --silent --show-error \
               -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
-              "${LICENSE_MASTER_URL%/}/database-packages/$package_id")"
+              -o "$package_response_file" \
+              "${LICENSE_MASTER_URL%/}/database-packages/$package_id"
             echo "Using Master Database Base package: $package_id"
           else
+            package_origin="fallback"
             echo "::warning::No Master Database Base package is registered yet; using License Manager's last current immutable Base package fallback."
-            response="$(curl --fail-with-body --silent --show-error \
+            curl --fail-with-body --silent --show-error \
               -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
-              "${LICENSE_MASTER_URL%/}/database-packages/base/current")"
-            package_id="$(jq -r '.package.id // empty' <<<"$response")"
+              -o "$package_response_file" \
+              "${LICENSE_MASTER_URL%/}/database-packages/base/current"
+            package_id="$(jq -r '.package.id // empty' "$package_response_file")"
             test -n "$package_id" || { echo "::error::No current Base database package fallback is available."; exit 1; }
           fi
 
-
-          PACKAGE_RESPONSE="$response" node - <<'NODE'
+          DATABASE_PACKAGE_ORIGIN="$package_origin" node - "$package_response_file" <<'NODE'
           const fs=require("fs"),path=require("path"),crypto=require("crypto");
-          const body=JSON.parse(process.env.PACKAGE_RESPONSE||"{}");
+          const body=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));
           const row=body.package,p=row?.payload;
           if(!body.ok||!p||p.format!=="orbitfs-customer-database-package-v1"||p.component!=="base")throw new Error("Invalid central Base database package");
-          if(p.sourceRepo!=="lucaskerim123/Master-Database-System"||!/^[a-f0-9]{40}$/.test(String(p.sourceCommit||"")))throw new Error("Central Base package source identity is invalid");
+          const sourceRepo=String(p.sourceRepo||"").trim();
+          const sourceCommit=String(p.sourceCommit||"").trim();
+          if(!sourceRepo||!/^[a-f0-9]{40}$/.test(sourceCommit))throw new Error("Central Base package source identity is invalid");
+          if(sourceRepo!==String(row.sourceRepo||"").trim()||sourceCommit!==String(row.sourceCommit||"").trim())throw new Error("Central Base package payload identity does not match License Manager metadata");
+          if(process.env.DATABASE_PACKAGE_ORIGIN==="master"&&sourceRepo!=="lucaskerim123/Master-Database-System")throw new Error("Selected Master Database package has an unexpected source repository");
           const snapshot=p.snapshot;
           if(!snapshot||snapshot.encoding!=="base64"||typeof snapshot.data!=="string")throw new Error("Central Base package is missing its fresh-install snapshot");
           const snapshotBytes=Buffer.from(snapshot.data,"base64");
@@ -285,7 +299,7 @@ jobs:
           fs.writeFileSync("release-package/base-database-package.json",JSON.stringify(p,null,2));
           NODE
 
-          reference="$(jq -c '{id:.package.id,component:.package.component,databaseSchemaVersion:.package.databaseSchemaVersion,sha256:.package.sha256,sourceRepo:.package.sourceRepo,sourceCommit:.package.sourceCommit}' <<<"$response")"
+          reference="$(jq -c '{id:.package.id,component:.package.component,databaseSchemaVersion:.package.databaseSchemaVersion,sha256:.package.sha256,sourceRepo:.package.sourceRepo,sourceCommit:.package.sourceCommit}' "$package_response_file")"
           jq -e '.id|type=="string" and length>0' <<<"$reference" >/dev/null
           jq -e '.sha256|test("^[a-f0-9]{64}$")' <<<"$reference" >/dev/null
           echo "reference=$reference" >> "$GITHUB_OUTPUT"
