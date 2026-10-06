@@ -925,18 +925,21 @@ export const getReleaseHandoff=createServerFn({method:"POST"}).handler(async({da
   throw new Error("Release workflow run is not available yet");
 });
 
-export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine"}})=>{
+export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
  const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to inspect release branch state.");
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
  const releaseRef=data.type==="base"?BASE_REF:ENGINE_REF;
+ const releaseType=data.type==="base"?"base":"update";
  const sourceRef="main";
+ const channel=normalizeChannel(data.channel||"stable");
  const workflow="sync-release-branch.yml";
- const [sourceBranch,releaseBranch,runs]=await Promise.all([
+ const [sourceBranch,releaseBranch,runs,publishedResult]=await Promise.all([
   github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(sourceRef)}`),
   github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(releaseRef)}`).catch(()=>null),
-  github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`,{cache:"no-store"}).catch(()=>({workflow_runs:[]}))
+  github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`,{cache:"no-store"}).catch(()=>({workflow_runs:[]})),
+  licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`).catch(()=>({releases:[]}))
  ]);
  const sourceSha=String(sourceBranch?.object?.sha||"");
  const releaseSha=String(releaseBranch?.object?.sha||"");
@@ -953,20 +956,65 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
   })
   .sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  const latestRun=[...allRuns].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+
+ let sourceComparison:any=null;
  let sourceEquivalent=Boolean(releaseSha&&releaseSha===sourceSha);
  if(!sourceEquivalent&&releaseSha&&sourceSha){
-  const comparison=await github(`/repos/${repo}/compare/${encodeURIComponent(releaseSha)}...${encodeURIComponent(sourceSha)}`).catch(()=>null);
-  sourceEquivalent=Boolean(comparison&&Number(comparison.ahead_by||0)===0);
+  sourceComparison=await github(`/repos/${repo}/compare/${encodeURIComponent(releaseSha)}...${encodeURIComponent(sourceSha)}`).catch(()=>null);
+  sourceEquivalent=Boolean(sourceComparison&&Number(sourceComparison.ahead_by||0)===0);
  }
+ const sourcePending=!sourceEquivalent;
+ const sourceCommitCount=sourcePending?Math.max(0,Number(sourceComparison?.ahead_by||sourceComparison?.total_commits||0)):0;
+ const sourceFileCount=sourcePending&&Array.isArray(sourceComparison?.files)?sourceComparison.files.length:0;
+
+ const publishedRelease=(Array.isArray(publishedResult?.releases)?publishedResult.releases:[])
+  .filter((release:any)=>String(release?.status||"").toLowerCase()==="published"&&String(release?.review_status||"").toLowerCase()==="approved"&&!release?.archived_at&&/^[a-f0-9]{40}$/i.test(String(release?.source_sha||"")))
+  .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
+ const publishedSha=String(publishedRelease?.source_sha||"");
+ let preparedComparison:any=null;
+ let preparedPending=false;
+ let releaseBehindPublished=false;
+ if(releaseSha){
+  if(!publishedSha){
+   preparedPending=true;
+  }else if(releaseSha!==publishedSha){
+   preparedComparison=await github(`/repos/${repo}/compare/${encodeURIComponent(publishedSha)}...${encodeURIComponent(releaseSha)}`).catch(()=>null);
+   preparedPending=Boolean(preparedComparison&&Number(preparedComparison.ahead_by||0)>0);
+   releaseBehindPublished=Boolean(preparedComparison&&Number(preparedComparison.behind_by||0)>0&&Number(preparedComparison.ahead_by||0)===0);
+  }
+ }
+ const preparedCommitCount=preparedPending?Math.max(0,Number(preparedComparison?.ahead_by||preparedComparison?.total_commits||0)):0;
+ const preparedFileCount=preparedPending&&Array.isArray(preparedComparison?.files)?preparedComparison.files.length:0;
+
  return {
-  ok:true,repo,sourceRef,releaseRef,sourceSha,releaseSha,
+  ok:true,repo,sourceRef,releaseRef,sourceSha,releaseSha,channel,
   upToDate:sourceEquivalent,
   active:Boolean(activeRun),
   activeRun:activeRun?{id:activeRun.id||null,url:activeRun.html_url||null,status:activeRun.status||"in_progress",headSha:activeRun.head_sha||null}:null,
-  latestRun:latestRun?{id:latestRun.id||null,url:latestRun.html_url||null,status:latestRun.status||null,conclusion:latestRun.conclusion||null,headSha:latestRun.head_sha||null,updatedAt:latestRun.updated_at||latestRun.created_at||null}:null
+  latestRun:latestRun?{id:latestRun.id||null,url:latestRun.html_url||null,status:latestRun.status||null,conclusion:latestRun.conclusion||null,headSha:latestRun.head_sha||null,updatedAt:latestRun.updated_at||latestRun.created_at||null}:null,
+  sourceChanges:{
+   pending:sourcePending,
+   commitCount:sourceCommitCount,
+   fileCount:sourceFileCount,
+   compareStatus:sourceComparison?.status||null,
+  },
+  preparedChanges:{
+   pending:preparedPending,
+   commitCount:preparedCommitCount,
+   fileCount:preparedFileCount,
+   publishedVersion:publishedRelease?.version||null,
+   publishedSourceSha:publishedSha||null,
+   releaseBehindPublished,
+  },
+  detection:{
+   readOnly:true,
+   preparesSource:false,
+   buildsRelease:false,
+   publishesRelease:false,
+   assignsReleaseChannel:false,
+  }
  };
 });
-
 export const getPromotionRunStatus=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";runId?:number|string|null;sourceSha?:string}})=>{
  const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
