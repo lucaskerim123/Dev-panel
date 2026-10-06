@@ -1406,7 +1406,7 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
 export async function clearReleaseStateCore(data:{type:"base"|"engine";version:string;channel:string}){
  const {BASE_WORKER_REPO,ENGINE_REPO}=await githubContext();
  const version=String(data.version||"").trim();
- if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("A valid release version is required.");
+ if(!isOrbitReleaseVersion(version))throw new Error("A valid 2–4 part numeric release version is required.");
  const channel=normalizeChannel(data.channel||"stable");
  const releaseType=data.type==="base"?"base":"update";
  const workerRepo=data.type==="base"?BASE_WORKER_REPO:ENGINE_REPO;
