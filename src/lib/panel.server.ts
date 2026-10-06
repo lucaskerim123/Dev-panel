@@ -834,7 +834,13 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
  try {
    const baseResult = await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(ENGINE_BASE_COMPATIBILITY_CHANNEL)}&type=base&include_archived=false`);
    baseBaseline=(baseResult?.releases||[])
-     .filter((r:any)=>r.review_status==="approved"&&r.status==="published"&&!r.archived_at)
+     .filter((r:any)=>{
+      const manifest=r?.manifest&&typeof r.manifest==="object"?r.manifest:{};
+      const releaseInfo=manifest?.releaseInfo&&typeof manifest.releaseInfo==="object"?manifest.releaseInfo:{};
+      const schemaSha=String(manifest.databaseSchemaSha256||releaseInfo.databaseSchemaSha256||"").trim();
+      const schemaVersion=Number(manifest.databaseSchemaVersion||releaseInfo.databaseSchemaVersion||0);
+      return r.review_status==="approved"&&r.status==="published"&&!r.archived_at&&/^[a-f0-9]{64}$/i.test(schemaSha)&&Number.isInteger(schemaVersion)&&schemaVersion>0;
+     })
      .sort((a:any,b:any)=>{
       const compared=compareSemVer(String(b.version||""),String(a.version||""));
       return compared??(new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime());
@@ -1120,7 +1126,11 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   const baseResult=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(baseChannel)}&type=base&include_archived=false`);
   const publishedBases=(baseResult?.releases||[]).filter((r:any)=>{
    const comparison=compareSemVer(String(r.version||""),minimumBaseVersion);
-   return r.status==="published"&&r.review_status==="approved"&&!r.archived_at&&String(r.channel||"stable").toLowerCase()===baseChannel&&comparison!==null&&comparison>=0;
+   const manifest=r?.manifest&&typeof r.manifest==="object"?r.manifest:{};
+   const releaseInfo=manifest?.releaseInfo&&typeof manifest.releaseInfo==="object"?manifest.releaseInfo:{};
+   const schemaSha=String(manifest.databaseSchemaSha256||releaseInfo.databaseSchemaSha256||"").trim();
+   const schemaVersion=Number(manifest.databaseSchemaVersion||releaseInfo.databaseSchemaVersion||0);
+   return r.status==="published"&&r.review_status==="approved"&&!r.archived_at&&String(r.channel||"stable").toLowerCase()===baseChannel&&comparison!==null&&comparison>=0&&/^[a-f0-9]{64}$/i.test(schemaSha)&&Number.isInteger(schemaVersion)&&schemaVersion>0;
   }).sort((a:any,b:any)=>compareSemVer(String(b.version||""),String(a.version||""))??0);
   if(!publishedBases.length){
    const available=(baseResult?.releases||[]).filter((r:any)=>r.status==="published"&&r.review_status==="approved"&&!r.archived_at).map((r:any)=>String(r.version||"")).filter(Boolean);
