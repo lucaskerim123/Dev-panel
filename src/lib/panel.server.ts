@@ -939,7 +939,7 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
   github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(sourceRef)}`),
   github(`/repos/${repo}/git/ref/heads/${encodeURIComponent(releaseRef)}`).catch(()=>null),
   github(`/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(sourceRef)}&per_page=10`,{cache:"no-store"}).catch(()=>({workflow_runs:[]})),
-  licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`).catch(()=>({releases:[]}))
+  licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(channel)}&type=${releaseType}&include_archived=false`)
  ]);
  const sourceSha=String(sourceBranch?.object?.sha||"");
  const releaseSha=String(releaseBranch?.object?.sha||"");
@@ -960,7 +960,7 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
  let sourceComparison:any=null;
  let sourceEquivalent=Boolean(releaseSha&&releaseSha===sourceSha);
  if(!sourceEquivalent&&releaseSha&&sourceSha){
-  sourceComparison=await github(`/repos/${repo}/compare/${encodeURIComponent(releaseSha)}...${encodeURIComponent(sourceSha)}`).catch(()=>null);
+  sourceComparison=await github(`/repos/${repo}/compare/${encodeURIComponent(releaseSha)}...${encodeURIComponent(sourceSha)}`);
   sourceEquivalent=Boolean(sourceComparison&&Number(sourceComparison.ahead_by||0)===0);
  }
  const sourcePending=!sourceEquivalent;
@@ -978,7 +978,7 @@ export const getReleaseBranchSyncState=createServerFn({method:"POST"}).handler(a
   if(!publishedSha){
    preparedPending=true;
   }else if(releaseSha!==publishedSha){
-   preparedComparison=await github(`/repos/${repo}/compare/${encodeURIComponent(publishedSha)}...${encodeURIComponent(releaseSha)}`).catch(()=>null);
+   preparedComparison=await github(`/repos/${repo}/compare/${encodeURIComponent(publishedSha)}...${encodeURIComponent(releaseSha)}`);
    preparedPending=Boolean(preparedComparison&&Number(preparedComparison.ahead_by||0)>0);
    releaseBehindPublished=Boolean(preparedComparison&&Number(preparedComparison.behind_by||0)>0&&Number(preparedComparison.ahead_by||0)===0);
   }
