@@ -54,7 +54,7 @@ export function ReleaseWorkspace(p:any){
     schedule(next?.active?60000:25*60*1000);
    }catch{
     if(cancelled)return;
-    setBranchSync((current:any)=>current||{error:true});
+    setBranchSync((current:any)=>({...current,error:true}));
     schedule(25*60*1000);
    }
   };
@@ -94,7 +94,7 @@ export function ReleaseWorkspace(p:any){
   void poll();
   const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void poll()},60000);
   return()=>{cancelled=true;window.clearInterval(timer)};
- },[promotionRun?.runId,promotionRun?.sourceSha,promotionRun?.completed,promotionRun?.conclusion,base,p.session.token,p.type,branchSync?.releaseRef,p.baseline?.ref]);
+ },[promotionRun?.runId,promotionRun?.sourceSha,promotionRun?.completed,promotionRun?.conclusion,base,p.session.token,p.type,p.channel,branchSync?.releaseRef,p.baseline?.ref]);
  // A historical run must not hijack a new wizard or an unrelated draft.
  // New builds use the version/channel of the run that this page actually started.
  const currentRun=p.run&&!selected&&stage>=2&&(
