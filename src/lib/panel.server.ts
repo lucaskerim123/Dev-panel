@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import {activeGithubProfile,githubProfileDefinitions,githubToken,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
 import {selectOperationsRun} from "@/lib/operations-run-selection.mjs";
+import {operationsWorkflowRunPaths} from "@/lib/operations-workflow-runs.mjs";
 import {activeReleaseRunRepository} from "@/lib/release-run-repository.mjs";
 import {compareOrbitReleaseVersions,isOrbitReleaseVersion,parseOrbitReleaseVersion} from "@/lib/release-version";
 
@@ -1771,15 +1772,17 @@ function fallbackOperationFailure(job:any,logTail:string){
 }
 async function operationsRunDetail(cfg:any,force=false,includeDetails=false){
  const read=(path:string)=>github(path,force?{cache:"no-store"}:{});
- const [runRows,ref]=await Promise.all([
-  read("/repos/"+cfg.repo+"/actions/runs?branch="+encodeURIComponent(cfg.branch)+"&per_page=50"),
+ const workflowPaths=operationsWorkflowRunPaths(cfg);
+ const [ciRows,deployRows,quickDeployRows,ref]=await Promise.all([
+  read(workflowPaths.ci),
+  read(workflowPaths.deploy),
+  read(workflowPaths.quickDeploy),
   read("/repos/"+cfg.repo+"/git/ref/heads/"+encodeURIComponent(cfg.branch)),
  ]);
- const allRuns=Array.isArray(runRows?.workflow_runs)?runRows.workflow_runs:[];
- const forWorkflow=(workflow:string)=>allRuns.filter((run:any)=>String(run?.path||"").endsWith("/"+workflow));
- const ciRuns=forWorkflow(cfg.ci);
- const deployRuns=forWorkflow(cfg.deploy);
- const quickDeployRuns=forWorkflow(cfg.quickDeploy);
+ const workflowRuns=(rows:any)=>Array.isArray(rows?.workflow_runs)?rows.workflow_runs:[];
+ const ciRuns=workflowRuns(ciRows);
+ const deployRuns=workflowRuns(deployRows);
+ const quickDeployRuns=workflowRuns(quickDeployRows);
  const ciRun=ciRuns[0]||null;
  const deployRun=deployRuns[0]||null;
  const quickDeployRun=quickDeployRuns[0]||null;
