@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import {activeGithubProfile,githubProfileDefinitions,githubToken,localGithubProfileName,requireLocalGithubProfileActive} from "@/lib/github-profile";
 import {selectOperationsRun} from "@/lib/operations-run-selection.mjs";
 import {activeReleaseRunRepository} from "@/lib/release-run-repository.mjs";
+import {compareOrbitReleaseVersions,isOrbitReleaseVersion,parseOrbitReleaseVersion} from "@/lib/release-version";
 
 async function githubContext(){
  const profile=await activeGithubProfile();
@@ -67,29 +68,6 @@ async function configuredMasterUrl(force=false){
 }
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
 const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE_COMPATIBILITY_CHANNEL||"stable");
-function parseSemVer(value:string){
- const match=String(value||"").trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
- if(!match)return null;
- return {core:[Number(match[1]),Number(match[2]),Number(match[3])],pre:match[4]?match[4].split("."):[]};
-}
-function compareSemVer(left:string,right:string){
- const a=parseSemVer(left),b=parseSemVer(right);
- if(!a||!b)return null;
- for(let i=0;i<3;i++){if(a.core[i]!==b.core[i])return a.core[i]>b.core[i]?1:-1}
- if(!a.pre.length&&!b.pre.length)return 0;
- if(!a.pre.length)return 1;
- if(!b.pre.length)return -1;
- const length=Math.max(a.pre.length,b.pre.length);
- for(let i=0;i<length;i++){
-  const av=a.pre[i],bv=b.pre[i];
-  if(av===undefined)return -1;if(bv===undefined)return 1;if(av===bv)continue;
-  const an=/^\d+$/.test(av),bn=/^\d+$/.test(bv);
-  if(an&&bn)return Number(av)>Number(bv)?1:-1;
-  if(an!==bn)return an?-1:1;
-  return av>bv?1:-1;
- }
- return 0;
-}
 
 function detectUpdateComponents(files:any[]){
  const out:string[]=[];
@@ -238,7 +216,7 @@ async function initialEngineSourceBaseline(head:string){
  if(parsed?.locked!==true)throw new Error("Engine update baseline must be explicitly locked before the first Update release.");
  if(String(parsed?.mode||"")!=="snapshot")throw new Error("Engine first Update baseline must use snapshot mode.");
  if(String(parsed?.sourceRepository||"")!==ENGINE_REPO||String(parsed?.releaseBranch||"")!==ENGINE_REF)throw new Error("Engine update baseline declaration does not match the configured Update source.");
- if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(initialReleaseVersion))throw new Error("Engine update baseline declaration is missing a valid initialReleaseVersion");
+ if(!isOrbitReleaseVersion(initialReleaseVersion))throw new Error("Engine update baseline declaration is missing a valid 2–4 part numeric initialReleaseVersion");
  if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("Could not resolve the exact UPDATE_RELEASE snapshot SHA.");
  return {sha:head,ref:"release/update-baseline.json",initialReleaseVersion,locked:true,mode:"snapshot",components:["apex","mcp","studio"]};
 }
@@ -560,7 +538,7 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
  const {BASE_REPO,BASE_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const actor=readSession(data.token);
  const version=String(data.version||"").trim();
- if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("Version must be valid SemVer, e.g. 1.2.3");
+ if(!isOrbitReleaseVersion(version))throw new Error("Version must use 2–4 numeric parts, e.g. 1.0, 1.2.3 or 1.2.3.4");
  const channel=normalizeChannel(data.channel||"stable");
  const releaseType=data.type==="base"?"base":"update";
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
@@ -842,7 +820,7 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
       return r.review_status==="approved"&&r.status==="published"&&!r.archived_at&&/^[a-f0-9]{64}$/i.test(schemaSha)&&Number.isInteger(schemaVersion)&&schemaVersion>0;
      })
      .sort((a:any,b:any)=>{
-      const compared=compareSemVer(String(b.version||""),String(a.version||""));
+      const compared=compareOrbitReleaseVersions(String(b.version||""),String(a.version||""));
       return compared??(new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime());
      })[0]||null;
  } catch {}
@@ -1088,7 +1066,7 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
 export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null},actor:any){
  const {BASE_REPO,BASE_REF,BASE_WORKER_REPO,BASE_WORKER_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const version=data.version.trim();
- if(!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))throw new Error("Version must be valid SemVer, e.g. 1.2.3");
+ if(!isOrbitReleaseVersion(version))throw new Error("Version must use 2–4 numeric parts, e.g. 1.0, 1.2.3 or 1.2.3.4");
  if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Apex, MCP, or Studio).");
  const channel=normalizeChannel(data.channel);
  const repackage=Boolean(data.repackage);
@@ -1121,18 +1099,18 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  if (data.type === "engine") {
   const minimumBaseVersion=String(data.minimumBaseVersion||"").trim();
   const protocol=Number(data.protocol||"");
-  if(!parseSemVer(minimumBaseVersion))throw new Error("Minimum Base version must be valid SemVer.");
+  if(!isOrbitReleaseVersion(minimumBaseVersion))throw new Error("Minimum Base version must use 2–4 numeric parts.");
   if(!Number.isInteger(protocol)||protocol<1||protocol>100)throw new Error("Minimum Updater protocol must be an integer from 1 to 100.");
   const baseChannel=ENGINE_BASE_COMPATIBILITY_CHANNEL;
   const baseResult=await licenseMaster(`/releases?product=orbitfs_base&channel=${encodeURIComponent(baseChannel)}&type=base&include_archived=false`);
   const publishedBases=(baseResult?.releases||[]).filter((r:any)=>{
-   const comparison=compareSemVer(String(r.version||""),minimumBaseVersion);
+   const comparison=compareOrbitReleaseVersions(String(r.version||""),minimumBaseVersion);
    const manifest=r?.manifest&&typeof r.manifest==="object"?r.manifest:{};
    const releaseInfo=manifest?.releaseInfo&&typeof manifest.releaseInfo==="object"?manifest.releaseInfo:{};
    const schemaSha=String(manifest.databaseSchemaSha256||releaseInfo.databaseSchemaSha256||"").trim();
    const schemaVersion=Number(manifest.databaseSchemaVersion||releaseInfo.databaseSchemaVersion||0);
    return r.status==="published"&&r.review_status==="approved"&&!r.archived_at&&String(r.channel||"stable").toLowerCase()===baseChannel&&comparison!==null&&comparison>=0&&/^[a-f0-9]{64}$/i.test(schemaSha)&&Number.isInteger(schemaVersion)&&schemaVersion>0;
-  }).sort((a:any,b:any)=>compareSemVer(String(b.version||""),String(a.version||""))??0);
+  }).sort((a:any,b:any)=>compareOrbitReleaseVersions(String(b.version||""),String(a.version||""))??0);
   if(!publishedBases.length){
    const available=(baseResult?.releases||[]).filter((r:any)=>r.status==="published"&&r.review_status==="approved"&&!r.archived_at).map((r:any)=>String(r.version||"")).filter(Boolean);
    throw new Error(`Minimum Base ${minimumBaseVersion} requires an approved published Base at or above that version in ${baseChannel}.${available.length?` Available: ${available.join(", ")}.`:""}`);
@@ -1199,7 +1177,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  let sourceBaselineKind = previousSourceCommit ? "published_update" : initialRelease ? "full_snapshot" : "";
  if(initialUpdate){
    initialUpdateConfig=await initialEngineSourceBaseline(head);
-   if(version!==initialUpdateConfig.initialReleaseVersion)throw new Error(`The first published Update is locked to v${initialUpdateConfig.initialReleaseVersion}. Set the Update version to ${initialUpdateConfig.initialReleaseVersion}; later releases can use any advancing SemVer.`);
+   if(version!==initialUpdateConfig.initialReleaseVersion)throw new Error(`The first published Update is locked to v${initialUpdateConfig.initialReleaseVersion}. Set the Update version to ${initialUpdateConfig.initialReleaseVersion}; later releases can use any advancing 2–4 part numeric version.`);
    sourceBaselineKind="initial_snapshot";
  }
  let detectedFiles:any[]=[];
@@ -1260,7 +1238,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   changedFiles: dispatchFiles,
   changedFilesTruncated: detectedFiles.length > dispatchFiles.length,
   components: selectedComponents,
-  minimumBaseVersion: data.type === "engine" ? (data.minimumBaseVersion || "1.0.0") : null,
+  minimumBaseVersion: data.type === "engine" ? (data.minimumBaseVersion || "1.0") : null,
   baseCompatibilityChannel: data.type === "engine" ? ENGINE_BASE_COMPATIBILITY_CHANNEL : null,
   minimumUpdaterProtocol: data.type === "engine" ? (data.protocol || "2") : null,
   baseSource: data.type === "engine" && selectedComponents.includes("base") ? updateBaseSource : null,
@@ -1284,7 +1262,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   apex:String(selectedComponents.includes("apex")),
   mcp:String(selectedComponents.includes("mcp")),
   studio:String(selectedComponents.includes("studio")),
-  minimum_base_version:data.minimumBaseVersion||"1.0.0",
+  minimum_base_version:data.minimumBaseVersion||"1.0",
   base_channel:ENGINE_BASE_COMPATIBILITY_CHANNEL,
   minimum_updater_protocol:data.protocol||"2",
   base_source_sha:selectedComponents.includes("base")?String(updateBaseSource?.commit||""):"",
