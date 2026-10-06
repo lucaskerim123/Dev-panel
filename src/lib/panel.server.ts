@@ -1202,10 +1202,11 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   sourceDiffMeta=diff;
  }
 
- if(!initialRelease&&!initialUpdate&&previousSourceCommit===head&&!repackage){
+ const hasCapturedBaseChanges=data.type==="engine"&&Boolean(updateBaseSource);
+ if(!initialRelease&&!initialUpdate&&previousSourceCommit===head&&!repackage&&!hasCapturedBaseChanges){
   throw new Error(`No ${data.type==="base"?"Base":"Update"} source changes detected since the authoritative published baseline. There is nothing new to release.`);
  }
- if(!initialRelease&&!initialUpdate&&!detectedFiles.length&&!repackage){
+ if(!initialRelease&&!initialUpdate&&!detectedFiles.length&&!repackage&&!hasCapturedBaseChanges){
   throw new Error(`No ${data.type==="base"?"Base":"Update"} file changes were detected against the authoritative published baseline. There is nothing new to release.`);
  }
 
