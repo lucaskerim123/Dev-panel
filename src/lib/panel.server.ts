@@ -1665,7 +1665,7 @@ const MASTER_DATABASE_COMPONENTS=["base","engine-shared","mcp","apex","studio"] 
 const MASTER_DATABASE_BUILD_TARGETS=["all",...MASTER_DATABASE_COMPONENTS,"license-manager-dev-panel","billing-storefront"] as const;
 
 async function masterDatabaseGithub(path:string,init:RequestInit={}){
- const token=String(process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
+ const token=String(process.env.GITHUB_RELEASE_TOKEN||process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
  if(!token)throw new Error("Master Database GitHub control token is not configured.");
  return requestJson("https://api.github.com"+path,{
   ...init,
