@@ -51,6 +51,10 @@ jobs:
         if: steps.profile.outputs.run == 'true'
         continue-on-error: true
         run: bun x tsc --noEmit
+      - name: Database automation contract
+        if: steps.profile.outputs.run == 'true'
+        run: node scripts/database-automation-contract.test.mjs
+
       - name: Build
         if: steps.profile.outputs.run == 'true'
         env:
