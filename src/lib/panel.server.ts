@@ -1799,7 +1799,10 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
  ]));
  const deploymentEventsResult=await authClient().from("orbitfs_deployment_events").select("id,installation_id,event_type,status,message,detail,created_at").order("created_at",{ascending:false}).limit(80);
  const activity=(Array.isArray(deploymentEventsResult?.data)?deploymentEventsResult.data:[])
-  .filter((row:any)=>/^(update\.engine\.|database\.migration\.|base\.database\.migration\.|deployment\.)/.test(String(row?.event_type||"")))
+  .filter((row:any)=>{
+   const eventType=String(row?.event_type||"");
+   return eventType==="update.engine.preflight"||eventType.startsWith("database.migration.")||eventType.startsWith("base.database.migration.")||eventType.startsWith("deployment.");
+  })
   .slice(0,30);
  const latestValidation=buildRuns.find((run:any)=>run.headSha===headSha)||buildRuns[0]||null;
  return {
