@@ -9,9 +9,10 @@ assert(
   server.includes("requiredDatabaseComponentsForRelease"),
   "Database automation contract failed: normal releases must automatically ensure the central package set."
 );
+const databasePreparationIndex=server.indexOf("databasePackages=await ensureAutomaticReleaseDatabasePackages");
+const releaseDispatchIndex=server.indexOf("await github(\`/repos/\${workerRepo}/actions/workflows",databasePreparationIndex);
 assert(
-  server.includes("databasePackages=await ensureAutomaticReleaseDatabasePackages") &&
-  server.indexOf("databasePackages=await ensureAutomaticReleaseDatabasePackages") < server.indexOf("actions/workflows"),
+  databasePreparationIndex>=0 && releaseDispatchIndex>databasePreparationIndex,
   "Database automation contract failed: database package readiness must be checked before release worker dispatch."
 );
 assert(
