@@ -1116,14 +1116,6 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  const version=data.version.trim();
  if(!isOrbitReleaseVersion(version))throw new Error("Version must use 2–4 numeric parts, e.g. 1.0, 1.2.3 or 1.2.3.4");
  if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Apex, MCP, or Studio).");
- const authority=await licenseMaster("/license/health",{cache:"no-store"});
- const maintenance=authority?.maintenance_mode===true;
- const masterOnline=authority?.external_authority_online===true;
- const releasesOnline=authority?.capabilities?.releases===true;
- if(authority?.ok!==true||!masterOnline||maintenance||!releasesOnline){
-  const reason=maintenance?"License Manager maintenance mode is active":!masterOnline?"Master Authority is offline":"Release Authority is disabled";
-  throw new Error(`Release build blocked by License Manager: ${reason}.`);
- }
  const channel=normalizeChannel(data.channel);
  const repackage=Boolean(data.repackage);
  const repackageReleaseId=String(data.repackageReleaseId||"").trim();
