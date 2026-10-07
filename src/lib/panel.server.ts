@@ -1791,12 +1791,23 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   packages.filter((row:any)=>row.component===component&&row.status==="current").sort((a:any,b:any)=>new Date(b.publishedAt||b.createdAt||0).getTime()-new Date(a.publishedAt||a.createdAt||0).getTime())[0]||null
  ]));
  const candidates=packages.filter((row:any)=>row.status==="candidate").sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime());
+ const headSha=String(refInfo?.object?.sha||"");
+ const ready=Object.fromEntries(MASTER_DATABASE_COMPONENTS.map(component=>[
+  component,
+  packages.filter((row:any)=>row.component===component&&["candidate","current"].includes(row.status)&&row.sourceRepo===MASTER_DATABASE_REPO&&row.sourceCommit===headSha)
+   .sort((a:any,b:any)=>new Date(b.createdAt||b.publishedAt||0).getTime()-new Date(a.createdAt||a.publishedAt||0).getTime())[0]||null
+ ]));
+ const deploymentEventsResult=await authClient().from("orbitfs_deployment_events").select("id,installation_id,event_type,status,message,detail,created_at").order("created_at",{ascending:false}).limit(80);
+ const activity=(Array.isArray(deploymentEventsResult?.data)?deploymentEventsResult.data:[])
+  .filter((row:any)=>/^(update\.engine\.|database\.migration\.|base\.database\.migration\.|deployment\.)/.test(String(row?.event_type||"")))
+  .slice(0,30);
+ const latestValidation=buildRuns.find((run:any)=>run.headSha===headSha)||buildRuns[0]||null;
  return {
   ok:true,
   authority:"License Manager",
   repo:MASTER_DATABASE_REPO,
   ref:MASTER_DATABASE_REF,
-  headSha:String(refInfo?.object?.sha||""),
+  headSha,
   repoUrl:repoInfo?.html_url||`https://github.com/${MASTER_DATABASE_REPO}`,
   workflows:{
    build:buildRuns,
@@ -1806,6 +1817,15 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   },
   current,
   candidates,
+  ready,
+  activity,
+  automation:{
+   releaseIntegration:"automatic",
+   latestValidation,
+   centralReady:Boolean(latestValidation&&latestValidation.headSha===headSha&&latestValidation.conclusion==="success"&&MASTER_DATABASE_COMPONENTS.every(component=>Boolean((ready as any)[component]))),
+   baseFlow:["Base release","Central DB validation","License Manager package attach","Inner Deployer / customer database"],
+   updateFlow:["Update release","License Manager package attach","Inner Deployer verification","Shared Engine Host","Selected addon database additions"]
+  },
   policies:{
    productionApply:"manual-only",
    candidatePublication:"License Manager controlled",
