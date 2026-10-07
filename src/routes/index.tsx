@@ -406,7 +406,7 @@ function Index() {
         <Sidebar tab={tab} setTab={navigateTab} activeRun={!!run && !run.conclusion} />
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 xl:px-8">
           <div className="mx-auto max-w-[1440px] space-y-4">
-            {error && <div className="sticky top-[80px] z-30"><Alert tone="error" onClose={() => setError("")}>{error}</Alert></div>}
+            {error && <div className="relative z-10"><Alert tone="error" onClose={() => setError("")}>{error}</Alert></div>}
             {notice && <Alert tone="success" onClose={() => setNotice("")}>{notice}</Alert>}
             {tab === "overview" && <Dashboard stats={stats} releases={allReleases} connected={masterConnected} run={run} channels={availableChannels}
               onBase={() => navigateTab("base")} onEngine={() => navigateTab("engine")}
@@ -1090,6 +1090,6 @@ function StatusPill({ text }: any) { return <span className={`orbit-status-pill 
 function Field({ label, children }: any) { return <label className="block text-xs font-medium">{label}{children}</label>; }
 function Alert({ tone, children, onClose }: any) {
   const cls=tone==="error"?"border-red-400/40 bg-red-400/10 text-red-100":tone==="warning"?"border-amber-400/40 bg-amber-400/10 text-amber-100":"border-emerald-400/30 bg-emerald-400/10 text-emerald-100";
-  return <div className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5 text-xs ${cls}`}><span>{children}</span>{onClose&&<button className="opacity-60 hover:opacity-100" onClick={onClose}><XCircle size={14}/></button>}</div>;
+  return <div className={`flex min-w-0 items-start justify-between gap-3 rounded-lg border px-3 py-2.5 text-xs leading-5 ${cls}`}><span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{children}</span>{onClose&&<button className="shrink-0 opacity-60 hover:opacity-100" onClick={onClose} aria-label="Dismiss message"><XCircle size={14}/></button>}</div>;
 }
 
