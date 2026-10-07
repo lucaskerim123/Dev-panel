@@ -69,7 +69,7 @@ export function VaultWorkspace({session}:{session:any}){
   }
 
   async function remove(id:string){
-    if(!confirm("Remove this Vault entry?"))return;
+    if(!window.confirm("Remove this Vault entry?"))return;
     setBusy(true);setError("");
     try{await persist(records.filter(row=>row.id!==id));setNotice("Vault entry removed.")}
     catch(x:any){setError(x.message||"Unable to remove Vault entry.")}
