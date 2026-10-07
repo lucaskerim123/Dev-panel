@@ -109,6 +109,10 @@ jobs:
         if: steps.profile.outputs.deploy == 'true'
         run: bun install --frozen-lockfile
 
+      - name: Database automation contract
+        if: steps.profile.outputs.deploy == 'true'
+        run: node scripts/database-automation-contract.test.mjs
+
       - name: Build Vercel production artifact
         if: steps.profile.outputs.deploy == 'true'
         env:
