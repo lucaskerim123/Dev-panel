@@ -1250,6 +1250,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  const selectedComponents = data.type === "engine"
    ? [...new Set((data.components || []).map((x:string)=>String(x).trim().toLowerCase()).filter((x:string)=>["base","apex","mcp","studio"].includes(x)))]
    : ["base"];
+ const databasePackages=await ensureAutomaticReleaseDatabasePackages(data.type,selectedComponents);
  const detectedComponents=data.type==="engine"?(initialUpdate?(initialUpdateConfig?.components||["apex","mcp","studio"]):detectUpdateComponents(detectedFiles)):[];
  const missingDetectedComponents=detectedComponents.filter((component:string)=>!selectedComponents.includes(component));
  if(missingDetectedComponents.length)throw new Error(`Stage 1 targets do not cover detected Update changes: ${missingDetectedComponents.join(", ")}. Re-inspect the Update source before building.`);
@@ -1286,6 +1287,13 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   changedFiles: dispatchFiles,
   changedFilesTruncated: detectedFiles.length > dispatchFiles.length,
   components: selectedComponents,
+  databasePreparation:{
+   mode:"automatic-central",
+   requiredComponents:databasePackages.requiredComponents,
+   sourceCommit:databasePackages.sourceCommit,
+   packageIds:(databasePackages.packages||[]).map((item:any)=>String(item?.id||"")).filter(Boolean),
+   reusedValidatedSource:databasePackages.reused===true
+  },
   minimumBaseVersion: data.type === "engine" ? (data.minimumBaseVersion || "1.0") : null,
   baseCompatibilityChannel: data.type === "engine" ? ENGINE_BASE_COMPATIBILITY_CHANNEL : null,
   minimumUpdaterProtocol: data.type === "engine" ? (data.protocol || "2") : null,
