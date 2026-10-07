@@ -1314,6 +1314,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  if(data.type==="base") Object.assign(inputs,{release_record:JSON.stringify(releaseRecord),source_repo:repo,source_ref:ref,source_sha:head,database_source_commit:String(databasePackages.sourceCommit||"")});
  if(data.type==="engine")Object.assign(inputs,{
   source_sha:head,
+  database_source_commit:String(databasePackages.sourceCommit||""),
   base:String(selectedComponents.includes("base")),
   apex:String(selectedComponents.includes("apex")),
   mcp:String(selectedComponents.includes("mcp")),
