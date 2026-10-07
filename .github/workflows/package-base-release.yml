@@ -220,33 +220,24 @@ jobs:
           node -e 'const u=new URL(process.env.LICENSE_MASTER_URL); if(u.protocol!=="https:"||u.pathname!=="/api/v1"||u.search||u.hash) throw new Error("LICENSE_MASTER_URL must target /api/v1 over HTTPS");'
           mkdir -p release-package supabase/migrations
 
-          list_file="$(mktemp)"
+          resolver_file="$(mktemp)"
           package_response_file="$(mktemp)"
-          trap 'rm -f "$list_file" "$package_response_file"' EXIT
+          trap 'rm -f "$resolver_file" "$package_response_file"' EXIT
 
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
-            -o "$list_file" \
-            "${LICENSE_MASTER_URL%/}/database-packages?component=base"
-          package_id="$(jq -r '[.packages[]? | select(.source_repo=="lucaskerim123/Master-Database-System" and (.status=="candidate" or .status=="current"))] | sort_by(.database_schema_version,.created_at) | last | .id // empty' "$list_file")"
-          package_origin="master"
-
-          if [ -n "$package_id" ]; then
-            curl --fail-with-body --silent --show-error \
-              -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
-              -o "$package_response_file" \
-              "${LICENSE_MASTER_URL%/}/database-packages/$package_id"
-            echo "Using Master Database Base package: $package_id"
-          else
-            package_origin="fallback"
-            echo "::warning::No Master Database Base package is registered yet; using License Manager's last current immutable Base package fallback."
-            curl --fail-with-body --silent --show-error \
-              -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
-              -o "$package_response_file" \
-              "${LICENSE_MASTER_URL%/}/database-packages/base/current"
-            package_id="$(jq -r '.package.id // empty' "$package_response_file")"
-            test -n "$package_id" || { echo "::error::No current Base database package fallback is available."; exit 1; }
-          fi
+            -o "$resolver_file" \
+            "${LICENSE_MASTER_URL%/}/database-packages/resolve?components=base&include_payload=true"
+          jq -e '.ok==true and (.packages|length)==1 and .packages[0].component=="base" and (.packages[0].payload|type=="object")' "$resolver_file" >/dev/null || {
+            echo "::error::License Manager did not resolve one authoritative Base database package."
+            cat "$resolver_file"
+            exit 1
+          }
+          jq '{ok:.ok,package:.packages[0]}' "$resolver_file" > "$package_response_file"
+          package_id="$(jq -r '.package.id // empty' "$package_response_file")"
+          package_origin="$(jq -r '.package.resolutionSource // "unknown"' "$package_response_file")"
+          test -n "$package_id" || { echo "::error::License Manager resolver returned no Base database package id."; exit 1; }
+          echo "Using License Manager resolved Base database package: $package_id ($package_origin)"
 
           DATABASE_PACKAGE_ORIGIN="$package_origin" node - "$package_response_file" <<'NODE'
           const fs=require("fs"),path=require("path"),crypto=require("crypto");
@@ -257,7 +248,7 @@ jobs:
           const sourceCommit=String(p.sourceCommit||"").trim();
           if(!sourceRepo||!/^[a-f0-9]{40}$/.test(sourceCommit))throw new Error("Central Base package source identity is invalid");
           if(sourceRepo!==String(row.sourceRepo||"").trim()||sourceCommit!==String(row.sourceCommit||"").trim())throw new Error("Central Base package payload identity does not match License Manager metadata");
-          if(process.env.DATABASE_PACKAGE_ORIGIN==="master"&&sourceRepo!=="lucaskerim123/Master-Database-System")throw new Error("Selected Master Database package has an unexpected source repository");
+          if(process.env.DATABASE_PACKAGE_ORIGIN==="central"&&sourceRepo!=="lucaskerim123/Master-Database-System")throw new Error("License Manager central Base package has an unexpected source repository");
           const snapshot=p.snapshot;
           if(!snapshot||snapshot.encoding!=="base64"||typeof snapshot.data!=="string")throw new Error("Central Base package is missing its fresh-install snapshot");
           const snapshotBytes=Buffer.from(snapshot.data,"base64");
@@ -303,7 +294,7 @@ jobs:
           jq -e '.id|type=="string" and length>0' <<<"$reference" >/dev/null
           jq -e '.sha256|test("^[a-f0-9]{64}$")' <<<"$reference" >/dev/null
           echo "reference=$reference" >> "$GITHUB_OUTPUT"
-          echo "Base database material resolved from License Manager cache: $package_id"
+          echo "Base database material resolved authoritatively by License Manager: $package_id"
 
       - name: Build release information
         working-directory: base-source
