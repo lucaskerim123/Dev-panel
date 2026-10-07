@@ -26,6 +26,10 @@ on:
         description: Exact inspected Base source commit
         required: true
         type: string
+      database_source_commit:
+        description: Exact Master Database source commit required by this release
+        required: true
+        type: string
       notes:
         description: Release notes supplied by Dev Panel
         required: false
@@ -224,15 +228,28 @@ jobs:
           package_response_file="$(mktemp)"
           trap 'rm -f "$resolver_file" "$package_response_file"' EXIT
 
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
-            -o "$resolver_file" \
-            "${LICENSE_MASTER_URL%/}/database-packages/resolve?components=base&include_payload=true"
-          jq -e '.ok==true and (.packages|length)==1 and .packages[0].component=="base" and (.packages[0].payload|type=="object")' "$resolver_file" >/dev/null || {
-            echo "::error::License Manager did not resolve one authoritative Base database package."
-            cat "$resolver_file"
+          expected_database_commit="${{ inputs.database_source_commit }}"
+          test -n "$expected_database_commit" || { echo "::error::Missing expected Master Database source commit."; exit 1; }
+
+          resolved=false
+          for attempt in $(seq 1 36); do
+            if curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
+              -o "$resolver_file" \
+              "${LICENSE_MASTER_URL%/}/database-packages/resolve?components=base&include_payload=true"; then
+              if jq -e --arg expected "$expected_database_commit" '.ok==true and (.packages|length)==1 and .packages[0].component=="base" and .packages[0].sourceRepo=="lucaskerim123/Master-Database-System" and .packages[0].sourceCommit==$expected and (.packages[0].payload|type=="object")' "$resolver_file" >/dev/null; then
+                resolved=true
+                break
+              fi
+            fi
+            echo "Waiting for validated Base database candidate for ${expected_database_commit:0:8} (attempt $attempt/36)..."
+            sleep 5
+          done
+          if [ "$resolved" != "true" ]; then
+            echo "::error::License Manager did not resolve the required Base database package for $expected_database_commit."
+            cat "$resolver_file" || true
             exit 1
-          }
+          fi
           jq '{ok:.ok,package:.packages[0]}' "$resolver_file" > "$package_response_file"
           package_id="$(jq -r '.package.id // empty' "$package_response_file")"
           package_origin="$(jq -r '.package.resolutionSource // "unknown"' "$package_response_file")"
