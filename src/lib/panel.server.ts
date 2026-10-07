@@ -1730,7 +1730,7 @@ async function ensureAutomaticReleaseDatabasePackages(type:"base"|"engine",compo
   ref=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
  }catch(error:any){
   const message=String(error?.message||error||"");
-  if(/not found/i.test(message))throw new Error(`Dev Panel cannot access the central database repository ${MASTER_DATABASE_REPO}. Configure MASTER_DATABASE_GITHUB_TOKEN with access to that repository before starting a Base/Update release.`);
+  if(/not found/i.test(message))throw new Error(`Dev Panel cannot access the central database repository ${MASTER_DATABASE_REPO}. Configure GITHUB_RELEASE_TOKEN with access to that repository before starting a Base/Update release.`);
   throw error;
  }
  const sourceCommit=String(ref?.object?.sha||"").trim();
