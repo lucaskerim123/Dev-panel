@@ -316,7 +316,8 @@ jobs:
             mustContain('app/layout.tsx',"const LOCAL_PROFILE='"+targetProfile+"' as const",'License Manager local profile');
             mustContain('database/migrations/20261004100000_license_manager_github_profile.sql',"default '"+targetProfile+"'",'License Manager first-run profile');
             mustContain('app/api/v1/engine-bootstrap/route.ts',targetEngine,'License Manager Engine repository');
-            mustContain('app/api/v1/engine-bootstrap/route.ts',targetEngineRepoId,'License Manager Engine repository id');
+            // Engine bootstrap now validates repository.full_name through the active
+            // GitHub profile. Do not require the retired hard-coded numeric repo id.
           }else if(key==='billing'){
             mustContain('scripts/release-manifest.mjs',targetBilling,'Billing manifest repository');
           }else if(key==='control'){
