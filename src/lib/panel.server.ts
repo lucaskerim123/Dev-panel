@@ -1692,6 +1692,63 @@ async function latestDispatchedDatabaseRun(workflow:string,startedAt:number){
  return null;
 }
 
+function requiredDatabaseComponentsForRelease(type:"base"|"engine",components:string[]){
+ if(type==="base")return ["base"];
+ const selected=[...new Set((components||[]).map(value=>String(value||"").trim().toLowerCase()).filter(value=>["base","mcp","apex","studio"].includes(value)))];
+ const required:string[]=[];
+ if(selected.includes("base"))required.push("base");
+ const engineComponents=selected.filter(value=>["mcp","apex","studio"].includes(value));
+ if(engineComponents.length)required.push("engine-shared",...engineComponents);
+ return [...new Set(required)];
+}
+async function resolvedAutomaticDatabasePackages(requiredComponents:string[],expectedSourceCommit:string){
+ if(!requiredComponents.length)return {ready:true,packages:[] as any[]};
+ try{
+  const result=await licenseMaster("/database-packages/resolve?components="+encodeURIComponent(requiredComponents.join(",")));
+  const packages=Array.isArray(result?.packages)?result.packages:[];
+  const byComponent=new Map(packages.map((item:any)=>[String(item?.component||""),item]));
+  const ready=requiredComponents.every(component=>{
+   const item:any=byComponent.get(component);
+   return item&&String(item.sourceRepo||"")===MASTER_DATABASE_REPO&&String(item.sourceCommit||"")===expectedSourceCommit&&["candidate","current"].includes(String(item.status||"").toLowerCase());
+  });
+  return {ready,packages};
+ }catch{return {ready:false,packages:[] as any[]}}
+}
+async function ensureAutomaticReleaseDatabasePackages(type:"base"|"engine",components:string[]){
+ const requiredComponents=requiredDatabaseComponentsForRelease(type,components);
+ if(!requiredComponents.length)return {requiredComponents,packages:[] as any[],sourceCommit:null,workflowRun:null,reused:true};
+ const ref=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
+ const sourceCommit=String(ref?.object?.sha||"").trim();
+ if(!/^[a-f0-9]{40}$/i.test(sourceCommit))throw new Error("Could not resolve the central database source commit.");
+
+ let resolved=await resolvedAutomaticDatabasePackages(requiredComponents,sourceCommit);
+ if(resolved.ready)return {requiredComponents,packages:resolved.packages,sourceCommit,workflowRun:null,reused:true};
+
+ let runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,10);
+ let workflowRun=runs.find((run:any)=>run.headSha===sourceCommit&&["queued","in_progress","waiting","requested","pending"].includes(String(run.status||"").toLowerCase()))||null;
+ const successful=runs.find((run:any)=>run.headSha===sourceCommit&&String(run.conclusion||"").toLowerCase()==="success");
+ if(!workflowRun&&!successful){
+  const startedAt=Date.now();
+  await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_BUILD_WORKFLOW)}/dispatches`,{
+   method:"POST",
+   body:JSON.stringify({ref:MASTER_DATABASE_REF})
+  });
+  workflowRun=await latestDispatchedDatabaseRun(MASTER_DATABASE_BUILD_WORKFLOW,startedAt);
+ }
+
+ for(let attempt=0;attempt<45;attempt++){
+  resolved=await resolvedAutomaticDatabasePackages(requiredComponents,sourceCommit);
+  if(resolved.ready)return {requiredComponents,packages:resolved.packages,sourceCommit,workflowRun,reused:false};
+  runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,10);
+  const matching=runs.find((run:any)=>run.headSha===sourceCommit);
+  if(matching&&matching.status==="completed"&&matching.conclusion&&matching.conclusion!=="success"){
+   throw new Error("Automatic central database validation failed. Open Database Operations to inspect the failed run.");
+  }
+  await new Promise(resolve=>setTimeout(resolve,1000));
+ }
+ throw new Error("Automatic central database preparation did not become ready for this release. Open Database Operations to inspect the validation run.");
+}
+
 export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
  const [repoInfo,refInfo,buildRuns,controlRuns,freshRuns,migrationRuns,packageSets]=await Promise.all([
