@@ -1725,7 +1725,14 @@ async function resolvedAutomaticDatabasePackages(requiredComponents:string[],exp
 async function ensureAutomaticReleaseDatabasePackages(type:"base"|"engine",components:string[]){
  const requiredComponents=requiredDatabaseComponentsForRelease(type,components);
  if(!requiredComponents.length)return {requiredComponents,packages:[] as any[],sourceCommit:null,workflowRun:null,reused:true};
- const ref=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
+ let ref:any;
+ try{
+  ref=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
+ }catch(error:any){
+  const message=String(error?.message||error||"");
+  if(/not found/i.test(message))throw new Error(`Dev Panel cannot access the central database repository ${MASTER_DATABASE_REPO}. Configure MASTER_DATABASE_GITHUB_TOKEN with access to that repository before starting a Base/Update release.`);
+  throw error;
+ }
  const sourceCommit=String(ref?.object?.sha||"").trim();
  if(!/^[a-f0-9]{40}$/i.test(sourceCommit))throw new Error("Could not resolve the central database source commit.");
 
@@ -1735,6 +1742,10 @@ async function ensureAutomaticReleaseDatabasePackages(type:"base"|"engine",compo
  let runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,10);
  let workflowRun=runs.find((run:any)=>run.headSha===sourceCommit&&["queued","in_progress","waiting","requested","pending"].includes(String(run.status||"").toLowerCase()))||null;
  const successful=runs.find((run:any)=>run.headSha===sourceCommit&&String(run.conclusion||"").toLowerCase()==="success");
+ if(!workflowRun&&successful){
+  resolved=await resolvedAutomaticDatabasePackages(requiredComponents,sourceCommit);
+  if(!resolved.ready)throw new Error(`Central database validation passed for ${sourceCommit.slice(0,8)}, but License Manager has no registered database candidate for: ${requiredComponents.join(", ")}. The Master Database workflow must have ORBITFS_LICENSE_MANAGER_URL and ORBITFS_LICENSE_MANAGER_TOKEN configured so validated packages are registered.`);
+ }
  if(!workflowRun&&!successful){
   const startedAt=Date.now();
   await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_BUILD_WORKFLOW)}/dispatches`,{
