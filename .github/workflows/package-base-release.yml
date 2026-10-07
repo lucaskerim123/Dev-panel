@@ -232,7 +232,7 @@ jobs:
           test -n "$expected_database_commit" || { echo "::error::Missing expected Master Database source commit."; exit 1; }
 
           resolved=false
-          for attempt in $(seq 1 36); do
+          for attempt in $(seq 1 72); do
             if curl --fail-with-body --silent --show-error \
               -H "Authorization: Bearer $LICENSE_MASTER_API_TOKEN" \
               -o "$resolver_file" \
@@ -242,7 +242,7 @@ jobs:
                 break
               fi
             fi
-            echo "Waiting for validated Base database candidate for ${expected_database_commit:0:8} (attempt $attempt/36)..."
+            echo "Waiting for validated Base database candidate for ${expected_database_commit:0:8} (attempt $attempt/72)..."
             sleep 5
           done
           if [ "$resolved" != "true" ]; then
