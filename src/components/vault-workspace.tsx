@@ -3,6 +3,8 @@ import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye
 import { getVaultEnvelope, saveVaultEnvelope } from "@/lib/vault.server";
 import { VaultVercelSync } from "@/components/vault-vercel-sync";
 import { VaultGithubSync } from "@/components/vault-github-sync";
+import { VaultCoreSection } from "@/components/vault-core-section";
+import { isCoreRecord, type CoreSpec } from "@/lib/vault-core";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
 
 const SYSTEMS=["Vercel","GitHub","Supabase","License Manager","Billing Store","Other"];
@@ -67,7 +69,7 @@ export function VaultWorkspace({session}:{session:any}){
     event.preventDefault();setError("");setBusy(true);
     try{
       const system=draft.system.trim(),service=draft.service.trim(),keyName=draft.keyName.trim();
-      if(!system||!service||!keyName||!draft.secret)throw new Error("System, service, key name and secret are required.");
+      if(!system||!service||!keyName)throw new Error("System, service and key name are required.");
       const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system==="Other"?(draft.otherSystem.trim()||"Other"):system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service:service==="Custom"?(draft.customService.trim()||"Custom"):service,customService:service==="Custom"?draft.customService.trim():"",keyName,secret:draft.secret,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
       await persist(next);setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""});setNotice(editing?"Vault entry updated.":"Vault entry saved.");
@@ -91,7 +93,7 @@ export function VaultWorkspace({session}:{session:any}){
       const next=data.entries.map((item:any,index:number)=>{
         if(!item||typeof item!=="object")throw new Error("Invalid entry at row "+(index+1));
         const system=String(item.system||"").trim(),service=String(item.service||"").trim(),keyName=String(item.keyName||"").trim();
-        if(!system||!service||!keyName||typeof item.secret!=="string"||!item.secret.trim())throw new Error("Missing system, service, key name or secret at row "+(index+1));
+        if(!system||!service||!keyName||typeof item.secret!=="string")throw new Error("Missing system, service, key name or non-string value at row "+(index+1));
         if([system,service,keyName,item.secret].some(v=>v.length>10000))throw new Error("Entry too large at row "+(index+1));
         return {id:crypto.randomUUID(),systems:[system],otherSystem:SYSTEMS.includes(system)?"":system,service,customService:SERVICES.includes(service)?"":service,keyName,secret:item.secret} as VaultRecord;
       });
@@ -133,7 +135,20 @@ export function VaultWorkspace({session}:{session:any}){
     window.scrollTo({top:0,behavior:"smooth"});
   }
 
-  const filtered=useMemo(()=>{const q=query.trim().toLowerCase();return q?records.filter(row=>[...row.systems,row.service,row.keyName].some(v=>String(v).toLowerCase().includes(q))):records},[records,query]);
+  function editCore(row:VaultRecord|null,spec?:CoreSpec) {
+    if(row) {
+      edit(row);
+    } else if(spec) {
+      const knownSystem=SYSTEMS.includes(spec.system),knownService=SERVICES.includes(spec.service);
+      setEditing(null);
+      setDraft({system:knownSystem?spec.system:"Other",otherSystem:knownSystem?"":spec.system,
+        service:knownService?spec.service:"Custom",customService:knownService?"":spec.service,
+        keyName:spec.keyName,secret:""});
+    } else return;
+    requestAnimationFrame(()=>document.getElementById("vault-entry-editor")?.scrollIntoView({behavior:"smooth",block:"start"}));
+  }
+
+  const filtered=useMemo(()=>{const q=query.trim().toLowerCase();const ordinary=records.filter(row=>!isCoreRecord(row));return q?ordinary.filter(row=>[...row.systems,row.service,row.keyName].some(v=>String(v).toLowerCase().includes(q))):ordinary},[records,query]);
 
   if(phase!=="open")return <section className="space-y-4">
     <div className="orbit-reference-page-head"><p>SECURE OPERATIONS</p><h1>Vault</h1><span>Persistent encrypted credentials with a separate Vault unlock.</span></div>
@@ -154,11 +169,12 @@ export function VaultWorkspace({session}:{session:any}){
     <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
     {error&&<div className="rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
     {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">{notice}</div>}
+    <VaultCoreSection records={records} onEdit={editCore}/>
     <div className="orbit-panel p-3 text-xs"><strong className="text-sm">Vercel Production integration</strong><p className="mt-1 text-muted-foreground">Connect your Main or Fallback Vercel account below. Connections are separate and use stored encrypted tokens; a saved token does not mean the account has been verified.</p></div>
     <VaultVercelSync session={session} records={records} onPersist={persist}/>
     <VaultGithubSync session={session} records={records} onPersist={persist}/>
-    <form onSubmit={save} className="orbit-panel p-4">
-      <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit Vault entry":"New Vault entry"}</h2><p>Changes are encrypted in your browser before persistence.</p></div></div>
+    <form id="vault-entry-editor" onSubmit={save} className="orbit-panel p-4">
+      <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit Vault entry":"New Vault entry"}</h2><p>Changes are encrypted in your browser before persistence. Values may be blank, change-me or any text; the marked core section is a reminder only.</p></div></div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <label className="block text-xs font-medium">System<select className="control mt-1" value={draft.system} onChange={e=>setDraft({...draft,system:e.target.value})}>{SYSTEMS.map(x=><option key={x}>{x}</option>)}</select></label>
         <label className="block text-xs font-medium">Service<select className="control mt-1" value={draft.service} onChange={e=>setDraft({...draft,service:e.target.value})}>{SERVICES.map(x=><option key={x}>{x}</option>)}</select></label>
@@ -170,13 +186,13 @@ export function VaultWorkspace({session}:{session:any}){
       <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""})}}><X size={14}/> Cancel</button>}</div>
     </form>
     <section className="orbit-panel p-4 space-y-3">
-      <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import Vault entries</h2><p>Import a JSON template. Choose whether matching system, service and key names are skipped or replaced. Imported secrets are encrypted before saving.</p></div></div>
+      <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import Vault entries</h2><p>Import a JSON template. Choose whether matching system, service and key names are skipped or replaced. Empty and placeholder values are permitted and encrypted before saving.</p></div></div>
       <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button><label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" onChange={e=>void prepareImport(e)}/></label></div>
       {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.systems[0]} / {row.service} / {row.keyName}</p>)}</div><fieldset className="space-y-2 text-xs"><legend className="font-semibold">When an entry already exists</legend><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} onChange={()=>setImportMode("skip")}/> Skip existing (keep saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} onChange={()=>setImportMode("override")}/> Override existing (replace saved secrets)</label></fieldset><p className="text-xs text-muted-foreground">{importRows.filter(row=>records.some(saved=>saved.systems[0].toLowerCase()===row.systems[0].toLowerCase()&&saved.service.toLowerCase()===row.service.toLowerCase()&&saved.keyName.toLowerCase()===row.keyName.toLowerCase())).length} matching entries will be {importMode==="skip"?"skipped":"overwritten"}.</p><div className="flex gap-2"><button type="button" className="button-primary" disabled={busy} onClick={()=>void confirmImport()}>Import entries</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
     </section>
     <section className="orbit-panel overflow-hidden">
-      <div className="border-b p-4"><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
-      <div>{filtered.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">From: {row.systems.join(" / ")} · {row.service}{row.vercelTargets?.length?` · Linked to: ${row.vercelTargets.map(target=>target.connection+" / "+target.projectName).join(", ")}`:""}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?row.secret:"••••••••••••"}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}{!filtered.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}</div>
+      <div className="border-b p-4"><h2 className="text-sm font-semibold mb-2">Other Vault keys</h2><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
+      <div>{filtered.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">From: {row.systems.join(" / ")} · {row.service}{row.vercelTargets?.length?` · Linked to: ${row.vercelTargets.map(target=>target.connection+" / "+target.projectName).join(", ")}`:""}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?(row.secret||"(blank)"):(row.secret?"••••••••••••":"(blank)")}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}{!filtered.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No ordinary Vault keys match. Core credentials are listed above.":"No Vault entries yet."}</div>}</div>
     </section>
   </section>;
 }

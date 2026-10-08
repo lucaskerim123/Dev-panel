@@ -53,7 +53,7 @@ export function VaultGithubSync({session,records,onPersist}:{
     resetComparison();setError("");setNotice("");
   }
   function auth(){
-    if(!tokenRow?.secret) throw new Error("Save a GitHub Personal Access Token in the Vault first.");
+    if(!tokenRow?.secret?.trim()) throw new Error("Save a usable GitHub Personal Access Token in the Vault first. Blank entries are reminders only.");
     return {token:session.token,githubToken:tokenRow.secret,account};
   }
   async function run(label:string,task:()=>Promise<void>){
@@ -63,8 +63,7 @@ export function VaultGithubSync({session,records,onPersist}:{
   }
   async function saveConnection(){
     await run("save",async()=>{
-      const value=tokenInput.trim();
-      if(value.length<16 || /\s/.test(value)) throw new Error("Enter a GitHub Personal Access Token.");
+      const value=tokenInput;
       const existing=connectionRow(records,account);
       const next=existing
         ? records.map(r=>r.id===existing.id?{...r,secret:value}:r)
@@ -157,14 +156,14 @@ export function VaultGithubSync({session,records,onPersist}:{
     <div className="flex gap-2">{(["main","fallback"] as const).map(a=>
       <button type="button" key={a} className={account===a?"button-primary":"button-secondary"} disabled={!!busy} onClick={()=>chooseAccount(a)}>
         {a==="main"?"Main GitHub":"Fallback GitHub"}</button>)}</div>
-    <p className="text-xs text-muted-foreground">Vault connection: {tokenRow?"Saved · not verified until repositories load":"Not configured"}.
-      Use a token owned by {account==="main"?"lucaskerim123":"remipetrovich-design"} with access to the chosen repositories and Actions Secrets/Variables (read/write), Environments (read) and Metadata (read). No tokens are written into GitHub Actions.</p>
+    <p className="text-xs text-muted-foreground">Vault connection: {tokenRow?(tokenRow.secret.trim()?"Saved · not verified until repositories load":"Saved blank · add a real token to connect"):"Not configured"}.
+      Use a token owned by {account==="main"?"lucaskerim123":"remipetrovich-design"} with access to all required repositories and Actions Secrets/Variables (read/write), Environments (read) and Metadata (read). Two shared connection slots are used, one per account, rather than one per repository. Actual permissions are controlled by GitHub. No tokens are written into GitHub Actions.</p>
     <div className="flex flex-wrap items-end gap-2">
       <label className="block text-xs font-medium flex-1 min-w-52">GitHub Personal Access Token
         <input type="password" autoComplete="off" className="control mt-1 font-mono" value={tokenInput}
-          onChange={e=>setTokenInput(e.target.value)} placeholder={tokenRow?"Enter a replacement token":"Paste account-scoped token"}/></label>
-      <button type="button" className="button-secondary" disabled={!!busy || !tokenInput.trim()} onClick={()=>void saveConnection()}>
-        Save encrypted connection</button>
+          onChange={e=>setTokenInput(e.target.value)} placeholder={tokenRow?"Enter a replacement, change-me or leave blank":"Paste token or change-me"}/></label>
+      <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void saveConnection()}>
+        Save encrypted connection (blank allowed)</button>
       <button type="button" className="button-secondary" disabled={!!busy || !tokenRow} onClick={()=>void loadRepos()}>
         <RefreshCw size={14}/> Verify / load repositories</button>
     </div>
