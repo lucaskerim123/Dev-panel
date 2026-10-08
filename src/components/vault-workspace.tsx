@@ -25,7 +25,8 @@ export function VaultWorkspace({session}:{session:any}){
   const [visible,setVisible]=useState<string[]>([]);
   const [draftVisible,setDraftVisible]=useState(false);
   const [importRows,setImportRows]=useState<VaultRecord[]>([]);
-  const [importMode,setImportMode]=useState<"skip"|"override">("skip");
+  const [importMode,setImportMode]=useState<"skip"|"override"|"replace-all">("skip");
+  const [replaceApproved,setReplaceApproved]=useState(false);
   const [editing,setEditing]=useState<VaultRecord|null>(null);
   const [pendingMigration,setPendingMigration]=useState<VaultRecord[]|null>(null);
   const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
@@ -85,13 +86,19 @@ export function VaultWorkspace({session}:{session:any}){
     finally{setBusy(false)}
   }
 
+  function downloadEncryptedBackup(){
+    if(!envelope){setError("Encrypted Vault is unavailable.");return;}
+    const blob=new Blob([JSON.stringify({format:"orbitfs-vault-encrypted-backup-v1",envelope},null,2)+"\n"],{type:"application/json"});
+    const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="orbitfs-vault-encrypted-backup.json";a.click();URL.revokeObjectURL(url);
+  }
+
   function downloadTemplate(){
     const blob=new Blob([JSON.stringify(IMPORT_TEMPLATE,null,2)+"\n"],{type:"application/json"});
     const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="orbitfs-vault-import-template.json";link.click();URL.revokeObjectURL(url);
   }
 
   async function prepareImport(event:React.ChangeEvent<HTMLInputElement>){
-    setError("");setNotice("");setImportRows([]);
+    setError("");setNotice("");setImportRows([]);setReplaceApproved(false);
     const file=event.target.files?.[0];event.target.value="";if(!file)return;
     try{
       if(file.size>1024*1024)throw new Error("Import file must be 1 MB or smaller.");
@@ -126,19 +133,20 @@ export function VaultWorkspace({session}:{session:any}){
   }
 
   async function confirmImport(){
+    if(importMode==="replace-all"&&!replaceApproved){setError("Export the old Vault as a backup and confirm the full replacement before proceeding.");return;}
     setBusy(true);setError("");
     try{
       const existing=new Map(records.map(row=>[recordIdentity(row),row]));
       const additions=importRows.filter(row=>!existing.has(recordIdentity(row)));
       const overrides=importMode==="override"?importRows.filter(row=>existing.has(recordIdentity(row))):[];
       const replacements=new Map(overrides.map(row=>[recordIdentity(row),row]));
-      if(!additions.length&&!overrides.length)throw new Error("Nothing new to import.");
+      if(importMode!=="replace-all"&&!additions.length&&!overrides.length)throw new Error("Nothing new to import.");
       const next=records.map(row=>{
         const replacement=replacements.get(recordIdentity(row));
         return replacement?{...replacement,id:row.id,vercelTargets:row.vercelTargets,githubTargets:row.githubTargets}:row;
       });
-      await persist([...additions,...next]);setPendingMigration(null);setImportRows([]);
-      setNotice("Added "+additions.length+", replaced "+overrides.length+", skipped "+(importRows.length-additions.length-overrides.length)+".");
+      await persist(importMode==="replace-all"?importRows:[...additions,...next]);setPendingMigration(null);setImportRows([]);setReplaceApproved(false);
+      setNotice(importMode==="replace-all"?"Old Vault entries replaced with "+importRows.length+" imported records.":"Added "+additions.length+", replaced "+overrides.length+", skipped "+(importRows.length-additions.length-overrides.length)+".");
     }catch(x:any){setError(x.message||"Import failed.")}finally{setBusy(false)}
   }
 
@@ -223,7 +231,7 @@ export function VaultWorkspace({session}:{session:any}){
     <section className="orbit-panel p-4 space-y-3">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
       <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button><label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" onChange={e=>void prepareImport(e)}/></label></div>
-      {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"}</p>)}</div><fieldset className="space-y-2 text-xs"><legend className="font-semibold">When an entry already exists</legend><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} onChange={()=>setImportMode("skip")}/> Skip existing (keep saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} onChange={()=>setImportMode("override")}/> Override existing (replace saved secrets)</label></fieldset><p className="text-xs text-muted-foreground">{importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length} matching entries will be {importMode==="skip"?"skipped":"overwritten"}.</p><div className="flex gap-2"><button type="button" className="button-primary" disabled={busy} onClick={()=>void confirmImport()}>Import entries</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
+      {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"}</p>)}</div><fieldset className="space-y-2 text-xs"><legend className="font-semibold">When an entry already exists</legend><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} onChange={()=>setImportMode("skip")}/> Skip existing (keep saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} onChange={()=>setImportMode("override")}/> Override existing (replace saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="replace-all"} onChange={()=>{setImportMode("replace-all");setReplaceApproved(false)}}/> Replace entire Vault with this JSON (delete every old entry)</label></fieldset><p className="text-xs text-muted-foreground">{importMode==="replace-all"?`All ${records.length} existing Vault entries will be removed and replaced with ${importRows.length} imported entries.`:`${importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length} matching entries will be ${importMode==="skip"?"skipped":"overwritten"}.`}</p>{importMode==="replace-all"&&<div className="space-y-2 rounded border p-3"><p className="text-xs">This is irreversible without your old Vault PIN and an encrypted backup. Back up before replacing; real secrets are not recoverable from Vercel/GitHub.</p><button className="button-secondary" type="button" onClick={downloadEncryptedBackup}><Download size={14}/> Export encrypted old Vault backup</button><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={replaceApproved} onChange={e=>setReplaceApproved(e.target.checked)}/> I approve deleting every old Vault entry and using only the imported JSON.</label></div>}<div className="flex gap-2"><button type="button" className="button-primary" disabled={busy||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{importMode==="replace-all"?"Replace entire Vault":"Import entries"}</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
     </section>
     <details className="orbit-panel p-4" aria-label="Vercel Production sync">
       <summary className="cursor-pointer font-semibold">2 · Vercel — send keys to Production projects (open only when needed)</summary>
