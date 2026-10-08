@@ -69,9 +69,13 @@ export function systemOf(row:VaultRecord):VaultSystem {
  const current=row.systems?.[0]||"Other";
  if((VAULT_SYSTEMS as readonly string[]).includes(current))return current as VaultSystem;
  const key=row.keyName.toUpperCase();
- if(key.startsWith("LM_")||current==="License Manager")return "License";
- if(key.startsWith("BILLING_")||current==="Billing Store")return "Billing";
- if(key.startsWith("DEV_")||current==="Dev Panel")return "Dev";
+ if(current==="License Manager")return "License";
+ if(current==="Billing Store")return "Billing";
+ if(current==="Dev Panel")return "Dev";
+ if(key.startsWith("LM_"))return "License";
+ if(key.startsWith("BILLING_"))return "Billing";
+ if(key.startsWith("DEV_"))return "Dev";
+ if(/^(VERCEL_(TOKEN|TEAM_ID)|GITHUB_TOKEN)_(MAIN|FALLBACK)$/.test(key))return "Dev";
  const names=["License","Billing","Dev"] as const;
  const match=names.filter(sys=>verified[sys].includes(key));
  return match.length===1?match[0]:"Other";
