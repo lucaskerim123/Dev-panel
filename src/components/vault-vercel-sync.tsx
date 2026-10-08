@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, Cloud, RefreshCw, ShieldCheck } from "lucide-react";
 import type { VaultRecord } from "@/lib/vault-crypto";
-import { intendedForVercelProject } from "@/lib/vault-placement";
+import { allowedForVercelProject, systemForProject, recordIdentity } from "@/lib/vault-schema";
 import { planProductionKey, type ProductionPlan, type VercelEnvMeta } from "@/lib/vercel-sync-policy";
 import {
   listVaultVercelProjects, inspectVaultVercelProduction,
@@ -19,27 +19,10 @@ const PLACEHOLDER = /^(REPLACE_WITH_SECRET|YOUR_|replace-with|your-|placeholder|
 const labelOf = (record:VaultRecord) => record.systems.join(" / ") + " · " + record.service;
 function isConnectionKey(name:string) { return /^VERCEL_(TOKEN|TEAM_ID)_(MAIN|FALLBACK)$/.test(name); }
 function findConnection(records:VaultRecord[], key:string) {
-  return records.find(record => record.systems.includes("Vercel") && record.service === "Deployment" && record.keyName === key);
+  return records.find(record => record.keyName === key);
 }
-function suggestedDestination(row:VaultRecord, project:Project) {
-  const scope = project.name.toLowerCase();
-  if(scope.includes("dev-panel")||scope.includes("deploy-panel")){
-    const panelToken=scope.includes("fallback")?"GITHUB_TOKEN_FALLBACK":"GITHUB_TOKEN_MAIN";
-    if(row.keyName===panelToken)
-      return scope.includes("fallback")?"ORBITFS_FALLBACK_GITHUB_TOKEN":"ORBITFS_RELEASE_DISPATCH_TOKEN";
-  }
-  if(scope.includes("licen")){
-    const overrides:Record<string,string>={
-      GITHUB_TOKEN_MAIN:"ORBITFS_PRIMARY_GITHUB_TOKEN",GITHUB_TOKEN_FALLBACK:"ORBITFS_FALLBACK_GITHUB_TOKEN",
-      VERCEL_TOKEN_MAIN:"ORBITFS_MAIN_VERCEL_TOKEN",VERCEL_TOKEN_FALLBACK:"ORBITFS_FALLBACK_VERCEL_TOKEN"
-    };
-    if(overrides[row.keyName])return overrides[row.keyName];
-  }
-  const prefix = scope.includes("licen") ? "LM_" : scope.includes("billing") ? "BILLING_" : scope.includes("dev-panel") || scope.includes("deploy-panel") ? "DEV_" : "";
-  // BILLING_API_TOKEN is already its real environment name, not API_TOKEN.
-  if (prefix === "BILLING_" && row.keyName === "BILLING_API_TOKEN") return row.keyName;
-  return prefix && row.keyName.startsWith(prefix) ? row.keyName.slice(prefix.length) : row.keyName;
-}
+function suggestedDestination(row:VaultRecord, _project:Project) {return row.keyName;}
+
 function friendlySource(row:VaultRecord) {
   const origin = row.systems.join(" / ") || "Other";
   const target = row.vercelTargets?.map(item => item.connection + " / " + item.projectName).join(", ");
@@ -56,7 +39,6 @@ export function VaultVercelSync({session,records,onPersist}:{
   const [envs,setEnvs] = useState<VercelEnvMeta[]>([]);
   const [inspected,setInspected] = useState(false);
   const [selected,setSelected] = useState<string[]>([]);
-  const [showAllKeys,setShowAllKeys] = useState(false);
   const [keyOverrides,setKeyOverrides] = useState<Record<string,string>>({});
   const [review,setReview] = useState<Review[]>([]);
   const [ack,setAck] = useState(false);
@@ -67,16 +49,10 @@ export function VaultVercelSync({session,records,onPersist}:{
   const teamRow = findConnection(records,"VERCEL_TEAM_ID_"+account.toUpperCase());
   const teamId = teamRow?.secret || DEFAULT_TEAMS[account];
   const project = projects.find(p=>p.id===projectId) || null;
-  const eligible = useMemo(()=>records.filter(row=>{
-    if(!row.secret?.trim()||PLACEHOLDER.test(row.secret.trim()))return false;
-    const isAccountToken=/^(GITHUB_TOKEN|VERCEL_TOKEN)_(MAIN|FALLBACK)$/.test(row.keyName);
-    if(isAccountToken)return Boolean(project && (
-      /licen/i.test(project.name) ||
-      (/dev-panel|deploy-panel/i.test(project.name) &&
-        row.keyName==="GITHUB_TOKEN_"+account.toUpperCase())
-    ));
-    return !isConnectionKey(row.keyName);
-  }),[records,project]);
+  const eligible = useMemo(()=>records.filter(row=>
+    Boolean(project) && allowedForVercelProject(row,project!.name,account) &&
+    Boolean(row.secret?.trim()) && !PLACEHOLDER.test(row.secret.trim()) && !isConnectionKey(row.keyName)
+  ),[records,project,account]);
   const availableConfigs = inspected ? envs.filter(row=>row.type !== "sensitive" && row.visibility === "config" && planProductionKey(envs,row.key).action==="replace") : [];
   const connectionStatus = tokenRow?.secret ? "Token saved in Vault · not yet verified" : "Not connected · add an account API token";
   function clearReview() {setReview([]);setAck(false);}
@@ -103,13 +79,13 @@ export function VaultVercelSync({session,records,onPersist}:{
       const changes = new Map([["VERCEL_TOKEN_"+account.toUpperCase(),token],["VERCEL_TEAM_ID_"+account.toUpperCase(),team]]);
       const seen = new Set<string>();
       const next = records.map(row=>{
-        if (row.systems.includes("Vercel") && row.service==="Deployment" && changes.has(row.keyName)) {
+        if (changes.has(row.keyName)) {
           seen.add(row.keyName);return {...row,secret:changes.get(row.keyName)!};
         }
         return row;
       });
       for (const [keyName,secret] of changes) if (!seen.has(keyName)) next.unshift({
-        id:crypto.randomUUID(),systems:["Vercel"],otherSystem:"",service:"Deployment",customService:"",keyName,secret
+        id:crypto.randomUUID(),systems:["Dev"],otherSystem:"",service:"Vercel",customService:"",keyName,secret,usedIn:[account],destinationSystem:"Vault connection",needsReview:false
       });
       await onPersist(next);setTokenInput("");setTeamInput("");setProjects([]);setProjectId("");setInspected(false);
       clearReview();setNotice("Connection saved encrypted in the Vault. No Vercel settings were changed.");
@@ -183,8 +159,8 @@ export function VaultVercelSync({session,records,onPersist}:{
         ...connectionData(),projectId:target.id,envId:row.id,expectedUpdatedAt:row.updatedAt
       }});
       const added:VaultRecord={
-        id:crypto.randomUUID(),systems:["Vercel"],otherSystem:"",
-        service:"Environment · "+target.name+" · "+account,customService:"",
+        id:crypto.randomUUID(),systems:[systemForProject(target.name)],otherSystem:"",
+        service:"Vercel",customService:"",usedIn:[account],destinationSystem:target.name,needsReview:false,
         keyName:fetched.key,secret:fetched.value,
         vercelTargets:[{connection:account,projectId:target.id,projectName:target.name,keyName:fetched.key}]
       };
@@ -215,7 +191,7 @@ export function VaultVercelSync({session,records,onPersist}:{
         onClick={()=>void loadProjects()}><RefreshCw size={14}/> Load projects</button>
       <span className="text-xs text-muted-foreground">{connectionStatus} · Production only</span>
     </div>
-    {project&&<label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={showAllKeys} onChange={e=>setShowAllKeys(e.target.checked)}/> Show all Vault keys (advanced; otherwise only keys for this service)</label>}
+    {project&&<p className="text-xs text-muted-foreground">Only Vault entries explicitly mapped to this account, system and exact project are eligible. No prefix stripping.</p>}
     {projects.length>0&&<div className="flex flex-wrap items-end gap-2">
       <label className="block text-xs font-medium flex-1 min-w-48">Project<select className="control mt-1" value={projectId}
         onChange={e=>{setProjectId(e.target.value);setInspected(false);setEnvs([]);setSelected([]);clearReview();}}>
@@ -231,7 +207,7 @@ export function VaultVercelSync({session,records,onPersist}:{
           <p className="text-xs text-muted-foreground">{envs.length} existing Production variables · select exact Vault records below</p></div>
         <span className="text-xs rounded border px-2 py-1">Production only</span>
       </div>
-      <div className="max-h-72 overflow-auto space-y-2">{(showAllKeys || !project ? eligible : eligible.filter(row=>intendedForVercelProject(row,project.name))).map(row=>{
+      <div className="max-h-72 overflow-auto space-y-2">{eligible.map(row=>{
         const key=keyOverrides[row.id] ?? suggestedDestination(row,project);
         const plan=planProductionKey(envs,key.trim());
         return <div key={row.id} className="border rounded p-2">
