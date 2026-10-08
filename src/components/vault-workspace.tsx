@@ -4,6 +4,7 @@ import { getVaultEnvelope, saveVaultEnvelope } from "@/lib/vault.server";
 import { VaultVercelSync } from "@/components/vault-vercel-sync";
 import { VaultGithubSync } from "@/components/vault-github-sync";
 import { VaultInventorySection } from "@/components/vault-inventory-section";
+import { VaultSetupGuide } from "@/components/vault-setup-guide";
 import { VAULT_SYSTEMS, VAULT_SERVICES, normalizeVaultRecord, recordIdentity, type VaultMode } from "@/lib/vault-schema";
 import { groupVaultItems } from "@/lib/vault-grouping";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
@@ -232,6 +233,7 @@ export function VaultWorkspace({session}:{session:any}){
         <button type="button" className="button-secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError("");try{await persist(records);setPendingMigration(null);setNotice("Corrected Vault names saved in encrypted storage. No Vercel or GitHub variables changed.");}catch(e:any){setError(e?.message||"Could not save migration")}finally{setBusy(false)}})()}>Save reviewed Vault migration</button>
       </div>}
     </div>
+    <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
     <section className="orbit-panel overflow-hidden">
       <div className="border-b p-4"><h2 className="text-sm font-semibold mb-1">Saved keys · by system and account</h2><p className="text-xs text-muted-foreground mb-3">Open a system, then Main or Fallback. Entries used in both accounts appear in both groups. Search expands matching groups.</p><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
       <div className="p-3 space-y-3">
