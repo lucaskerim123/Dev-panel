@@ -187,25 +187,38 @@ export function VaultWorkspace({session}:{session:any}){
     {error&&<div className="rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
     {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">{notice}</div>}
     <div className="orbit-panel p-4 space-y-2">
-      <h2 className="text-base font-semibold">Your Production setup — four steps</h2>
-      <p className="text-xs">1. Add missing credentials below, or import your JSON. A blank value or change-me is fine as a reminder.</p>
-      <p className="text-xs">2. Use <strong>Goes to</strong> beside a key to see the intended service. The same named key can belong to different services.</p>
-      <p className="text-xs">3. Open <strong>Vercel</strong> or <strong>GitHub</strong> further down only when ready to copy settings to Production.</p>
-      <p className="text-xs">4. Choose the account and project/repository, compare existing settings, and approve changes. Nothing is deployed by a Vault sync.</p>
-      <p className="text-xs text-muted-foreground"><strong>Main:</strong> lucaskerim123 + Main Vercel. <strong>Fallback:</strong> remipetrovich-design + Fallback Vercel. <strong>Database:</strong> one shared Master Database System; changing source mode never migrates it.</p>
+      <h2 className="text-base font-semibold">Vault · exact-name inventory</h2>
+      <p className="text-xs text-muted-foreground">Service is the provider. System is the OrbitFS product. Every key is tied to an explicit account mode and exact destination; prefixes are never guessed during sync.</p>
+      <p className="text-xs text-muted-foreground">{records.length} saved entries · {needingReview.length} need destination review. Verified Production names below come from real Main Vercel settings, not invented runtime requirements.</p>
+      {pendingMigration&&<div className="rounded border p-3 space-y-2">
+        <strong className="text-sm">Review legacy Vault conversion</strong>
+        <p className="text-xs">The existing Vault was decrypted in your browser. Only key names verified against the actual Main Production inventory were normalised. Other names and all values were retained. Your previous encrypted Vault is unchanged until you save.</p>
+        <p className="text-xs text-muted-foreground">{records.filter(r=>r.legacyKeyName).length} old prefixed names were mapped to exact verified names. {needingReview.length} entries still need explicit destinations.</p>
+        <button type="button" className="button-secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError("");try{await persist(records);setPendingMigration(null);setNotice("Corrected Vault names saved in encrypted storage. No Vercel or GitHub variables changed.");}catch(e:any){setError(e?.message||"Could not save migration")}finally{setBusy(false)}})()}>Save reviewed Vault migration</button>
+      </div>}
     </div>
-    <VaultCoreSection records={records} onEdit={editCore}/>
+    <VaultInventorySection records={records} onPersist={persist}/>
     <form id="vault-entry-editor" onSubmit={save} className="orbit-panel p-4">
-      <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit saved key":"Add a missing key"}</h2><p>Changes are encrypted in your browser before persistence. Values may be blank, change-me or any text; the marked core section is a reminder only.</p></div></div>
+      <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit saved key":"Add a missing key"}</h2><p>Values are encrypted before saving. A blank value is allowed as an inventory reminder and cannot be pushed to Production.</p></div></div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <label className="block text-xs font-medium">System<select className="control mt-1" value={draft.system} onChange={e=>setDraft({...draft,system:e.target.value})}>{SYSTEMS.map(x=><option key={x}>{x}</option>)}</select></label>
         <label className="block text-xs font-medium">Service<select className="control mt-1" value={draft.service} onChange={e=>setDraft({...draft,service:e.target.value})}>{SERVICES.map(x=><option key={x}>{x}</option>)}</select></label>
+        <label className="block text-xs font-medium">System<select className="control mt-1" value={draft.system} onChange={e=>setDraft({...draft,system:e.target.value})}>{SYSTEMS.map(x=><option key={x}>{x}</option>)}</select></label>
+        {draft.service==="Other"&&<label className="block text-xs font-medium">Other service<input className="control mt-1" value={draft.customService} onChange={e=>setDraft({...draft,customService:e.target.value})}/></label>}
         {draft.system==="Other"&&<label className="block text-xs font-medium">Other system<input className="control mt-1" value={draft.otherSystem} onChange={e=>setDraft({...draft,otherSystem:e.target.value})}/></label>}
-        {draft.service==="Custom"&&<label className="block text-xs font-medium">Custom service<input className="control mt-1" value={draft.customService} onChange={e=>setDraft({...draft,customService:e.target.value})}/></label>}
-        <label className="block text-xs font-medium">Key name<input className="control mt-1" autoComplete="off" value={draft.keyName} onChange={e=>setDraft({...draft,keyName:e.target.value})}/></label>
-        <label className="block text-xs font-medium">Secret<input className="control mt-1 font-mono" type={draftVisible?"text":"password"} autoComplete="off" value={draft.secret} onChange={e=>setDraft({...draft,secret:e.target.value})}/><button type="button" className="button-secondary mt-1" onClick={()=>setDraftVisible(v=>!v)}>{draftVisible?"Hide secret":"Show secret"}</button></label>
+        <label className="block text-xs font-medium">Key name · exact<input className="control mt-1 font-mono" autoComplete="off" value={draft.keyName} onChange={e=>setDraft({...draft,keyName:e.target.value})} placeholder="e.g. BILLING_API_TOKEN"/></label>
+        <label className="block text-xs font-medium">Key value<input className="control mt-1 font-mono" type={draftVisible?"text":"password"} autoComplete="off" value={draft.secret} onChange={e=>setDraft({...draft,secret:e.target.value})}/><button type="button" className="button-secondary mt-1" onClick={()=>setDraftVisible(v=>!v)}>{draftVisible?"Hide value":"Show value"}</button></label>
+        <fieldset className="text-xs font-medium"><legend>Used in</legend><div className="flex gap-4 mt-2">{(["main","fallback"] as VaultMode[]).map(mode=><label className="flex gap-2 items-center" key={mode}><input type="checkbox" checked={draft.usedIn.includes(mode)} onChange={e=>setDraft({...draft,usedIn:e.target.checked?[...draft.usedIn,mode]:draft.usedIn.filter(x=>x!==mode)})}/>{mode==="main"?"Main":"Fallback"}</label>)}</div></fieldset>
+        <label className="block text-xs font-medium">Destination system · exact Vercel project or GitHub repository
+          <input className="control mt-1 font-mono" list="vault-destination-suggestions" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="e.g. v2-billing-store"/>
+          <datalist id="vault-destination-suggestions">
+            {["custom-licence-manager","v2-billing-store","base-deploy-panel","orbitfs-license-fallback","orbitfs-billing-fallback","orbitfs-dev-panel-fallback",
+              "lucaskerim123/V2_Billing_Store","remipetrovich-design/OrbitFS-Billing-Shopfront","lucaskerim123/V1-vercel-base","lucaskerim123/V1-vercel-engine",
+              "remipetrovich-design/OrbitFS-Base-System","remipetrovich-design/OrbitFS_Engine"].map(x=><option key={x} value={x}/>)}
+          </datalist>
+        </label>
       </div>
-      <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""})}}><X size={14}/> Cancel</button>}</div>
+      <p className="mt-2 text-xs text-muted-foreground">Key name is the actual environment variable name, not a Vault label. A key may exist more than once if its System, mode or destination differs. Sync never automatically adds/removes a prefix.</p>
+      <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft())}}><X size={14}/> Cancel</button>}</div>
     </form>
     <section className="orbit-panel p-4 space-y-3">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Import a JSON template. Choose whether matching system, service and key names are skipped or replaced. Empty and placeholder values are permitted and encrypted before saving.</p></div></div>
