@@ -230,25 +230,6 @@ export function VaultWorkspace({session}:{session:any}){
         <button type="button" className="button-secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError("");try{await persist(records);setPendingMigration(null);setNotice("Corrected Vault names saved in encrypted storage. No Vercel or GitHub variables changed.");}catch(e:any){setError(e?.message||"Could not save migration")}finally{setBusy(false)}})()}>Save reviewed Vault migration</button>
       </div>}
     </div>
-    <section className="orbit-panel p-4 space-y-3">
-      <div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div>
-        <h2>Account connections — protected during imports</h2>
-        <p>Main and Fallback GitHub/Vercel access, separate from service variables</p>
-      </div></div>
-      <div className="grid gap-2 md:grid-cols-2">
-        {(["GITHUB_TOKEN_MAIN","GITHUB_TOKEN_FALLBACK","VERCEL_TOKEN_MAIN","VERCEL_TOKEN_FALLBACK","VERCEL_TEAM_ID_MAIN","VERCEL_TEAM_ID_FALLBACK"] as const).map(key=>{
-          const record=bestVaultConnection(records,key);
-          const saved=usableConnectionValue(record?.secret);
-          return <div key={key} className="rounded border px-3 py-2 flex items-center justify-between text-xs gap-2">
-            <span className="font-mono break-all">{key}</span>
-            <span className={saved?"text-emerald-400":"text-amber-500"}>{saved?"Saved (unverified)":record?"Placeholder / blank":"Missing"}</span>
-          </div>;
-        })}
-      </div>
-      <p className="text-xs text-muted-foreground">Importing a new Vault JSON will not remove usable saved account connections. If a previous replacement reset them, restore only the connections from an encrypted Vault backup. Values never leave the browser unencrypted.</p>
-      <label className="button-secondary cursor-pointer inline-flex items-center gap-2"><Upload size={14}/> Restore account connections from encrypted backup
-        <input type="file" className="sr-only" accept=".json,application/json" disabled={busy} onChange={e=>void restoreConnectionsFromBackup(e)}/></label>
-    </section>
     <VaultInventorySection records={records} onPersist={persist}/>
     <form id="vault-entry-editor" onSubmit={save} className="orbit-panel p-4">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit saved key":"Add a missing key"}</h2><p>Values are encrypted before saving. A blank value is allowed as an inventory reminder and cannot be pushed to Production.</p></div></div>
@@ -287,6 +268,12 @@ export function VaultWorkspace({session}:{session:any}){
       <summary className="cursor-pointer font-semibold">3 · GitHub — send release/deployment settings to repositories (open only when needed)</summary>
       <p className="mt-2 text-xs text-muted-foreground">One GitHub token per account. Select repository secrets for release workflows or Production environment secrets for service deployment workflows. Do not copy the GitHub account connection token into a workflow.</p>
       <div className="mt-3"><VaultGithubSync session={session} records={records} onPersist={persist}/></div>
+    </details>
+    <details className="orbit-panel p-4">
+      <summary className="cursor-pointer text-xs font-semibold">Advanced · Restore lost account connections</summary>
+      <p className="mt-2 text-xs text-muted-foreground">Only needed if an older Vault import replaced the saved GitHub/Vercel account tokens. Normal imports now preserve them.</p>
+      <label className="button-secondary cursor-pointer inline-flex items-center gap-2 mt-2"><Upload size={14}/> Restore account connections from encrypted backup
+        <input type="file" className="sr-only" accept=".json,application/json" disabled={busy} onChange={e=>void restoreConnectionsFromBackup(e)}/></label>
     </details>
     <section className="orbit-panel overflow-hidden">
       <div className="border-b p-4"><h2 className="text-sm font-semibold mb-2">Saved Vault entries — all systems</h2><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
