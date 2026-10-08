@@ -170,6 +170,25 @@ export function VaultVercelSync({session,records,onPersist}:{
       setNotice(fetched.key+" imported from "+target.name+" Production as a separate encrypted Vault entry.");
     });
   }
+  async function importNamesOnly(){
+    if(!project || !inspected)throw new Error("Compare a Production project first.");
+    await run("import-names",async()=>{
+      const known=new Set(records.map(recordIdentity));
+      const additions:VaultRecord[]=[];
+      for(const item of envs){
+        if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(item.key) || isConnectionKey(item.key))continue;
+        const record:VaultRecord={
+          id:crypto.randomUUID(),systems:[systemForProject(project.name)],otherSystem:"",
+          service:"Vercel",customService:"",keyName:item.key,secret:"",usedIn:[account],
+          destinationSystem:project.name,needsReview:false,
+          vercelTargets:[{connection:account,projectId:project.id,projectName:project.name,keyName:item.key}]
+        };
+        if(!known.has(recordIdentity(record))){additions.push(record);known.add(recordIdentity(record));}
+      }
+      if(additions.length)await onPersist([...additions,...records]);
+      setNotice(additions.length+" exact Production key names added as blank encrypted Vault records. Protected values were not accessed. No Vercel variables were changed.");
+    });
+  }
   return <section className="orbit-panel p-4 space-y-4">
     <div className="orbit-section-head"><span className="orbit-section-icon"><Cloud size={15}/></span><div>
       <h2>Vercel Production sync</h2><p>Connect Main or Fallback · compare first · manual approval · Production only</p>
@@ -206,6 +225,12 @@ export function VaultVercelSync({session,records,onPersist}:{
         <div><p className="text-sm font-semibold">Vault → {project.name}</p>
           <p className="text-xs text-muted-foreground">{envs.length} existing Production variables · select exact Vault records below</p></div>
         <span className="text-xs rounded border px-2 py-1">Production only</span>
+      </div>
+      <div className="flex flex-wrap gap-2 items-center">
+        <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importNamesOnly()}>
+          <ArrowDownToLine size={14}/> Import exact names only (blank values)
+        </button>
+        <span className="text-xs text-muted-foreground">Reads project metadata, never secrets; also works for Sensitive variables.</span>
       </div>
       <div className="max-h-72 overflow-auto space-y-2">{eligible.map(row=>{
         const key=keyOverrides[row.id] ?? suggestedDestination(row,project);
