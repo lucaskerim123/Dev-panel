@@ -28,13 +28,9 @@ function suggestedDestination(row:VaultRecord, project:Project) {
   return prefix && row.keyName.startsWith(prefix) ? row.keyName.slice(prefix.length) : row.keyName;
 }
 function friendlySource(row:VaultRecord) {
-  const originalKey=row.keyName;
-  const origin=row.systems.includes("Vercel") ? "Vercel" :
-    originalKey.startsWith("LM_") ? "License Manager" :
-    originalKey.startsWith("BILLING_") ? "Billing Store" :
-    originalKey.startsWith("DEV_") ? "Dev Panel" : row.systems[0] || "Other";
-  const vercelTarget=row.vercelTargets?.[0];
-  return origin + " · " + labelOf(row) + (vercelTarget ? " · " + vercelTarget.projectName + " (" + vercelTarget.connection + ")" : "");
+  const origin = row.systems.join(" / ") || "Other";
+  const target = row.vercelTargets?.map(item => item.connection + " / " + item.projectName).join(", ");
+  return origin + " · " + row.service + (target ? " · Linked to: " + target : "");
 }
 export function VaultVercelSync({session,records,onPersist}:{
   session:any; records:VaultRecord[]; onPersist:(rows:VaultRecord[])=>Promise<void>;
@@ -59,6 +55,7 @@ export function VaultVercelSync({session,records,onPersist}:{
   const project = projects.find(p=>p.id===projectId) || null;
   const eligible = useMemo(()=>records.filter(row=>Boolean(row.secret?.trim()) && !PLACEHOLDER.test(row.secret.trim()) && !isConnectionKey(row.keyName)),[records]);
   const availableConfigs = inspected ? envs.filter(row=>row.type !== "sensitive" && row.visibility === "config" && planProductionKey(envs,row.key).action==="replace") : [];
+  const connectionStatus = tokenRow?.secret ? "Token saved in Vault · not yet verified" : "Not connected · add an account API token";
   function clearReview() {setReview([]);setAck("");}
   function switchAccount(next:Account) {
     setAccount(next);setTeamInput("");setTokenInput("");setProjects([]);setProjectId("");setEnvs([]);
@@ -193,7 +190,7 @@ export function VaultVercelSync({session,records,onPersist}:{
         <ShieldCheck size={14}/> Save encrypted connection</button>
       <button type="button" className="button-secondary" disabled={!!busy || !tokenRow}
         onClick={()=>void loadProjects()}><RefreshCw size={14}/> Load projects</button>
-      <span className="text-xs text-muted-foreground">{tokenRow?"Vault token saved":"No token saved"} · Production only</span>
+      <span className="text-xs text-muted-foreground">{connectionStatus} · Production only</span>
     </div>
     {projects.length>0&&<div className="flex flex-wrap items-end gap-2">
       <label className="block text-xs font-medium flex-1 min-w-48">Project<select className="control mt-1" value={projectId}
