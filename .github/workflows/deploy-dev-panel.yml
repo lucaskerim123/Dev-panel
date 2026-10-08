@@ -125,6 +125,10 @@ jobs:
         if: steps.profile.outputs.deploy == 'true'
         run: node --experimental-strip-types --test tests/vault-core.test.mjs
 
+      - name: Prevent Vault connection loss in imports
+        if: steps.profile.outputs.deploy == 'true'
+        run: node --experimental-strip-types --test tests/vault-connection-preservation.test.mjs
+
       - name: Verify exact Vault key schema and safe migration
         if: steps.profile.outputs.deploy == 'true'
         run: node --experimental-strip-types --test tests/vault-schema.test.mjs
