@@ -3,6 +3,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Cloud, RefreshCw, ShieldCheck } from 
 import type { VaultRecord } from "@/lib/vault-crypto";
 import { bestVaultConnection } from "@/lib/vault-connections";
 import { systemForProject, recordIdentity } from "@/lib/vault-schema";
+import { groupVaultItems, vaultSystemLabel } from "@/lib/vault-grouping";
 import { assessVercelVaultEntry, attachVercelVaultEntry, suggestUnsavedVercelKeys, addBlankVercelVaultEntry } from "@/lib/vault-vercel-selection";
 import { planProductionKey, type ProductionPlan, type VercelEnvMeta } from "@/lib/vercel-sync-policy";
 import {
@@ -59,6 +60,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
     return !term || [row.keyName,row.service,...row.systems,row.destinationSystem||"",row.purpose||""]
       .some(value=>value.toLowerCase().includes(term));
   }),[entries,keyQuery]);
+  const groupedVisibleEntries=groupVaultItems(visibleEntries,item=>item.row);
   const eligible = useMemo(()=>entries.filter(entry=>entry.assessment.status==="ready").map(entry=>entry.row),[entries]);
   const missingReferences=useMemo(()=>project ? suggestUnsavedVercelKeys(records,project.name,inspected?envs.map(x=>x.key):[]) : [],[records,project,inspected,envs]);
   const availableConfigs = inspected ? envs.filter(row=>row.type !== "sensitive" && row.visibility === "config" && planProductionKey(envs,row.key).action==="replace") : [];
@@ -265,7 +267,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
         <span className="text-xs text-muted-foreground">Reads project metadata, never secrets; also works for Sensitive variables.</span>
       </div>
       {missingReferences.length>0&&<details className="rounded border p-3 space-y-2">
-        <summary className="cursor-pointer text-xs font-semibold">{missingReferences.length} known variable names not yet saved in Vault (expand to add)</summary>
+        <summary className="cursor-pointer text-xs font-semibold">{vaultSystemLabel(systemForProject(project.name))} · {account==="main"?"Main":"Fallback"} · {missingReferences.length} reference names not yet saved (optional)</summary>
         <p className="text-xs text-muted-foreground mt-2">These names come from the Main Vercel inventory or this project's existing Production variables. They are references only, not saved credentials. Adding one creates a blank value in the encrypted Vault; it does not change Vercel.</p>
         <div className="max-h-52 overflow-auto mt-2 space-y-1">{missingReferences.map(name=>
           <div key={name} className="flex items-center justify-between gap-2 border-b py-2">
@@ -276,13 +278,29 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
         )}</div>
       </details>}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="text-xs font-medium flex-1 min-w-48">Find any saved Vault key
+        <label className="text-xs font-medium flex-1 min-w-48">Find a saved key across all systems
           <input className="control mt-1" type="search" placeholder="Search key name, system or purpose…" value={keyQuery}
             onChange={e=>setKeyQuery(e.target.value)} />
         </label>
         <span className="text-xs text-muted-foreground">{entries.length} saved · {eligible.length} ready · {entries.filter(e=>e.assessment.status==="attach").length} need attaching · {entries.filter(e=>e.assessment.status==="value").length} need a real value</span>
       </div>
-      <div className="max-h-96 overflow-auto space-y-2">{visibleEntries.map(({row,assessment})=>{
+      <div className="max-h-[34rem] overflow-auto space-y-3">
+        {groupedVisibleEntries.map(group=><details
+          key={group.system+"-"+(keyQuery.trim()?"search":"browse")}
+          open={Boolean(keyQuery.trim())||group.system===systemForProject(project.name)}
+          className="rounded-lg border">
+          <summary className="cursor-pointer flex flex-wrap items-center justify-between gap-2 px-3 py-3 text-sm font-semibold">
+            <span>{group.label}</span><span className="text-xs text-muted-foreground">{group.count} saved keys</span>
+          </summary>
+          <div className="border-t p-2 space-y-2">
+            {group.sections.map(section=><details
+              key={group.system+"-"+section.mode+"-"+(keyQuery.trim()?"search":"browse")}
+              open={Boolean(keyQuery.trim())||group.system===systemForProject(project.name)}
+              className="rounded-md border">
+              <summary className="cursor-pointer flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold">
+                <span>{section.label}</span><span className="text-muted-foreground">{section.items.length} keys</span>
+              </summary>
+              <div className="border-t p-2 space-y-2">{section.items.map(({row,assessment})=>{
         const plan=planProductionKey(envs,row.keyName.trim());
         const ready=assessment.status==="ready" && plan.action!=="blocked";
         const message=assessment.status==="ready"&&plan.action==="blocked"?"Vercel restriction: "+plan.reason:assessment.reason;
@@ -309,8 +327,11 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
             <span className="text-muted-foreground">{plan.action==="create"?"New Production key":plan.action==="replace"?"Existing Production key":plan.reason}</span>
           </div>}
         </div>;
-      })}
-      {!visibleEntries.length&&<p className="p-3 text-xs text-muted-foreground">No keys match this search. Clear the search to see every Vault entry; use Add to Vault above if the key is not saved yet.</p>}
+      })}</div>
+            </details>)}
+          </div>
+        </details>)}
+        {!groupedVisibleEntries.length&&<p className="p-3 text-xs text-muted-foreground">No saved keys match this search. Clear the search to see all systems, or add a reference name above.</p>}
       </div>
       <button type="button" className="button-secondary" disabled={!!busy || !selected.length}
         onClick={buildReview}><ArrowUpFromLine size={14}/> Review {selected.length} selected changes</button>
