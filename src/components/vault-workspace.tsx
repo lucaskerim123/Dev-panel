@@ -262,7 +262,7 @@ export function VaultWorkspace({session}:{session:any}){
     <details className="orbit-panel p-4" aria-label="Vercel Production sync">
       <summary className="cursor-pointer font-semibold">2 · Vercel — send keys to Production projects (open only when needed)</summary>
       <p className="mt-2 text-xs text-muted-foreground">Use one Vercel account at a time. Main and Fallback have separate projects. Select the relevant service, compare before writing, and skip unrelated keys.</p>
-      <div className="mt-3"><VaultVercelSync session={session} records={records} onPersist={persist}/></div>
+      <div className="mt-3"><VaultVercelSync session={session} records={records} onPersist={persist} onEdit={edit}/></div>
     </details>
     <details className="orbit-panel p-4" aria-label="GitHub Actions sync">
       <summary className="cursor-pointer font-semibold">3 · GitHub — send release/deployment settings to repositories (open only when needed)</summary>
