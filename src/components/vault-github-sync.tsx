@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpFromLine, Github, RefreshCw, ShieldCheck } from "lucide-react";
 import type { VaultRecord } from "@/lib/vault-crypto";
-import { intendedForGithubRepo } from "@/lib/vault-placement";
+import { allowedForGithubRepo, systemForProject, recordIdentity } from "@/lib/vault-schema";
 import {
   allowedVaultValue, planGithubKey, type GithubAccount, type GithubItem, type GithubKind,
   type GithubPlan, type GithubScope,
@@ -12,16 +12,9 @@ type Repository = {fullName:string;name:string;isPrivate:boolean};
 type Review = { id:string; key:string; kind:GithubKind; source:string; plan:GithubPlan };
 const TOKEN_KEYS:Record<GithubAccount,string>={main:"GITHUB_TOKEN_MAIN",fallback:"GITHUB_TOKEN_FALLBACK"};
 function connectionRow(records:VaultRecord[],account:GithubAccount){
-  return records.find(row=>row.systems.includes("GitHub") && row.service==="Deployment" && row.keyName===TOKEN_KEYS[account]);
+  return records.find(row=>row.keyName===TOKEN_KEYS[account]);
 }
-function suggestedDestination(row:VaultRecord,repo:Repository|null){
-  if(/^VERCEL_TOKEN_(MAIN|FALLBACK)$/.test(row.keyName))return "VERCEL_TOKEN";
-  if(!repo) return row.keyName;
-  const name=repo.name.toLowerCase();
-  const prefix=name.includes("licen") ? "LM_" : name.includes("billing") ? "BILLING_" : name.includes("dev-panel") ? "DEV_" : "";
-  if(prefix==="BILLING_" && row.keyName==="BILLING_API_TOKEN") return row.keyName;
-  return prefix && row.keyName.startsWith(prefix) ? row.keyName.slice(prefix.length) : row.keyName;
-}
+function suggestedDestination(row:VaultRecord,_repo:Repository|null){return row.keyName;}
 
 export function VaultGithubSync({session,records,onPersist}:{
   session:any;records:VaultRecord[];onPersist:(records:VaultRecord[])=>Promise<void>;
@@ -36,7 +29,6 @@ export function VaultGithubSync({session,records,onPersist}:{
   const [environmentName,setEnvironmentName]=useState<string|null>(null);
   const [inspected,setInspected]=useState(false);
   const [selected,setSelected]=useState<string[]>([]);
-  const [showAllKeys,setShowAllKeys]=useState(false);
   const [keyOverrides,setKeyOverrides]=useState<Record<string,string>>({});
   const [review,setReview]=useState<Review[]>([]);
   const [approval,setApproval]=useState(false);
@@ -45,16 +37,11 @@ export function VaultGithubSync({session,records,onPersist}:{
   const [notice,setNotice]=useState("");
   const tokenRow=connectionRow(records,account);
   const repository=repositories.find(r=>r.fullName===repoName)||null;
-  const eligible=useMemo(()=>records.filter(r=>{
-    if(!allowedVaultValue(r.secret))return false;
-    if(/^GITHUB_TOKEN_(MAIN|FALLBACK)$/.test(r.keyName))return false;
-    if(/^VERCEL_(TEAM_ID)_(MAIN|FALLBACK)$/.test(r.keyName))return false;
-    if(/^VERCEL_TOKEN_(MAIN|FALLBACK)$/.test(r.keyName))
-      return scope==="production" && kind==="secret" &&
-        r.keyName==="VERCEL_TOKEN_"+account.toUpperCase() &&
-        Boolean(repository && /dev-panel|control-centre|licen|billing/i.test(repository.name));
-    return true;
-  }),[records,account,scope,kind,repository]);
+  const eligible=useMemo(()=>records.filter(r=>Boolean(repository) &&
+    allowedForGithubRepo(r,repository!.fullName,account) &&
+    allowedVaultValue(r.secret) &&
+    !/^(GITHUB_TOKEN_(MAIN|FALLBACK)|VERCEL_(TOKEN|TEAM_ID)_(MAIN|FALLBACK))$/.test(r.keyName)
+  ),[records,account,repository]);
 
   function resetReview(){setReview([]);setApproval(false);}
   function resetComparison(){setInventory([]);setEnvironmentName(null);setInspected(false);setSelected([]);setKeyOverrides({});resetReview();}
@@ -74,11 +61,11 @@ export function VaultGithubSync({session,records,onPersist}:{
   }
   async function saveConnection(){
     await run("save",async()=>{
-      const value=tokenInput;
+      const value=tokenInput.trim() || tokenRow?.secret || "";
       const existing=connectionRow(records,account);
       const next=existing
         ? records.map(r=>r.id===existing.id?{...r,secret:value}:r)
-        : [{id:crypto.randomUUID(),systems:["GitHub"],otherSystem:"",service:"Deployment",customService:"",keyName:TOKEN_KEYS[account],secret:value},...records];
+        : [{id:crypto.randomUUID(),systems:["Dev"],otherSystem:"",service:"GitHub",customService:"",keyName:TOKEN_KEYS[account],secret:value,usedIn:[account],destinationSystem:"Vault connection",needsReview:false},...records];
       await onPersist(next);
       setTokenInput("");setRepositories([]);setRepoName("");resetComparison();
       setNotice("Encrypted GitHub connection saved. No GitHub settings changed; verify by loading repositories.");
@@ -200,8 +187,8 @@ export function VaultGithubSync({session,records,onPersist}:{
         <p className="text-xs text-muted-foreground">{inventory.length} existing entries in {repository.fullName} /
           {scope==="production"?(environmentName||"Production"):"Repository"} / {kind}s. No values retrieved.
           {kind==="variable"?" Warning: GitHub Actions variables are not secret and can be read by permitted users.":""}</p>
-        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={showAllKeys} onChange={e=>setShowAllKeys(e.target.checked)}/> Show all Vault keys (advanced; otherwise only likely keys for this repo)</label>
-        <div className="max-h-72 overflow-auto space-y-1">{(showAllKeys || !repository ? eligible : eligible.filter(row=>intendedForGithubRepo(row,repository.fullName))).map(row=>{
+        <p className="text-xs text-muted-foreground">Only keys explicitly assigned to this account and exact repository are available for writing. Import verified names below or edit a Vault entry to assign it.</p>
+        <div className="max-h-72 overflow-auto space-y-1">{eligible.map(row=>{
           const key=keyOverrides[row.id]??suggestedDestination(row,repository);
           const plan=planGithubKey(inventory,key.trim());
           const checked=selected.includes(row.id);
