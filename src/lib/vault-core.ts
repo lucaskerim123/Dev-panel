@@ -53,6 +53,8 @@ export const CORE_GROUPS: CoreGroup[] = [
     spec("LM_GITHUB_RELEASE_TOKEN","GitHub","Deployment","License Manager · artifact access"),
     spec("LM_GITHUB_TOKEN","GitHub","API","License Manager · GitHub API"),
     spec("LM_GITHUB_ACTIONS_TOKEN","GitHub","Deployment","License Manager · Actions"),
+    spec("LM_ORBITFS_RELEASE_DISPATCH_TOKEN","GitHub","Deployment","License Manager · repository access for release dispatch"),
+    spec("LM_AUTHORITY_LOCKDOWN_RECOVERY_TOKEN","License Manager","API","License Manager · emergency authority recovery token (keep service-only)"),
     spec("LM_ORBITFS_FALLBACK_GITHUB_TOKEN","GitHub","Deployment","License Manager · Fallback GitHub account preflight"),
     spec("LM_ORBITFS_MAIN_VERCEL_TOKEN","Vercel","Deployment","License Manager · verify Main Vercel projects"),
     spec("LM_ORBITFS_FALLBACK_VERCEL_TOKEN","Vercel","Deployment","License Manager · verify Fallback Vercel projects"),
