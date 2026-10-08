@@ -57,7 +57,7 @@ function normalizeEnvironment(v: any): VercelEnvMeta {
 }
 async function readEnvironments(input: ProjectInput) {
   const response = await vercelApi<{envs?: unknown[]}>(
-    "/v10/projects/" + encodeURIComponent(input.projectId) + "/env" + scope(input.teamId),
+    "/v9/projects/" + encodeURIComponent(input.projectId) + "/env" + scope(input.teamId),
     input.vercelToken
   );
   if (!Array.isArray(response?.envs)) throw new Error("Vercel did not return an environment inventory.");
@@ -93,7 +93,7 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
     // Compare a fresh server-side snapshot to the exact action reviewed in the browser.
     const current = await readEnvironments(data);
     const plan = assertReviewedProductionWrite(current, data);
-    const projectPath = "/v10/projects/" + encodeURIComponent(data.projectId) + "/env";
+    const projectPath = "/v9/projects/" + encodeURIComponent(data.projectId) + "/env";
     if (plan.action === "create") {
       await vercelApi(projectPath + scope(data.teamId), data.vercelToken, {
         method: "POST",
@@ -125,7 +125,7 @@ export const importVaultVercelConfig = createServerFn({method:"POST"}).handler(
     if (item.visibility !== "config" || item.type === "sensitive" || planProductionKey(envs,item.key).action !== "replace")
       throw new Error("Only readable, Production-only Vercel Config variables can be imported.");
     const response = await vercelApi<any>(
-      "/v10/projects/" + encodeURIComponent(data.projectId) + "/env/" + encodeURIComponent(item.id) + scope(data.teamId),
+      "/v1/projects/" + encodeURIComponent(data.projectId) + "/env/" + encodeURIComponent(item.id) + scope(data.teamId),
       data.vercelToken
     );
     if (response?.decrypted !== true || typeof response?.value !== "string" || !response.value.length)
