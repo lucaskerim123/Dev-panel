@@ -109,16 +109,17 @@ export function VaultVercelSync({session,records,onPersist}:{
   function buildReview() {
     if (!project || !inspected) {setError("Inspect the selected project's Production variables first.");return;}
     const rows = eligible.filter(row=>selected.includes(row.id)).map(row=>{
-      const key=(keyOverrides[row.id] ?? suggestedDestination(row,project)).trim();
+      const key=row.keyName.trim();
       return {id:row.id,source:friendlySource(row),key,plan:planProductionKey(envs,key)};
     });
     if (!rows.length) {setError("Choose at least one Vault entry.");return;}
+    if(rows.some(x=>records.find(r=>r.id===x.id)?.keyName!==x.key)) {setError("Destination name must exactly match the verified Vault name. Edit the entry itself first.");return;}
     const duplicateKeys=new Set<string>();
     for(const item of rows) {
       if (duplicateKeys.has(item.key)) {setError("Two selected Vault entries target "+item.key+". Choose one source for this Production variable, or give them different destination names.");return;}
       duplicateKeys.add(item.key);
     }
-    setError("");setNotice("");setReview(rows);setAck("");
+    setError("");setNotice("");setReview(rows);setAck(false);
   }
   async function applyReviewed() {
     if (!project || !ack || !review.length || review.some(row=>row.plan.action==="blocked")) return;
@@ -233,7 +234,7 @@ export function VaultVercelSync({session,records,onPersist}:{
         <span className="text-xs text-muted-foreground">Reads project metadata, never secrets; also works for Sensitive variables.</span>
       </div>
       <div className="max-h-72 overflow-auto space-y-2">{eligible.map(row=>{
-        const key=keyOverrides[row.id] ?? suggestedDestination(row,project);
+        const key=row.keyName;
         const plan=planProductionKey(envs,key.trim());
         return <div key={row.id} className="border rounded p-2">
           <label className="flex gap-2 items-start text-xs">
@@ -243,8 +244,7 @@ export function VaultVercelSync({session,records,onPersist}:{
             <span><strong className="font-mono">{row.keyName}</strong><span className="block text-muted-foreground">From: {friendlySource(row)}</span></span>
           </label>
           {selected.includes(row.id)&&<div className="ml-5 mt-2 flex flex-wrap items-center gap-2 text-xs">
-            <label className="flex-1">Destination key<input className="control mt-1 font-mono" value={key}
-              onChange={e=>{setKeyOverrides(prev=>({...prev,[row.id]:e.target.value}));clearReview();}}/></label>
+            <label className="flex-1">Destination key (exact name)<input className="control mt-1 font-mono" value={key} readOnly/></label>
             <span className="text-muted-foreground">{plan.action==="create"?"New Production key":plan.action==="replace"?"Exists in Production":"Blocked: "+plan.reason}</span>
           </div>}</div>;
       })}</div>
