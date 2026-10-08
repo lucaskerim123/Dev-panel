@@ -222,7 +222,7 @@ export function VaultWorkspace({session}:{session:any}){
     {error&&<div className="rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
     {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">{notice}</div>}
     <div className="orbit-panel p-4 space-y-2">
-      <h2 className="text-base font-semibold">Vault · exact-name inventory</h2>
+      <h2 className="text-base font-semibold">Vault · organised by system</h2>
       <p className="text-xs text-muted-foreground">Service is the provider. System is the OrbitFS product. Every key is tied to an explicit account mode and exact destination; prefixes are never guessed during sync.</p>
       <p className="text-xs text-muted-foreground">{records.length} saved entries · {needingReview.length} need destination review. Verified Production names below come from real Main Vercel settings, not invented runtime requirements.</p>
       {pendingMigration&&<div className="rounded border p-3 space-y-2">
@@ -232,6 +232,25 @@ export function VaultWorkspace({session}:{session:any}){
         <button type="button" className="button-secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError("");try{await persist(records);setPendingMigration(null);setNotice("Corrected Vault names saved in encrypted storage. No Vercel or GitHub variables changed.");}catch(e:any){setError(e?.message||"Could not save migration")}finally{setBusy(false)}})()}>Save reviewed Vault migration</button>
       </div>}
     </div>
+    <section className="orbit-panel overflow-hidden">
+      <div className="border-b p-4"><h2 className="text-sm font-semibold mb-1">Saved keys · by system and account</h2><p className="text-xs text-muted-foreground mb-3">Open a system, then Main or Fallback. Entries used in both accounts appear in both groups. Search expands matching groups.</p><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
+      <div className="p-3 space-y-3">
+        {groupedEntries.map(group=><details key={group.system+"-"+(query.trim()?"search":"browse")} open={Boolean(query.trim())||group.system==="Billing"} className="rounded-lg border">
+          <summary className="cursor-pointer flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
+            <span>{group.label}</span><span className="text-xs text-muted-foreground">{group.count} saved keys</span>
+          </summary>
+          <div className="border-t p-3 space-y-2">
+            {group.sections.map(section=><details key={group.system+"-"+section.mode+"-"+(query.trim()?"search":"browse")} open={Boolean(query.trim())||section.mode==="main"} className="rounded-md border">
+              <summary className="cursor-pointer flex justify-between items-center gap-2 px-3 py-2 text-xs font-semibold">
+                <span>{section.label}</span><span className="text-muted-foreground">{section.items.length} keys</span>
+              </summary>
+              <div className="border-t">{section.items.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">From: {row.systems.join(" / ")} · {row.service}{row.vercelTargets?.length?` · Linked to: ${row.vercelTargets.map(target=>target.connection+" / "+target.projectName).join(", ")}`:""}</p>{row.purpose&&<p className="mt-1 text-xs text-muted-foreground">{row.purpose}</p>}<p className="mt-1 text-xs"><strong>Used in:</strong> {(row.usedIn||[]).map(m=>m==="main"?"Main":"Fallback").join(" / ")||"Needs review"} · <strong>Destination:</strong> {row.destinationSystem||"Not assigned"} {row.legacyKeyName&&<span className="block text-amber-500">Legacy key: {row.legacyKeyName} → {row.keyName}</span>}{row.needsReview&&<span className="block text-amber-500">Unverified legacy key/destination · edit before syncing</span>}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?(row.secret||"(blank)"):(row.secret?"••••••••••••":"(blank)")}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}</div>
+            </details>)}
+          </div>
+        </details>)}
+        {!groupedEntries.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}
+      </div>
+    </section>
     <form id="vault-entry-editor" onSubmit={save} className="orbit-panel p-4">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit saved key":"Add a missing key"}</h2><p>Values are encrypted before saving. A blank value is allowed as an inventory reminder and cannot be pushed to Production.</p></div></div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -276,25 +295,6 @@ export function VaultWorkspace({session}:{session:any}){
       <label className="button-secondary cursor-pointer inline-flex items-center gap-2 mt-2"><Upload size={14}/> Restore account connections from encrypted backup
         <input type="file" className="sr-only" accept=".json,application/json" disabled={busy} onChange={e=>void restoreConnectionsFromBackup(e)}/></label>
     </details>
-    <section className="orbit-panel overflow-hidden">
-      <div className="border-b p-4"><h2 className="text-sm font-semibold mb-1">Saved keys · by system and account</h2><p className="text-xs text-muted-foreground mb-3">Open a system, then Main or Fallback. Entries used in both accounts appear in both groups. Search expands matching groups.</p><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
-      <div className="p-3 space-y-3">
-        {groupedEntries.map(group=><details key={group.system+"-"+(query.trim()?"search":"browse")} open={Boolean(query.trim())||group.system==="Billing"} className="rounded-lg border">
-          <summary className="cursor-pointer flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
-            <span>{group.label}</span><span className="text-xs text-muted-foreground">{group.count} saved keys</span>
-          </summary>
-          <div className="border-t p-3 space-y-2">
-            {group.sections.map(section=><details key={group.system+"-"+section.mode+"-"+(query.trim()?"search":"browse")} open={Boolean(query.trim())||section.mode==="main"} className="rounded-md border">
-              <summary className="cursor-pointer flex justify-between items-center gap-2 px-3 py-2 text-xs font-semibold">
-                <span>{section.label}</span><span className="text-muted-foreground">{section.items.length} keys</span>
-              </summary>
-              <div className="border-t">{section.items.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">From: {row.systems.join(" / ")} · {row.service}{row.vercelTargets?.length?` · Linked to: ${row.vercelTargets.map(target=>target.connection+" / "+target.projectName).join(", ")}`:""}</p>{row.purpose&&<p className="mt-1 text-xs text-muted-foreground">{row.purpose}</p>}<p className="mt-1 text-xs"><strong>Used in:</strong> {(row.usedIn||[]).map(m=>m==="main"?"Main":"Fallback").join(" / ")||"Needs review"} · <strong>Destination:</strong> {row.destinationSystem||"Not assigned"} {row.legacyKeyName&&<span className="block text-amber-500">Legacy key: {row.legacyKeyName} → {row.keyName}</span>}{row.needsReview&&<span className="block text-amber-500">Unverified legacy key/destination · edit before syncing</span>}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?(row.secret||"(blank)"):(row.secret?"••••••••••••":"(blank)")}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}</div>
-            </details>)}
-          </div>
-        </details>)}
-        {!groupedEntries.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}
-      </div>
-    </section>
     <details className="orbit-panel p-3">
       <summary className="cursor-pointer text-xs font-semibold">Reference key library (optional — not saved credentials)</summary>
       <p className="mt-2 text-xs text-muted-foreground">These are examples from Vercel and GitHub. Expand only when you need a name that is not already in the saved keys above.</p>
