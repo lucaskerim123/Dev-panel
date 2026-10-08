@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, Cloud, RefreshCw, ShieldCheck } from "lucide-react";
 import type { VaultRecord } from "@/lib/vault-crypto";
+import { intendedForVercelProject } from "@/lib/vault-placement";
 import { planProductionKey, type ProductionPlan, type VercelEnvMeta } from "@/lib/vercel-sync-policy";
 import {
   listVaultVercelProjects, inspectVaultVercelProduction,
@@ -22,6 +23,13 @@ function findConnection(records:VaultRecord[], key:string) {
 }
 function suggestedDestination(row:VaultRecord, project:Project) {
   const scope = project.name.toLowerCase();
+  if(scope.includes("licen")){
+    const overrides:Record<string,string>={
+      GITHUB_TOKEN_MAIN:"ORBITFS_PRIMARY_GITHUB_TOKEN",GITHUB_TOKEN_FALLBACK:"ORBITFS_FALLBACK_GITHUB_TOKEN",
+      VERCEL_TOKEN_MAIN:"ORBITFS_MAIN_VERCEL_TOKEN",VERCEL_TOKEN_FALLBACK:"ORBITFS_FALLBACK_VERCEL_TOKEN"
+    };
+    if(overrides[row.keyName])return overrides[row.keyName];
+  }
   const prefix = scope.includes("licen") ? "LM_" : scope.includes("billing") ? "BILLING_" : scope.includes("dev-panel") || scope.includes("deploy-panel") ? "DEV_" : "";
   // BILLING_API_TOKEN is already its real environment name, not API_TOKEN.
   if (prefix === "BILLING_" && row.keyName === "BILLING_API_TOKEN") return row.keyName;
@@ -43,9 +51,10 @@ export function VaultVercelSync({session,records,onPersist}:{
   const [envs,setEnvs] = useState<VercelEnvMeta[]>([]);
   const [inspected,setInspected] = useState(false);
   const [selected,setSelected] = useState<string[]>([]);
+  const [showAllKeys,setShowAllKeys] = useState(false);
   const [keyOverrides,setKeyOverrides] = useState<Record<string,string>>({});
   const [review,setReview] = useState<Review[]>([]);
-  const [ack,setAck] = useState("");
+  const [ack,setAck] = useState(false);
   const [busy,setBusy] = useState("");
   const [error,setError] = useState("");
   const [notice,setNotice] = useState("");
@@ -53,10 +62,15 @@ export function VaultVercelSync({session,records,onPersist}:{
   const teamRow = findConnection(records,"VERCEL_TEAM_ID_"+account.toUpperCase());
   const teamId = teamRow?.secret || DEFAULT_TEAMS[account];
   const project = projects.find(p=>p.id===projectId) || null;
-  const eligible = useMemo(()=>records.filter(row=>Boolean(row.secret?.trim()) && !PLACEHOLDER.test(row.secret.trim()) && !isConnectionKey(row.keyName)),[records]);
+  const eligible = useMemo(()=>records.filter(row=>{
+    if(!row.secret?.trim()||PLACEHOLDER.test(row.secret.trim()))return false;
+    const isAccountToken=/^(GITHUB_TOKEN|VERCEL_TOKEN)_(MAIN|FALLBACK)$/.test(row.keyName);
+    if(isAccountToken)return Boolean(project && /licen/i.test(project.name));
+    return !isConnectionKey(row.keyName);
+  }),[records,project]);
   const availableConfigs = inspected ? envs.filter(row=>row.type !== "sensitive" && row.visibility === "config" && planProductionKey(envs,row.key).action==="replace") : [];
   const connectionStatus = tokenRow?.secret ? "Token saved in Vault · not yet verified" : "Not connected · add an account API token";
-  function clearReview() {setReview([]);setAck("");}
+  function clearReview() {setReview([]);setAck(false);}
   function switchAccount(next:Account) {
     setAccount(next);setTeamInput("");setTokenInput("");setProjects([]);setProjectId("");setEnvs([]);
     setInspected(false);setSelected([]);setKeyOverrides({});clearReview();setError("");setNotice("");
@@ -122,7 +136,7 @@ export function VaultVercelSync({session,records,onPersist}:{
     setError("");setNotice("");setReview(rows);setAck("");
   }
   async function applyReviewed() {
-    if (!project || ack!=="PRODUCTION" || !review.length || review.some(row=>row.plan.action==="blocked")) return;
+    if (!project || !ack || !review.length || review.some(row=>row.plan.action==="blocked")) return;
     const sameProject=project;
     await run("apply",async()=>{
       let applied=0;
@@ -192,6 +206,7 @@ export function VaultVercelSync({session,records,onPersist}:{
         onClick={()=>void loadProjects()}><RefreshCw size={14}/> Load projects</button>
       <span className="text-xs text-muted-foreground">{connectionStatus} · Production only</span>
     </div>
+    {project&&<label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={showAllKeys} onChange={e=>setShowAllKeys(e.target.checked)}/> Show all Vault keys (advanced; otherwise only keys for this service)</label>}
     {projects.length>0&&<div className="flex flex-wrap items-end gap-2">
       <label className="block text-xs font-medium flex-1 min-w-48">Project<select className="control mt-1" value={projectId}
         onChange={e=>{setProjectId(e.target.value);setInspected(false);setEnvs([]);setSelected([]);clearReview();}}>
@@ -207,7 +222,7 @@ export function VaultVercelSync({session,records,onPersist}:{
           <p className="text-xs text-muted-foreground">{envs.length} existing Production variables · select exact Vault records below</p></div>
         <span className="text-xs rounded border px-2 py-1">Production only</span>
       </div>
-      <div className="max-h-72 overflow-auto space-y-2">{eligible.map(row=>{
+      <div className="max-h-72 overflow-auto space-y-2">{(showAllKeys || !project ? eligible : eligible.filter(row=>intendedForVercelProject(row,project.name))).map(row=>{
         const key=keyOverrides[row.id] ?? suggestedDestination(row,project);
         const plan=planProductionKey(envs,key.trim());
         return <div key={row.id} className="border rounded p-2">
@@ -233,9 +248,9 @@ export function VaultVercelSync({session,records,onPersist}:{
           {row.plan.action==="blocked"&&<span className="block text-red-300">{row.plan.reason}</span>}
         </p>)}
         <p className="text-xs text-muted-foreground">Existing Production-only values will be replaced. No rollback is automatic and secrets cannot be verified by reading them back.</p>
-        <label className="block text-xs font-medium">Type PRODUCTION to approve<input className="control mt-1" value={ack}
-          onChange={e=>setAck(e.target.value)} autoComplete="off"/></label>
-        <button type="button" className="button-primary" disabled={!!busy || ack!=="PRODUCTION" || review.some(r=>r.plan.action==="blocked")}
+        <label className="flex items-center gap-2 text-xs font-medium"><input type="checkbox" checked={ack} onChange={e=>setAck(e.target.checked)}/>
+          I checked each destination key and approve the Production changes.</label>
+        <button type="button" className="button-primary" disabled={!!busy || !ack || review.some(r=>r.plan.action==="blocked")}
           onClick={()=>void applyReviewed()}>Apply {review.length} reviewed Production changes</button>
       </div>}
       <div className="border-t pt-3 space-y-2">

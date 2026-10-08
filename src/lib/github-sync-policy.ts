@@ -18,6 +18,8 @@ export function planGithubKey(items: GithubItem[], key: string): GithubPlan {
     return { action: "blocked", key, reason: "Invalid GitHub Actions variable/secret name." };
   if (CONNECTION_NAMES.test(key))
     return { action: "blocked", key, reason: "Vault connection tokens cannot be pushed into GitHub Actions." };
+  if (/^(LM_)?(MASTER_API_TOKEN|DATABASE_URL|SUPABASE_SERVICE_ROLE_KEY|BOOTSTRAP_ADMIN_PASSWORD|AUTHORITY_LOCKDOWN_RECOVERY_TOKEN)$/i.test(key))
+    return {action:"blocked",key,reason:"Authority and database root secrets must stay in their owning Vercel service, not GitHub Actions."};
   const matches = items.filter(item => item.name.toUpperCase() === key.toUpperCase());
   if (!matches.length) return { action: "create", key, expectedUpdatedAt: null };
   if (matches.length !== 1 || !matches[0]?.updatedAt)

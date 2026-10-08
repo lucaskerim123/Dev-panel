@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Copy, Eye, EyeOff, Pencil, Plus } from "lucide-react";
 import type { VaultRecord } from "@/lib/vault-crypto";
 import { CORE_GROUPS, coreMatches, coreSpecOf, coreStatus, isCoreRecord, type CoreSpec } from "@/lib/vault-core";
+import { whereDoesThisGo } from "@/lib/vault-placement";
 
 type Props = {
   records: VaultRecord[];
@@ -33,6 +34,9 @@ export function VaultCoreSection({records,onEdit}:Props) {
         <div className="min-w-0 flex-1">
           <p className="font-mono text-xs font-semibold break-all">{key}</p>
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          <p className="mt-1 text-xs"><strong>Goes to: </strong>{whereDoesThisGo(record||{
+            keyName:key,systems:[spec?.system||"Other"],service:spec?.service||"Environment"
+          }).destination}</p>
           <p className={status==="filled"?"mt-1 text-xs text-muted-foreground":"mt-1 text-xs font-semibold text-amber-500"}>
             {statusLabel(record?.secret)}{record?" · "+record.systems.join(" / ")+" · "+record.service:""}
           </p>
@@ -58,11 +62,11 @@ export function VaultCoreSection({records,onEdit}:Props) {
     <div className="flex items-start gap-3">
       <AlertTriangle className="shrink-0 text-amber-500 mt-1" size={20}/>
       <div className="space-y-1">
-        <h2 className="text-base font-semibold">Core Production credentials and connections</h2>
+        <h2 className="text-base font-semibold">1 · Important keys — fill in what you know</h2>
         <p className="text-xs">Separate from the ordinary Vault key list. These are important connections collected from the Dev Panel,
           Billing Store and License Manager Production environment references, plus existing runtime requirements.</p>
         <p className="text-xs text-amber-500 font-semibold">{outstanding} expected core entries not filled with a normal value.
-          Orange is a reminder only — you can add, edit or save blank values, change-me or any other text. No Vault save restriction.</p>
+          Orange is a reminder only. Blank and change-me can always be saved; they are not automatically pushed to production.</p>
         <p className="text-xs text-muted-foreground">Values are encrypted inside your existing Vault. Save the actual credentials yourself;
           no values from the uploaded reference files are added to application source code. Syncing to GitHub or Vercel is a separate reviewed operation.</p>
       </div>
@@ -70,7 +74,7 @@ export function VaultCoreSection({records,onEdit}:Props) {
     {CORE_GROUPS.map((group,index)=>{
       const filled=group.entries.filter(spec=>coreStatus(records.find(row=>coreMatches(row,spec))?.secret)==="filled").length;
       return <details key={group.title} className="rounded-lg border border-amber-500/30 bg-background/40 p-3" open={index===0}>
-        <summary className="cursor-pointer text-sm font-semibold">
+        <summary className="cursor-pointer text-sm font-semibold" aria-label={`Show or hide ${group.title} credentials`}>
           {group.title} · {filled}/{group.entries.length} values saved
         </summary>
         <p className="mt-2 text-xs text-muted-foreground">{group.purpose}</p>

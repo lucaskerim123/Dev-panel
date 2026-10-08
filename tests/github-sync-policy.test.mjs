@@ -24,6 +24,10 @@ test("reject placeholders and unsafe empty values", () => {
   for(const value of ["","change-me","REPLACE_WITH_SECRET","your-key","todo","  "]) assert.equal(allowedVaultValue(value),false);
   assert.equal(allowedVaultValue("legitimate-production-secret"),true);
 });
+test("root database and master authority secrets never go to GitHub Actions",()=>{
+  for(const key of ["MASTER_API_TOKEN","LM_MASTER_API_TOKEN","DATABASE_URL","LM_DATABASE_URL","SUPABASE_SERVICE_ROLE_KEY","BOOTSTRAP_ADMIN_PASSWORD"])
+    assert.equal(planGithubKey([],key).action,"blocked",key);
+});
 test("GitHub scopes are distinct and only allow Production", () => {
   assert.equal(GITHUB_OWNERS.main,"lucaskerim123");
   assert.equal(GITHUB_OWNERS.fallback,"remipetrovich-design");

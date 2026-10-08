@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpFromLine, Github, RefreshCw, ShieldCheck } from "lucide-react";
 import type { VaultRecord } from "@/lib/vault-crypto";
+import { intendedForGithubRepo } from "@/lib/vault-placement";
 import {
   allowedVaultValue, planGithubKey, type GithubAccount, type GithubItem, type GithubKind,
   type GithubPlan, type GithubScope,
@@ -14,6 +15,7 @@ function connectionRow(records:VaultRecord[],account:GithubAccount){
   return records.find(row=>row.systems.includes("GitHub") && row.service==="Deployment" && row.keyName===TOKEN_KEYS[account]);
 }
 function suggestedDestination(row:VaultRecord,repo:Repository|null){
+  if(/^VERCEL_TOKEN_(MAIN|FALLBACK)$/.test(row.keyName))return "VERCEL_TOKEN";
   if(!repo) return row.keyName;
   const name=repo.name.toLowerCase();
   const prefix=name.includes("licen") ? "LM_" : name.includes("billing") ? "BILLING_" : name.includes("dev-panel") ? "DEV_" : "";
@@ -34,18 +36,27 @@ export function VaultGithubSync({session,records,onPersist}:{
   const [environmentName,setEnvironmentName]=useState<string|null>(null);
   const [inspected,setInspected]=useState(false);
   const [selected,setSelected]=useState<string[]>([]);
+  const [showAllKeys,setShowAllKeys]=useState(false);
   const [keyOverrides,setKeyOverrides]=useState<Record<string,string>>({});
   const [review,setReview]=useState<Review[]>([]);
-  const [approval,setApproval]=useState("");
+  const [approval,setApproval]=useState(false);
   const [busy,setBusy]=useState("");
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   const tokenRow=connectionRow(records,account);
   const repository=repositories.find(r=>r.fullName===repoName)||null;
-  const eligible=useMemo(()=>records.filter(r=>allowedVaultValue(r.secret)
-    && !/^(GITHUB_TOKEN(?:_(MAIN|FALLBACK))?|GH_TOKEN|VERCEL_(TOKEN|TEAM_ID)_(MAIN|FALLBACK))$/i.test(r.keyName)),[records]);
+  const eligible=useMemo(()=>records.filter(r=>{
+    if(!allowedVaultValue(r.secret))return false;
+    if(/^GITHUB_TOKEN_(MAIN|FALLBACK)$/.test(r.keyName))return false;
+    if(/^VERCEL_(TEAM_ID)_(MAIN|FALLBACK)$/.test(r.keyName))return false;
+    if(/^VERCEL_TOKEN_(MAIN|FALLBACK)$/.test(r.keyName))
+      return scope==="production" && kind==="secret" &&
+        r.keyName==="VERCEL_TOKEN_"+account.toUpperCase() &&
+        Boolean(repository && /dev-panel|control-centre|licen|billing/i.test(repository.name));
+    return true;
+  }),[records,account,scope,kind,repository]);
 
-  function resetReview(){setReview([]);setApproval("");}
+  function resetReview(){setReview([]);setApproval(false);}
   function resetComparison(){setInventory([]);setEnvironmentName(null);setInspected(false);setSelected([]);setKeyOverrides({});resetReview();}
   useEffect(()=>{resetReview()},[records]);
   function chooseAccount(next:GithubAccount){
@@ -104,7 +115,7 @@ export function VaultGithubSync({session,records,onPersist}:{
     setReview(rows);
   }
   async function applyReviewed(){
-    if(!repository || !inspected || !review.length || approval!=="PRODUCTION" || review.some(r=>r.plan.action==="blocked")){
+    if(!repository || !inspected || !review.length || !approval || review.some(r=>r.plan.action==="blocked")){
       setError("Review changes and type PRODUCTION before applying.");return;
     }
     const reviewedRepo=repository,reviewedAccount=account,reviewedScope=scope,reviewedKind=kind;
@@ -189,7 +200,8 @@ export function VaultGithubSync({session,records,onPersist}:{
         <p className="text-xs text-muted-foreground">{inventory.length} existing entries in {repository.fullName} /
           {scope==="production"?(environmentName||"Production"):"Repository"} / {kind}s. No values retrieved.
           {kind==="variable"?" Warning: GitHub Actions variables are not secret and can be read by permitted users.":""}</p>
-        <div className="max-h-72 overflow-auto space-y-1">{eligible.map(row=>{
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={showAllKeys} onChange={e=>setShowAllKeys(e.target.checked)}/> Show all Vault keys (advanced; otherwise only likely keys for this repo)</label>
+        <div className="max-h-72 overflow-auto space-y-1">{(showAllKeys || !repository ? eligible : eligible.filter(row=>intendedForGithubRepo(row,repository.fullName))).map(row=>{
           const key=keyOverrides[row.id]??suggestedDestination(row,repository);
           const plan=planGithubKey(inventory,key.trim());
           const checked=selected.includes(row.id);
@@ -223,9 +235,9 @@ export function VaultGithubSync({session,records,onPersist}:{
             {r.plan.action==="blocked"&&<span className="block text-red-300">{r.plan.reason}</span>}
           </p>)}
           <p className="text-xs text-muted-foreground">GitHub updates are not automatically reversible. Only metadata presence is verifiable for secrets; the original value is not readable from GitHub.</p>
-          <label className="block text-xs font-medium">Type PRODUCTION to approve
-            <input className="control mt-1" autoComplete="off" value={approval} onChange={e=>setApproval(e.target.value)}/></label>
-          <button type="button" className="button-primary" disabled={!!busy || approval!=="PRODUCTION" || review.some(r=>r.plan.action==="blocked")}
+          <label className="flex items-center gap-2 text-xs font-medium"><input type="checkbox" checked={approval} onChange={e=>setApproval(e.target.checked)}/>
+            I checked the repository, environment and names. Approve these Production changes.</label>
+          <button type="button" className="button-primary" disabled={!!busy || !approval || review.some(r=>r.plan.action==="blocked")}
             onClick={()=>void applyReviewed()}>Apply {review.length} reviewed GitHub entries</button>
         </div>}
       </div>}
