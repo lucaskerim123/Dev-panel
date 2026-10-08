@@ -39,11 +39,18 @@ export const VERIFIED_MAIN_KEYS = new Set(MAIN_VERCEL_INVENTORY.map(x=>x.name));
 
 // GitHub names are workflow SOURCE REFERENCES, not claimed to be already configured GitHub secrets.
 export const GITHUB_WORKFLOW_REFERENCES = [
- {system:"License" as VaultSystem,name:"VERCEL_TOKEN",repo:"remipetrovich-design/OrbitFS-License-Administration",usedIn:"fallback" as VaultMode},
+ {system:"Dev" as VaultSystem,name:"VERCEL_TOKEN",repo:"lucaskerim123/Dev-panel",usedIn:"main" as VaultMode},
+ {system:"Dev" as VaultSystem,name:"LICENSE_MASTER_API_TOKEN",repo:"lucaskerim123/Dev-panel",usedIn:"main" as VaultMode},
+ {system:"Dev" as VaultSystem,name:"LICENSE_MASTER_URL",repo:"lucaskerim123/Dev-panel",usedIn:"main" as VaultMode},
+ {system:"Dev" as VaultSystem,name:"ORBITFS_RELEASE_DISPATCH_TOKEN",repo:"lucaskerim123/Dev-panel",usedIn:"main" as VaultMode},
  {system:"Billing" as VaultSystem,name:"VERCEL_TOKEN",repo:"lucaskerim123/V2_Billing_Store",usedIn:"main" as VaultMode},
  {system:"Billing" as VaultSystem,name:"SUPABASE_ACCESS_TOKEN",repo:"lucaskerim123/V2_Billing_Store",usedIn:"main" as VaultMode},
  {system:"Billing" as VaultSystem,name:"VERCEL_TOKEN",repo:"remipetrovich-design/OrbitFS-Billing-Shopfront",usedIn:"fallback" as VaultMode},
  {system:"Billing" as VaultSystem,name:"SUPABASE_ACCESS_TOKEN",repo:"remipetrovich-design/OrbitFS-Billing-Shopfront",usedIn:"fallback" as VaultMode},
+ {system:"Base System" as VaultSystem,name:"LICENSE_MASTER_API_TOKEN",repo:"lucaskerim123/V1-vercel-base",usedIn:"main" as VaultMode},
+ {system:"Base System" as VaultSystem,name:"LICENSE_MASTER_URL",repo:"lucaskerim123/V1-vercel-base",usedIn:"main" as VaultMode},
+ {system:"Shared Engine" as VaultSystem,name:"LICENSE_MASTER_API_TOKEN",repo:"lucaskerim123/V1-vercel-engine",usedIn:"main" as VaultMode},
+ {system:"Shared Engine" as VaultSystem,name:"LICENSE_MASTER_URL",repo:"lucaskerim123/V1-vercel-engine",usedIn:"main" as VaultMode},
 ] as const;
 
 export function systemForProject(name:string):VaultSystem {
