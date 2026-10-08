@@ -3,7 +3,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Cloud, RefreshCw, ShieldCheck } from 
 import type { VaultRecord } from "@/lib/vault-crypto";
 import { bestVaultConnection } from "@/lib/vault-connections";
 import { systemForProject, recordIdentity } from "@/lib/vault-schema";
-import { assessVercelVaultEntry, attachVercelVaultEntry } from "@/lib/vault-vercel-selection";
+import { assessVercelVaultEntry, attachVercelVaultEntry, suggestUnsavedVercelKeys, addBlankVercelVaultEntry } from "@/lib/vault-vercel-selection";
 import { planProductionKey, type ProductionPlan, type VercelEnvMeta } from "@/lib/vercel-sync-policy";
 import {
   listVaultVercelProjects, inspectVaultVercelProduction,
@@ -60,6 +60,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
       .some(value=>value.toLowerCase().includes(term));
   }),[entries,keyQuery]);
   const eligible = useMemo(()=>entries.filter(entry=>entry.assessment.status==="ready").map(entry=>entry.row),[entries]);
+  const missingReferences=useMemo(()=>project ? suggestUnsavedVercelKeys(records,project.name,inspected?envs.map(x=>x.key):[]) : [],[records,project,inspected,envs]);
   const availableConfigs = inspected ? envs.filter(row=>row.type !== "sensitive" && row.visibility === "config" && planProductionKey(envs,row.key).action==="replace") : [];
   const connectionStatus = tokenRow?.secret ? "Token saved in Vault · not yet verified" : "Not connected · add an account API token";
   function clearReview() {setReview([]);setAck(false);}
@@ -170,6 +171,18 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
     });
   }
 
+  async function addReferenceKey(keyName:string) {
+    if(!project)return;
+    const destination=project.name;
+    await run("reference-"+keyName,async()=>{
+      const updated=addBlankVercelVaultEntry(records,keyName,destination,account,crypto.randomUUID());
+      await onPersist(updated);
+      setKeyQuery(keyName);
+      setSelected([]);clearReview();
+      setNotice(keyName+" added to Vault for "+destination+" with a blank value. Choose Edit key value to provide the real credential.");
+    });
+  }
+
   async function importConfig(row:VercelEnvMeta) {
     if (!project) return;
     const target=project;
@@ -251,6 +264,17 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
         </button>
         <span className="text-xs text-muted-foreground">Reads project metadata, never secrets; also works for Sensitive variables.</span>
       </div>
+      {missingReferences.length>0&&<details className="rounded border p-3 space-y-2">
+        <summary className="cursor-pointer text-xs font-semibold">{missingReferences.length} known variable names not yet saved in Vault (expand to add)</summary>
+        <p className="text-xs text-muted-foreground mt-2">These names come from the Main Vercel inventory or this project's existing Production variables. They are references only, not saved credentials. Adding one creates a blank value in the encrypted Vault; it does not change Vercel.</p>
+        <div className="max-h-52 overflow-auto mt-2 space-y-1">{missingReferences.map(name=>
+          <div key={name} className="flex items-center justify-between gap-2 border-b py-2">
+            <span className="font-mono text-xs break-all">{name}</span>
+            <button type="button" className="button-secondary shrink-0" disabled={!!busy}
+              onClick={()=>void addReferenceKey(name)}>Add to Vault</button>
+          </div>
+        )}</div>
+      </details>}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <label className="text-xs font-medium flex-1 min-w-48">Find any saved Vault key
           <input className="control mt-1" type="search" placeholder="Search key name, system or purpose…" value={keyQuery}
