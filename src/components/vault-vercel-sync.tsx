@@ -23,11 +23,18 @@ function findConnection(records:VaultRecord[], key:string) {
 function suggestedDestination(row:VaultRecord, project:Project) {
   const scope = project.name.toLowerCase();
   const prefix = scope.includes("licen") ? "LM_" : scope.includes("billing") ? "BILLING_" : scope.includes("dev-panel") || scope.includes("deploy-panel") ? "DEV_" : "";
+  // BILLING_API_TOKEN is already its real environment name, not API_TOKEN.
+  if (prefix === "BILLING_" && row.keyName === "BILLING_API_TOKEN") return row.keyName;
   return prefix && row.keyName.startsWith(prefix) ? row.keyName.slice(prefix.length) : row.keyName;
 }
 function friendlySource(row:VaultRecord) {
-  const vercelTarget = row.vercelTargets?.[0];
-  return labelOf(row) + (vercelTarget ? " · " + vercelTarget.projectName + " (" + vercelTarget.connection + ")" : "");
+  const originalKey=row.keyName;
+  const origin=row.systems.includes("Vercel") ? "Vercel" :
+    originalKey.startsWith("LM_") ? "License Manager" :
+    originalKey.startsWith("BILLING_") ? "Billing Store" :
+    originalKey.startsWith("DEV_") ? "Dev Panel" : row.systems[0] || "Other";
+  const vercelTarget=row.vercelTargets?.[0];
+  return origin + " · " + labelOf(row) + (vercelTarget ? " · " + vercelTarget.projectName + " (" + vercelTarget.connection + ")" : "");
 }
 export function VaultVercelSync({session,records,onPersist}:{
   session:any; records:VaultRecord[]; onPersist:(rows:VaultRecord[])=>Promise<void>;
