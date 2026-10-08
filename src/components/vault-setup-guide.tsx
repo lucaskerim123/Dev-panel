@@ -117,28 +117,32 @@ export function VaultSetupGuide({session,records,onPersist,onEdit}:Props) {
              {fallback.error&&<p className="mt-1 text-amber-500">{fallback.error}</p>}
            </div>
          </div>
-         <div className="overflow-x-auto">
-           <table className="w-full min-w-[35rem] text-left text-xs">
-             <thead><tr className="border-b text-muted-foreground"><th className="py-2 pr-2">Key name · what it's for</th><th className="p-2">Main</th><th className="p-2">Fallback</th><th className="p-2">Next step</th></tr></thead>
-             <tbody>{view.rows.map(row=>{
-               const needs=row.main.status==="missing"||row.fallback.status==="missing";
-               const target=row.fallback.status==="missing"?"fallback":row.main.status==="missing"?"main":null;
-               const dest=target?config[target]:null;
-               return <tr key={row.key} className="border-b align-top">
-                 <td className="py-2 pr-2 max-w-56"><span className="font-mono font-semibold break-all">{row.key}</span>
-                   <p className="mt-1 text-muted-foreground">{row.what}</p><p className="mt-1 text-muted-foreground">{row.origin}</p></td>
-                 <td className={"p-2 whitespace-normal "+styling[row.main.status]}>{label[row.main.status]}</td>
-                 <td className={"p-2 whitespace-normal "+styling[row.fallback.status]}>{label[row.fallback.status]}</td>
-                 <td className="p-2">
-                   {needs&&target&&dest?<button type="button" className="button-secondary text-xs" disabled={!!actionBusy||busy}
-                     onClick={()=>void addToVault(config.system,target,row.key,dest)}>Add / edit in Vault <ArrowRight size={12}/></button>:
-                    row.main.status==="review"||row.fallback.status==="review"?
-                     <span className="text-amber-500">Check the real Vercel value</span>:
-                     <span className="text-muted-foreground">No action from names alone</span>}
-                 </td>
-               </tr>
-             })}</tbody>
-           </table>
+         <div className="space-y-2">
+           <p className="text-xs font-semibold">Important keys and their purpose</p>
+           {view.rows.map(row=>{
+             const needs=row.main.status==="missing"||row.fallback.status==="missing";
+             const target=row.fallback.status==="missing"?"fallback":row.main.status==="missing"?"main":null;
+             const dest=target?config[target]:null;
+             return <div key={row.key} className="rounded-md border p-3 space-y-2 text-xs">
+               <div className="flex flex-wrap justify-between items-start gap-2">
+                 <div className="min-w-0"><p className="font-mono font-semibold break-all">{row.key}</p>
+                   <p className="mt-1 text-muted-foreground">{row.what}</p>
+                 </div>
+                 {row.priority==="feature"&&<span className="text-muted-foreground">Feature / optional setting</span>}
+               </div>
+               <div className="grid grid-cols-2 gap-2">
+                 <div><p className="text-muted-foreground">Main</p><p className={styling[row.main.status]}>{label[row.main.status]}</p></div>
+                 <div><p className="text-muted-foreground">Fallback</p><p className={styling[row.fallback.status]}>{label[row.fallback.status]}</p></div>
+               </div>
+               {(needs||row.main.status==="review"||row.fallback.status==="review")&&
+                 <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2">
+                   <p className="text-muted-foreground flex-1 min-w-44">{row.origin}</p>
+                   {needs&&target&&dest?<button type="button" className="button-secondary" disabled={!!actionBusy||busy}
+                     onClick={()=>void addToVault(config.system,target,row.key,dest)}>Prepare {sideName(target)} Vault key <ArrowRight size={12}/></button>:
+                     <span className="text-amber-500">Verify the stored Vercel value</span>}
+                 </div>}
+             </div>;
+           })}
          </div>
          {checked&&<details className="rounded border p-3 text-xs">
            <summary className="cursor-pointer font-medium">Other configured variables · don't copy automatically</summary>
