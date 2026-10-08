@@ -6,7 +6,7 @@ import { VaultGithubSync } from "@/components/vault-github-sync";
 import { VaultInventorySection } from "@/components/vault-inventory-section";
 import { VAULT_SYSTEMS, VAULT_SERVICES, normalizeVaultRecord, recordIdentity, type VaultMode } from "@/lib/vault-schema";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
-import { preserveVaultConnections, isVaultConnection, usableConnectionValue } from "@/lib/vault-connections";
+import { preserveVaultConnections, isVaultConnection, bestVaultConnection, usableConnectionValue } from "@/lib/vault-connections";
 
 const SYSTEMS=[...VAULT_SYSTEMS];
 const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
@@ -96,6 +96,29 @@ export function VaultWorkspace({session}:{session:any}){
   function downloadTemplate(){
     const blob=new Blob([JSON.stringify(IMPORT_TEMPLATE,null,2)+"\n"],{type:"application/json"});
     const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="orbitfs-vault-import-template.json";link.click();URL.revokeObjectURL(url);
+  }
+
+  async function restoreConnectionsFromBackup(event:React.ChangeEvent<HTMLInputElement>){
+    const file=event.target.files?.[0];event.target.value="";if(!file)return;
+    setError("");setNotice("");setBusy(true);
+    try{
+      if(file.size>1024*1024*3)throw new Error("Encrypted backup must be under 3 MB.");
+      const payload=JSON.parse(await file.text());
+      if(payload?.format!=="orbitfs-vault-encrypted-backup-v1"||!payload.envelope)
+        throw new Error("Select an encrypted Vault backup, not a plain import JSON.");
+      const previous=await decryptEnvelope(activePassword,payload.envelope as VaultEnvelope);
+      const restored=previous.filter(isVaultConnection).map(normalizeVaultRecord);
+      const valid=restored.filter(row=>usableConnectionValue(row.secret));
+      if(!valid.length)throw new Error("This backup contains no usable GitHub or Vercel account connections.");
+      const before=new Map(valid.map(x=>[x.keyName,bestVaultConnection(records,x.keyName)?.secret||""]));
+      const merged=preserveVaultConnections(records,[...restored,...records.filter(row=>!isVaultConnection(row))]);
+      const improved=valid.filter(x=>!usableConnectionValue(before.get(x.keyName)) && usableConnectionValue(bestVaultConnection(merged,x.keyName)?.secret));
+      if(!improved.length)throw new Error("The current Vault already has these connections. Nothing was overwritten.");
+      await persist(merged);
+      setPendingMigration(null);
+      setNotice("Restored "+improved.length+" account connection(s) from your encrypted backup. Existing non-connection keys were kept.");
+    }catch(e:any){setError(e?.message||"Could not restore encrypted Vault connections.");}
+    finally{setBusy(false)}
   }
 
   async function prepareImport(event:React.ChangeEvent<HTMLInputElement>){
@@ -207,6 +230,25 @@ export function VaultWorkspace({session}:{session:any}){
         <button type="button" className="button-secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError("");try{await persist(records);setPendingMigration(null);setNotice("Corrected Vault names saved in encrypted storage. No Vercel or GitHub variables changed.");}catch(e:any){setError(e?.message||"Could not save migration")}finally{setBusy(false)}})()}>Save reviewed Vault migration</button>
       </div>}
     </div>
+    <section className="orbit-panel p-4 space-y-3">
+      <div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div>
+        <h2>Account connections — protected during imports</h2>
+        <p>Main and Fallback GitHub/Vercel access, separate from service variables</p>
+      </div></div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {(["GITHUB_TOKEN_MAIN","GITHUB_TOKEN_FALLBACK","VERCEL_TOKEN_MAIN","VERCEL_TOKEN_FALLBACK","VERCEL_TEAM_ID_MAIN","VERCEL_TEAM_ID_FALLBACK"] as const).map(key=>{
+          const record=bestVaultConnection(records,key);
+          const saved=usableConnectionValue(record?.secret);
+          return <div key={key} className="rounded border px-3 py-2 flex items-center justify-between text-xs gap-2">
+            <span className="font-mono break-all">{key}</span>
+            <span className={saved?"text-emerald-400":"text-amber-500"}>{saved?"Saved (unverified)":record?"Placeholder / blank":"Missing"}</span>
+          </div>;
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">Importing a new Vault JSON will not remove usable saved account connections. If a previous replacement reset them, restore only the connections from an encrypted Vault backup. Values never leave the browser unencrypted.</p>
+      <label className="button-secondary cursor-pointer inline-flex items-center gap-2"><Upload size={14}/> Restore account connections from encrypted backup
+        <input type="file" className="sr-only" accept=".json,application/json" disabled={busy} onChange={e=>void restoreConnectionsFromBackup(e)}/></label>
+    </section>
     <VaultInventorySection records={records} onPersist={persist}/>
     <form id="vault-entry-editor" onSubmit={save} className="orbit-panel p-4">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit saved key":"Add a missing key"}</h2><p>Values are encrypted before saving. A blank value is allowed as an inventory reminder and cannot be pushed to Production.</p></div></div>
