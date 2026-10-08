@@ -146,7 +146,7 @@ export function VaultWorkspace({session}:{session:any}){
         const replacement=replacements.get(recordIdentity(row));
         return replacement?{...replacement,id:row.id,vercelTargets:row.vercelTargets,githubTargets:row.githubTargets}:row;
       });
-      const replacement=importMode==="replace-all"?preserveVaultConnections(records,importRows):[...additions,...next];
+      const replacement=preserveVaultConnections(records,importMode==="replace-all"?importRows:[...additions,...next]);
       await persist(replacement);setPendingMigration(null);setImportRows([]);setReplaceApproved(false);
       setNotice(importMode==="replace-all"?"Other keys replaced; saved GitHub/Vercel account connections protected. "+importRows.length+" imported entries processed.":"Added "+additions.length+", replaced "+overrides.length+", skipped "+(importRows.length-additions.length-overrides.length)+".");
     }catch(x:any){setError(x.message||"Import failed.")}finally{setBusy(false)}
