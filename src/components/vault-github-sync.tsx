@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpFromLine, Github, RefreshCw, ShieldCheck } from "lucide-react";
 import type { VaultRecord } from "@/lib/vault-crypto";
+import { bestVaultConnection } from "@/lib/vault-connections";
 import { allowedForGithubRepo, systemForProject, recordIdentity } from "@/lib/vault-schema";
 import {
   allowedVaultValue, planGithubKey, type GithubAccount, type GithubItem, type GithubKind,
@@ -12,7 +13,7 @@ type Repository = {fullName:string;name:string;isPrivate:boolean};
 type Review = { id:string; key:string; kind:GithubKind; source:string; plan:GithubPlan };
 const TOKEN_KEYS:Record<GithubAccount,string>={main:"GITHUB_TOKEN_MAIN",fallback:"GITHUB_TOKEN_FALLBACK"};
 function connectionRow(records:VaultRecord[],account:GithubAccount){
-  return records.find(row=>row.keyName===TOKEN_KEYS[account]);
+  return bestVaultConnection(records,TOKEN_KEYS[account]);
 }
 function suggestedDestination(row:VaultRecord,_repo:Repository|null){return row.keyName;}
 
