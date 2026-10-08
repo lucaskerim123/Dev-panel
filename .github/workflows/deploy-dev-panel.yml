@@ -113,6 +113,10 @@ jobs:
         if: steps.profile.outputs.deploy == 'true'
         run: node scripts/database-automation-contract.test.mjs
 
+      - name: Verify Vault Vercel key visibility and explicit attachment
+        if: steps.profile.outputs.deploy == 'true'
+        run: node --experimental-strip-types --test tests/vault-vercel-selection.test.mjs
+
       - name: Verify Production Vault Vercel sync safeguards
         if: steps.profile.outputs.deploy == 'true'
         run: node --experimental-strip-types --test tests/vercel-sync-policy.test.mjs
