@@ -15,7 +15,7 @@ const DEFAULT_TEAMS:Record<Account,string> = {
   main:"team_W3fS0X03YCjNkD2BoqRj6Uld",
   fallback:"team_0fWVaLb24pyeeCRqqYu5G47K"
 };
-const PLACEHOLDER = /^(REPLACE_WITH_SECRET|YOUR_|replace-with|your-|placeholder|todo\b)/i;
+const PLACEHOLDER = /^(REPLACE_WITH_SECRET|YOUR_|replace-with|your-|placeholder|todo\b|change-me(?:$|[-_ ]))/i;
 const labelOf = (record:VaultRecord) => record.systems.join(" / ") + " · " + record.service;
 function isConnectionKey(name:string) { return /^VERCEL_(TOKEN|TEAM_ID)_(MAIN|FALLBACK)$/.test(name); }
 function findConnection(records:VaultRecord[], key:string) {
@@ -23,6 +23,11 @@ function findConnection(records:VaultRecord[], key:string) {
 }
 function suggestedDestination(row:VaultRecord, project:Project) {
   const scope = project.name.toLowerCase();
+  if(scope.includes("dev-panel")||scope.includes("deploy-panel")){
+    const panelToken=scope.includes("fallback")?"GITHUB_TOKEN_FALLBACK":"GITHUB_TOKEN_MAIN";
+    if(row.keyName===panelToken)
+      return scope.includes("fallback")?"ORBITFS_FALLBACK_GITHUB_TOKEN":"ORBITFS_RELEASE_DISPATCH_TOKEN";
+  }
   if(scope.includes("licen")){
     const overrides:Record<string,string>={
       GITHUB_TOKEN_MAIN:"ORBITFS_PRIMARY_GITHUB_TOKEN",GITHUB_TOKEN_FALLBACK:"ORBITFS_FALLBACK_GITHUB_TOKEN",
@@ -65,7 +70,11 @@ export function VaultVercelSync({session,records,onPersist}:{
   const eligible = useMemo(()=>records.filter(row=>{
     if(!row.secret?.trim()||PLACEHOLDER.test(row.secret.trim()))return false;
     const isAccountToken=/^(GITHUB_TOKEN|VERCEL_TOKEN)_(MAIN|FALLBACK)$/.test(row.keyName);
-    if(isAccountToken)return Boolean(project && /licen/i.test(project.name));
+    if(isAccountToken)return Boolean(project && (
+      /licen/i.test(project.name) ||
+      (/dev-panel|deploy-panel/i.test(project.name) &&
+        row.keyName==="GITHUB_TOKEN_"+account.toUpperCase())
+    ));
     return !isConnectionKey(row.keyName);
   }),[records,project]);
   const availableConfigs = inspected ? envs.filter(row=>row.type !== "sensitive" && row.visibility === "config" && planProductionKey(envs,row.key).action==="replace") : [];

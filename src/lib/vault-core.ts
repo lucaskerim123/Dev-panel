@@ -39,6 +39,11 @@ export const CORE_GROUPS: CoreGroup[] = [
     spec("BILLING_API_TOKEN","Billing Store","Billing","Billing Store · billing integration credential"),
     spec("BILLING_DEPLOYER_API_TOKEN","Billing Store","Deployment","Billing Store · deployer integration credential"),
   ]},
+  {title:"Shared Master Database System",purpose:"The database builder and validated packages stay in lucaskerim123/Master-Database-System in either mode",entries:[
+    spec("DEV_MASTER_DATABASE_REPO","GitHub","Deployment","Both Dev Panels · central database source repository"),
+    spec("DEV_MASTER_DATABASE_GITHUB_TOKEN","GitHub","Deployment","Both Dev Panels · token with access to the shared central database repository"),
+    spec("DEV_MASTER_DATABASE_REF","GitHub","Deployment","Both Dev Panels · central database source branch"),
+  ]},
   {title:"GitHub account access — two shared tokens",purpose:"One Main token and one Fallback token; each serves all repositories that its account token can access",entries:[
     spec("GITHUB_TOKEN_MAIN","GitHub","Deployment","Main · lucaskerim123"),
     spec("GITHUB_TOKEN_FALLBACK","GitHub","Deployment","Fallback · remipetrovich-design"),

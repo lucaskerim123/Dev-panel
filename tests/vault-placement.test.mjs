@@ -24,3 +24,12 @@ test("unclassified keys do not get an invented destination",()=>{
  const result=whereDoesThisGo(item("SOME_UNKNOWN_SETTING"));
  assert.equal(result.where,"Review");
 });
+
+test("shared account tokens have only their intended explicit reuse destinations",()=>{
+ assert.equal(intendedForVercelProject(item("GITHUB_TOKEN_MAIN"),"base-deploy-panel"),true);
+ assert.equal(intendedForVercelProject(item("GITHUB_TOKEN_MAIN"),"orbitfs-dev-panel-fallback"),false);
+ assert.equal(intendedForVercelProject(item("GITHUB_TOKEN_FALLBACK"),"orbitfs-dev-panel-fallback"),true);
+ assert.equal(intendedForVercelProject(item("GITHUB_TOKEN_FALLBACK"),"orbitfs-billing-fallback"),false);
+ assert.equal(intendedForVercelProject(item("VERCEL_TOKEN_MAIN"),"custom-licence-manager"),true);
+ assert.equal(intendedForVercelProject(item("VERCEL_TOKEN_MAIN"),"v2-billing-store"),false);
+});

@@ -62,8 +62,13 @@ export function intendedForVercelProject(row:VaultRecord,projectName:string):boo
   const entry=whereDoesThisGo(row);
   // The four shared account tokens can be explicitly reused only by License
   // Manager for its account/asset verification; no other service sees them.
-  if(/^(GITHUB_TOKEN|VERCEL_TOKEN)_(MAIN|FALLBACK)$/.test(row.keyName))
-    return /licen/i.test(projectName);
+  if(/^(GITHUB_TOKEN|VERCEL_TOKEN)_(MAIN|FALLBACK)$/.test(row.keyName)){
+    if(/licen/i.test(projectName))return true;
+    if(/^GITHUB_TOKEN_/.test(row.keyName) && /dev-panel|deploy-panel/i.test(projectName))
+      return projectName.toLowerCase().includes("fallback")
+        ? row.keyName==="GITHUB_TOKEN_FALLBACK" : row.keyName==="GITHUB_TOKEN_MAIN";
+    return false;
+  }
   if(entry.where!=="Vercel")return false;
   const n=projectName.toLowerCase();
   if(entry.service==="License Manager")return n.includes("licen");
