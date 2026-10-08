@@ -113,6 +113,10 @@ jobs:
         if: steps.profile.outputs.deploy == 'true'
         run: node scripts/database-automation-contract.test.mjs
 
+      - name: Verify saved Vault groups appear before controls
+        if: steps.profile.outputs.deploy == 'true'
+        run: node --experimental-strip-types --test tests/vault-layout-order.test.mjs
+
       - name: Verify Vault System and Main/Fallback groups
         if: steps.profile.outputs.deploy == 'true'
         run: node --experimental-strip-types --test tests/vault-grouping.test.mjs
