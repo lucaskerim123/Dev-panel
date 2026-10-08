@@ -143,6 +143,28 @@ export function VaultGithubSync({session,records,onPersist}:{
     });
   }
 
+  async function importActionsNames() {
+    if(!repository || !inspected){setError("Compare the selected repository Actions first.");return;}
+    const reviewedRepository=repository;
+    await run("import-names",async()=>{
+      const saved=new Set(records.map(recordIdentity));
+      const additions:VaultRecord[]=[];
+      for(const item of inventory){
+        if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(item.name))continue;
+        if(/^GITHUB_TOKEN_(MAIN|FALLBACK)$/.test(item.name))continue;
+        const record:VaultRecord={
+          id:crypto.randomUUID(),systems:[systemForProject(reviewedRepository.name)],
+          otherSystem:"",service:"GitHub",customService:"",
+          keyName:item.name,secret:"",usedIn:[account],
+          destinationSystem:reviewedRepository.fullName,needsReview:false,
+          githubTargets:[{account,repo:reviewedRepository.fullName,scope,kind,keyName:item.name}]
+        };
+        if(!saved.has(recordIdentity(record))){additions.push(record);saved.add(recordIdentity(record));}
+      }
+      if(additions.length)await onPersist([...additions,...records]);
+      setNotice(additions.length+" exact GitHub Actions names added as blank Vault references. Protected secret values remain hidden; no GitHub settings changed.");
+    });
+  }
   return <section className="orbit-panel p-4 space-y-4">
     <div className="flex items-start gap-2"><Github size={20} className="mt-0.5"/>
       <div><h2 className="text-base font-semibold">GitHub Actions Vault sync</h2>
@@ -188,6 +210,9 @@ export function VaultGithubSync({session,records,onPersist}:{
           {scope==="production"?(environmentName||"Production"):"Repository"} / {kind}s. No values retrieved.
           {kind==="variable"?" Warning: GitHub Actions variables are not secret and can be read by permitted users.":""}</p>
         <p className="text-xs text-muted-foreground">Only keys explicitly assigned to this account and exact repository are available for writing. Import verified names below or edit a Vault entry to assign it.</p>
+        <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importActionsNames()}>
+          <RefreshCw size={14}/> Import exact Actions names (blank values)
+        </button>
         <div className="max-h-72 overflow-auto space-y-1">{eligible.map(row=>{
           const key=keyOverrides[row.id]??suggestedDestination(row,repository);
           const plan=planGithubKey(inventory,key.trim());
