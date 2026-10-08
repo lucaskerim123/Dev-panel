@@ -53,6 +53,8 @@ function normalizeEnvironment(v: any): VercelEnvMeta {
     gitBranch: typeof v?.gitBranch === "string" && v.gitBranch ? v.gitBranch : null,
     customEnvironmentIds: Array.isArray(v?.customEnvironmentIds) ? v.customEnvironmentIds.filter((id: any) => typeof id === "string") : [],
     visibility: typeof v?.visibility === "string" ? v.visibility : "",
+    // Do not return comments or values; only whether a human Vercel note flags a placeholder.
+    placeholderNote: /\\bPLACEHOLDER\\b|change-me/i.test(String(v?.comment||"")),
   };
 }
 async function readEnvironments(input: ProjectInput) {
