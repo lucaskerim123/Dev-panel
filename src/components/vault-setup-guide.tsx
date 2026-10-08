@@ -92,8 +92,8 @@ export function VaultSetupGuide({session,records,onPersist,onEdit}:Props) {
    {error&&<p role="alert" className="text-xs text-red-300">{error}</p>}
    {message&&<p role="status" className="text-xs text-muted-foreground">{message}</p>}
    {SETUP_PROJECTS.map((config,index)=>{
-     const main=scans.main[config.system]||{envs:null};
-     const fallback=scans.fallback[config.system]||{envs:null};
+     const main:Scan=scans.main[config.system]||{envs:null};
+     const fallback:Scan=scans.fallback[config.system]||{envs:null};
      const view=summarizeSystemSetup(config.system,main.envs,fallback.envs);
      const needing=view.rows.filter(r=>r.fallback.status==="missing"||r.fallback.status==="review").length;
      return <details className="rounded-lg border" key={config.system} open={index===0&&checked?true:undefined}>
