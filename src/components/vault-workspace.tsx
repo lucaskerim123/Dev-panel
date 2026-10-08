@@ -96,35 +96,49 @@ export function VaultWorkspace({session}:{session:any}){
     try{
       if(file.size>1024*1024)throw new Error("Import file must be 1 MB or smaller.");
       const data=JSON.parse(await file.text());
-      if(data?.format!=="orbitfs-vault-import-v1"||!Array.isArray(data.entries))throw new Error("Use the OrbitFS Vault JSON template.");
-      if(!data.entries.length||data.entries.length>500)throw new Error("Import must contain 1–500 entries.");
-      const next=data.entries.map((item:any,index:number)=>{
+      if(!["orbitfs-vault-import-v1","orbitfs-vault-import-v2"].includes(data?.format)||!Array.isArray(data.entries))
+        throw new Error("Use OrbitFS Vault JSON v1 or v2.");
+      if(!data.entries.length||data.entries.length>500)throw new Error("Import must have 1–500 entries.");
+      const rows:VaultRecord[]=data.entries.map((item:any,index:number)=>{
         if(!item||typeof item!=="object")throw new Error("Invalid entry at row "+(index+1));
-        const system=String(item.system||"").trim(),service=String(item.service||"").trim(),keyName=String(item.keyName||"").trim();
-        if(!system||!service||!keyName||typeof item.secret!=="string")throw new Error("Missing system, service, key name or non-string value at row "+(index+1));
-        if([system,service,keyName,item.secret].some(v=>v.length>10000))throw new Error("Entry too large at row "+(index+1));
-        return {id:crypto.randomUUID(),systems:[system],otherSystem:SYSTEMS.includes(system)?"":system,service,customService:SERVICES.includes(service)?"":service,keyName,secret:item.secret} as VaultRecord;
+        const rawName=String(item.keyName||"").trim();
+        const rawSecret=item.keyValue??item.secret;
+        if(!rawName||typeof rawSecret!=="string"||rawName.length>256||rawSecret.length>10000)
+          throw new Error("Invalid key name or value at row "+(index+1));
+        const modern=data.format==="orbitfs-vault-import-v2";
+        const record:VaultRecord={
+          id:crypto.randomUUID(),systems:[String(item.system||"Other")],
+          otherSystem:"",service:String(item.service||"Other"),customService:"",
+          keyName:rawName,secret:rawSecret,
+          usedIn:modern?(Array.isArray(item.usedIn)?item.usedIn:[]):undefined,
+          destinationSystem:modern?String(item.destinationSystem||""):""
+        };
+        return normalizeVaultRecord(record);
       });
-      const keys=new Set<string>();for(const row of next){const key=row.systems[0].toLowerCase()+"|"+row.service.toLowerCase()+"|"+row.keyName.toLowerCase();if(keys.has(key))throw new Error("Duplicate entries in import: "+row.keyName);keys.add(key)}
-      setImportRows(next);
+      const seen=new Set<string>();
+      for(const row of rows){
+        const id=recordIdentity(row);
+        if(seen.has(id))throw new Error("Duplicate same-system destination in import: "+row.keyName);
+        seen.add(id);
+      }
+      setImportRows(rows);
     }catch(x:any){setError(x.message||"Unable to read import file.")}
   }
 
   async function confirmImport(){
     setBusy(true);setError("");
     try{
-      const identity=(row:VaultRecord)=>row.systems[0].toLowerCase()+"|"+row.service.toLowerCase()+"|"+row.keyName.toLowerCase();
-      const existing=new Map(records.map(row=>[identity(row),row]));
-      const additions=importRows.filter(row=>!existing.has(identity(row)));
-      const overrides=importMode==="override"?importRows.filter(row=>existing.has(identity(row))):[];
-      const replacements=new Map(overrides.map(row=>[identity(row),row]));
-      if(!additions.length&&!overrides.length)throw new Error("All imported entries already exist. Nothing was changed.");
+      const existing=new Map(records.map(row=>[recordIdentity(row),row]));
+      const additions=importRows.filter(row=>!existing.has(recordIdentity(row)));
+      const overrides=importMode==="override"?importRows.filter(row=>existing.has(recordIdentity(row))):[];
+      const replacements=new Map(overrides.map(row=>[recordIdentity(row),row]));
+      if(!additions.length&&!overrides.length)throw new Error("Nothing new to import.");
       const next=records.map(row=>{
-        const replacement=replacements.get(identity(row));
+        const replacement=replacements.get(recordIdentity(row));
         return replacement?{...replacement,id:row.id,vercelTargets:row.vercelTargets,githubTargets:row.githubTargets}:row;
       });
-      await persist([...additions,...next]);setImportRows([]);
-      setNotice("Added "+additions.length+" entries, replaced "+overrides.length+" entries, skipped "+(importRows.length-additions.length-overrides.length)+".");
+      await persist([...additions,...next]);setPendingMigration(null);setImportRows([]);
+      setNotice("Added "+additions.length+", replaced "+overrides.length+", skipped "+(importRows.length-additions.length-overrides.length)+".");
     }catch(x:any){setError(x.message||"Import failed.")}finally{setBusy(false)}
   }
 
@@ -137,26 +151,21 @@ export function VaultWorkspace({session}:{session:any}){
   }
 
   function edit(row:VaultRecord){
-    const knownSystem=SYSTEMS.includes(row.systems[0]);
-    const knownService=SERVICES.includes(row.service);
-    setEditing(row);setDraft({system:knownSystem?row.systems[0]:"Other",otherSystem:knownSystem?"":row.systems[0],service:knownService?row.service:"Custom",customService:knownService?"":row.service,keyName:row.keyName,secret:row.secret});
-    window.scrollTo({top:0,behavior:"smooth"});
-  }
-
-  function editCore(row:VaultRecord|null,spec?:CoreSpec) {
-    if(row) {
-      edit(row);
-    } else if(spec) {
-      const knownSystem=SYSTEMS.includes(spec.system),knownService=SERVICES.includes(spec.service);
-      setEditing(null);
-      setDraft({system:knownSystem?spec.system:"Other",otherSystem:knownSystem?"":spec.system,
-        service:knownService?spec.service:"Custom",customService:knownService?"":spec.service,
-        keyName:spec.keyName,secret:""});
-    } else return;
+    const normalized=normalizeVaultRecord(row);
+    setEditing(row);setDraft({
+      system:normalized.systems[0]||"Other",otherSystem:normalized.otherSystem||"",
+      service:normalized.service,customService:normalized.customService||"",
+      keyName:normalized.keyName,secret:normalized.secret,
+      usedIn:normalized.usedIn||[],destinationSystem:normalized.destinationSystem||""
+    });
     requestAnimationFrame(()=>document.getElementById("vault-entry-editor")?.scrollIntoView({behavior:"smooth",block:"start"}));
   }
 
-  const filtered=useMemo(()=>{const q=query.trim().toLowerCase();const ordinary=records.filter(row=>!isCoreRecord(row));return q?ordinary.filter(row=>[...row.systems,row.service,row.keyName].some(v=>String(v).toLowerCase().includes(q))):ordinary},[records,query]);
+  const filtered=useMemo(()=>{
+    const q=query.trim().toLowerCase();
+    return records.filter(row=>!q||[row.systems[0],row.service,row.keyName,row.destinationSystem,...(row.usedIn||[])].some(v=>String(v||"").toLowerCase().includes(q)));
+  },[records,query]);
+  const needingReview=records.filter(row=>row.needsReview||!row.destinationSystem||!row.usedIn?.length);
 
   if(phase!=="open")return <section className="space-y-4">
     <div className="orbit-reference-page-head"><p>SECURE OPERATIONS</p><h1>Vault</h1><span>Persistent encrypted credentials with a separate Vault unlock.</span></div>
