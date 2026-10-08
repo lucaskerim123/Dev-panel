@@ -7,6 +7,7 @@ export type VaultRecord={
   keyName:string;
   secret:string;
   vercelTargets?: Array<{connection:"main"|"fallback";projectId:string;projectName:string;keyName:string}>;
+  githubTargets?: Array<{account:"main"|"fallback";repo:string;scope:"repository"|"production";kind:"secret"|"variable";keyName:string}>;
 };
 
 export type VaultEnvelope={

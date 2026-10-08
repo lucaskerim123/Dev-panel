@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye, EyeOff, Upload, Download } from "lucide-react";
 import { getVaultEnvelope, saveVaultEnvelope } from "@/lib/vault.server";
 import { VaultVercelSync } from "@/components/vault-vercel-sync";
+import { VaultGithubSync } from "@/components/vault-github-sync";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
 
 const SYSTEMS=["Vercel","GitHub","Supabase","License Manager","Billing Store","Other"];
@@ -67,7 +68,7 @@ export function VaultWorkspace({session}:{session:any}){
     try{
       const system=draft.system.trim(),service=draft.service.trim(),keyName=draft.keyName.trim();
       if(!system||!service||!keyName||!draft.secret)throw new Error("System, service, key name and secret are required.");
-      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system==="Other"?(draft.otherSystem.trim()||"Other"):system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service:service==="Custom"?(draft.customService.trim()||"Custom"):service,customService:service==="Custom"?draft.customService.trim():"",keyName,secret:draft.secret,vercelTargets:editing?.vercelTargets};
+      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system==="Other"?(draft.otherSystem.trim()||"Other"):system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service:service==="Custom"?(draft.customService.trim()||"Custom"):service,customService:service==="Custom"?draft.customService.trim():"",keyName,secret:draft.secret,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
       await persist(next);setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""});setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
@@ -110,7 +111,7 @@ export function VaultWorkspace({session}:{session:any}){
       if(!additions.length&&!overrides.length)throw new Error("All imported entries already exist. Nothing was changed.");
       const next=records.map(row=>{
         const replacement=replacements.get(identity(row));
-        return replacement?{...replacement,id:row.id}:row;
+        return replacement?{...replacement,id:row.id,vercelTargets:row.vercelTargets,githubTargets:row.githubTargets}:row;
       });
       await persist([...additions,...next]);setImportRows([]);
       setNotice("Added "+additions.length+" entries, replaced "+overrides.length+" entries, skipped "+(importRows.length-additions.length-overrides.length)+".");
@@ -155,6 +156,7 @@ export function VaultWorkspace({session}:{session:any}){
     {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">{notice}</div>}
     <div className="orbit-panel p-3 text-xs"><strong className="text-sm">Vercel Production integration</strong><p className="mt-1 text-muted-foreground">Connect your Main or Fallback Vercel account below. Connections are separate and use stored encrypted tokens; a saved token does not mean the account has been verified.</p></div>
     <VaultVercelSync session={session} records={records} onPersist={persist}/>
+    <VaultGithubSync session={session} records={records} onPersist={persist}/>
     <form onSubmit={save} className="orbit-panel p-4">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit Vault entry":"New Vault entry"}</h2><p>Changes are encrypted in your browser before persistence.</p></div></div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">

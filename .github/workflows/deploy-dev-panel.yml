@@ -117,6 +117,10 @@ jobs:
         if: steps.profile.outputs.deploy == 'true'
         run: node --experimental-strip-types --test tests/vercel-sync-policy.test.mjs
 
+      - name: Verify GitHub Actions Vault sync safeguards
+        if: steps.profile.outputs.deploy == 'true'
+        run: node --experimental-strip-types --test tests/github-sync-policy.test.mjs
+
       - name: Build Vercel production artifact
         if: steps.profile.outputs.deploy == 'true'
         env:
