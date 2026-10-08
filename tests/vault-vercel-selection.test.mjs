@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assessVercelVaultEntry, attachVercelVaultEntry } from "../src/lib/vault-vercel-selection.ts";
+import { assessVercelVaultEntry, attachVercelVaultEntry, suggestUnsavedVercelKeys, addBlankVercelVaultEntry } from "../src/lib/vault-vercel-selection.ts";
 import { allowedForVercelProject } from "../src/lib/vault-schema.ts";
 
 const record=(keyName,overrides={})=>({
@@ -56,4 +56,27 @@ test("invalid environment keys cannot be attached",()=>{
  const source=record("BAD-KEY");
  assert.equal(assessVercelVaultEntry(source,fallback,"fallback").status,"invalid");
  assert.throws(()=>attachVercelVaultEntry([source],source,fallback,"fallback","new-id"),/invalid/i);
+});
+
+test("the large verified inventory is offered in Vercel sync even if the name was never saved to Vault",()=>{
+ const suggestions=suggestUnsavedVercelKeys([],fallback,["MY_FALLBACK_CUSTOM_KEY"]);
+ assert.ok(suggestions.includes("BILLING_API_TOKEN"));
+ assert.ok(suggestions.includes("MY_FALLBACK_CUSTOM_KEY"));
+});
+test("clicking a reference name creates a blank, correctly mapped Vault key",()=>{
+ const result=addBlankVercelVaultEntry([],"BILLING_API_TOKEN",fallback,"fallback","ref-id");
+ assert.equal(result.length,1);
+ assert.equal(result[0].keyName,"BILLING_API_TOKEN");
+ assert.equal(result[0].secret,"");
+ assert.equal(result[0].destinationSystem,fallback);
+ assert.deepEqual(result[0].usedIn,["fallback"]);
+ assert.equal(assessVercelVaultEntry(result[0],fallback,"fallback").status,"value");
+});
+test("reference suggestions exclude saved keys, reserved account tokens, and invalid variable names",()=>{
+ const known=[record("BILLING_API_TOKEN")];
+ const refs=suggestUnsavedVercelKeys(known,fallback,["GITHUB_TOKEN_MAIN","BAD-KEY","FALLBACK_NEW_KEY"]);
+ assert.ok(!refs.includes("BILLING_API_TOKEN"));
+ assert.ok(!refs.includes("GITHUB_TOKEN_MAIN"));
+ assert.ok(!refs.includes("BAD-KEY"));
+ assert.ok(refs.includes("FALLBACK_NEW_KEY"));
 });
