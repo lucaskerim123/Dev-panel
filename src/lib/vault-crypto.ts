@@ -6,6 +6,8 @@ export type VaultRecord={
   customService:string;
   keyName:string;
   secret:string;
+  purpose?:string;
+  valueSource?:string;
   /** Main/Fallback are source modes, not key-name prefixes. */
   usedIn?: Array<"main"|"fallback">;
   /** Exact Vercel project name or GitHub owner/repository. Blank means not mapped. */
