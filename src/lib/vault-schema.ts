@@ -115,7 +115,8 @@ export function allowedForVercelProject(row:VaultRecord,projectName:string,accou
  if(!(row.usedIn||[]).includes(account))return false;
  if(row.destinationSystem&&row.destinationSystem.toLowerCase()!==projectName.toLowerCase())return false;
  if(systemOf(row)!==systemForProject(projectName))return false;
- return !!row.destinationSystem && !row.needsReview && row.keyName===exactVerifiedName(row);
+ const linked=(row.vercelTargets||[]).some(t=>t.connection===account && t.projectName.toLowerCase()===projectName.toLowerCase() && t.keyName===row.keyName);
+ return !!row.destinationSystem && !row.needsReview && (row.keyName===exactVerifiedName(row)||linked);
 }
 export function allowedForGithubRepo(row:VaultRecord,repo:string,account:VaultMode):boolean {
  return serviceOf(row)==="GitHub"&&(row.usedIn||[]).includes(account)&&
