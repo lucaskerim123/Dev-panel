@@ -3,14 +3,13 @@ import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye
 import { getVaultEnvelope, saveVaultEnvelope } from "@/lib/vault.server";
 import { VaultVercelSync } from "@/components/vault-vercel-sync";
 import { VaultGithubSync } from "@/components/vault-github-sync";
-import { VaultCoreSection } from "@/components/vault-core-section";
-import { isCoreRecord, type CoreSpec } from "@/lib/vault-core";
-import { whereDoesThisGo } from "@/lib/vault-placement";
+import { VaultInventorySection } from "@/components/vault-inventory-section";
+import { VAULT_SYSTEMS, VAULT_SERVICES, normalizeVaultRecord, recordIdentity, type VaultMode } from "@/lib/vault-schema";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
 
-const SYSTEMS=["Vercel","GitHub","Supabase","License Manager","Billing Store","Other"];
-const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v1",entries:[{system:"GitHub",service:"API",keyName:"GITHUB_TOKEN",secret:"REPLACE_WITH_SECRET"},{system:"Supabase",service:"Database",keyName:"SUPABASE_ACCESS_TOKEN",secret:"REPLACE_WITH_SECRET"}]};
-const SERVICES=["Environment","API","Billing","Licence","Database","Deployment","Dev","Custom"];
+const SYSTEMS=[...VAULT_SYSTEMS];
+const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
+const SERVICES=[...VAULT_SERVICES];
 
 export function VaultWorkspace({session}:{session:any}){
   const [phase,setPhase]=useState<"loading"|"setup"|"locked"|"open">("loading");
@@ -28,7 +27,9 @@ export function VaultWorkspace({session}:{session:any}){
   const [importRows,setImportRows]=useState<VaultRecord[]>([]);
   const [importMode,setImportMode]=useState<"skip"|"override">("skip");
   const [editing,setEditing]=useState<VaultRecord|null>(null);
-  const [draft,setDraft]=useState({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""});
+  const [pendingMigration,setPendingMigration]=useState<VaultRecord[]|null>(null);
+  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
+  const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
 
   useEffect(()=>{void loadEnvelope()},[session?.token]);
 
@@ -57,23 +58,29 @@ export function VaultWorkspace({session}:{session:any}){
         await persist([],password);setActivePassword(password);setRecords([]);setPhase("open");
       }else{
         if(!envelope)throw new Error("Encrypted Vault is unavailable.");
-        const next=await decryptEnvelope(password,envelope);setRecords(next);setActivePassword(password);setPhase("open");
+        const original=await decryptEnvelope(password,envelope);
+        const normalized=original.map(normalizeVaultRecord);
+        setPendingMigration(JSON.stringify(original)===JSON.stringify(normalized)?null:normalized);
+        setRecords(normalized);setActivePassword(password);setPhase("open");
       }
       setPassword("");setConfirm("");
     }catch(x:any){setError(phase==="setup"?(x.message||"Unable to create Vault."):"Wrong Vault PIN/password or unreadable Vault.")}
     finally{setBusy(false)}
   }
 
-  function lock(){setVisible([]);setDraftVisible(false);setImportRows([]);setRecords([]);setActivePassword("");setPassword("");setConfirm("");setEditing(null);setPhase("locked");setNotice("")}
+  function lock(){setVisible([]);setDraftVisible(false);setImportRows([]);setRecords([]);setActivePassword("");setPassword("");setConfirm("");setEditing(null);setPendingMigration(null);setPhase("locked");setNotice("")}
 
   async function save(event:React.FormEvent){
     event.preventDefault();setError("");setBusy(true);
     try{
       const system=draft.system.trim(),service=draft.service.trim(),keyName=draft.keyName.trim();
+      if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyName))throw new Error("Use the exact environment key name (letters, numbers and underscores). No guessed prefixes.");
+      if(!draft.destinationSystem.trim())throw new Error("Choose the exact destination project or repository before saving.");
+      if(!draft.usedIn.length)throw new Error("Select Main and/or Fallback.");
       if(!system||!service||!keyName)throw new Error("System, service and key name are required.");
-      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system==="Other"?(draft.otherSystem.trim()||"Other"):system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service:service==="Custom"?(draft.customService.trim()||"Custom"):service,customService:service==="Custom"?draft.customService.trim():"",keyName,secret:draft.secret,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
+      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,usedIn:draft.usedIn,destinationSystem:draft.destinationSystem.trim(),needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
-      await persist(next);setEditing(null);setDraft({system:"GitHub",otherSystem:"",service:"Environment",customService:"",keyName:"",secret:""});setNotice(editing?"Vault entry updated.":"Vault entry saved.");
+      await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
     finally{setBusy(false)}
   }
