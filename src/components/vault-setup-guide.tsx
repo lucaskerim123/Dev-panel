@@ -96,7 +96,7 @@ export function VaultSetupGuide({session,records,onPersist,onEdit}:Props) {
      const fallback:Scan=scans.fallback[config.system]||{envs:null};
      const view=summarizeSystemSetup(config.system,main.envs,fallback.envs);
      const needing=view.rows.filter(r=>r.fallback.status==="missing"||r.fallback.status==="review").length;
-     return <details className="rounded-lg border" key={config.system} open={index===0&&checked?true:undefined}>
+     return <details className="rounded-lg border" key={config.system} defaultOpen={index===0}>
        <summary className="flex cursor-pointer items-center justify-between gap-2 p-3">
          <span className="text-sm font-semibold">{config.system==="License"?"License Manager":config.system==="Billing"?"Billing Store":"Dev Panel"}</span>
          <span className="text-xs text-muted-foreground">{checked?`${view.mainCount??"—"} Main · ${view.fallbackCount??"—"} Fallback`:"Open to see keys"}
