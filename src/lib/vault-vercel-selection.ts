@@ -1,5 +1,5 @@
 import type { VaultRecord } from "./vault-crypto";
-import { allowedForVercelProject, systemForProject, KEY_PATTERN, type VaultMode } from "./vault-schema.ts";
+import { allowedForVercelProject, systemForProject, MAIN_VERCEL_INVENTORY, KEY_PATTERN, type VaultMode } from "./vault-schema.ts";
 
 export type VercelVaultEntryStatus = "ready" | "attach" | "value" | "protected" | "invalid";
 export type VercelVaultEntryAssessment = {status:VercelVaultEntryStatus;reason:string};
@@ -34,4 +34,25 @@ export function attachVercelVaultEntry(
     vercelTargets:[],githubTargets:undefined,
   };
   return [linked,...records];
+}
+
+/** The static Main inventory lists references, not necessarily saved Vault entries.
+ *  Include actual Production names too so users can add them without guessing. */
+export function suggestUnsavedVercelKeys(records:VaultRecord[],project:string,productionNames:string[]):string[] {
+  const system=systemForProject(project);
+  const sources=[...MAIN_VERCEL_INVENTORY.filter(item=>item.system===system).map(item=>item.name),...productionNames];
+  const saved=new Set(records.map(row=>row.keyName));
+  return [...new Set(sources)].filter(key=>KEY_PATTERN.test(key)&&key.length<=256&&
+    !protectedAccountKey.test(key)&&!saved.has(key)).sort((a,b)=>a.localeCompare(b));
+}
+export function addBlankVercelVaultEntry(records:VaultRecord[],keyName:string,project:string,account:VaultMode,id:string):VaultRecord[] {
+  if(!KEY_PATTERN.test(keyName)||keyName.length>256||protectedAccountKey.test(keyName))
+    throw new Error("Invalid or protected environment variable name.");
+  if(!project)throw new Error("Choose a Vercel project first.");
+  if(records.some(row=>row.keyName===keyName && row.service==="Vercel" &&
+    row.destinationSystem?.toLowerCase()===project.toLowerCase()&&row.usedIn?.includes(account)))
+    throw new Error("This key is already saved for the selected project.");
+  const record:VaultRecord={id,systems:[systemForProject(project)],otherSystem:"",service:"Vercel",
+    customService:"",keyName,secret:"",usedIn:[account],destinationSystem:project,needsReview:false};
+  return [record,...records];
 }
