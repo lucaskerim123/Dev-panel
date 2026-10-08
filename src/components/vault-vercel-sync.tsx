@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, Cloud, RefreshCw, ShieldCheck } from "lucide-react";
 import type { VaultRecord } from "@/lib/vault-crypto";
+import { bestVaultConnection } from "@/lib/vault-connections";
 import { allowedForVercelProject, systemForProject, recordIdentity } from "@/lib/vault-schema";
 import { planProductionKey, type ProductionPlan, type VercelEnvMeta } from "@/lib/vercel-sync-policy";
 import {
@@ -19,7 +20,7 @@ const PLACEHOLDER = /^(REPLACE_WITH_SECRET|YOUR_|replace-with|your-|placeholder|
 const labelOf = (record:VaultRecord) => record.systems.join(" / ") + " · " + record.service;
 function isConnectionKey(name:string) { return /^VERCEL_(TOKEN|TEAM_ID)_(MAIN|FALLBACK)$/.test(name); }
 function findConnection(records:VaultRecord[], key:string) {
-  return records.find(record => record.keyName === key);
+  return bestVaultConnection(records,key);
 }
 function suggestedDestination(row:VaultRecord, _project:Project) {return row.keyName;}
 
