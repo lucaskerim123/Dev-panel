@@ -122,8 +122,12 @@ export function allowedForVercelProject(row:VaultRecord,projectName:string,accou
  if(!(row.usedIn||[]).includes(account))return false;
  if(row.destinationSystem&&row.destinationSystem.toLowerCase()!==projectName.toLowerCase())return false;
  if(systemOf(row)!==systemForProject(projectName))return false;
- const linked=(row.vercelTargets||[]).some(t=>t.connection===account && t.projectName.toLowerCase()===projectName.toLowerCase() && t.keyName===row.keyName);
- return !!row.destinationSystem && !row.needsReview && (row.keyName===exactVerifiedName(row)||linked);
+ // A manually assigned, exact destination is authoritative even when the name
+ // is absent from the static Main inventory (e.g. new Fallback-only variables).
+ // Never silently strip, add, or infer a prefix.
+ if(!KEY_PATTERN.test(row.keyName) || row.keyName.length>256) return false;
+ if(/^(?:GITHUB_TOKEN|VERCEL_(?:TOKEN|TEAM_ID))_(?:MAIN|FALLBACK)$/.test(row.keyName))return false;
+ return !!row.destinationSystem && !row.needsReview;
 }
 export function allowedForGithubRepo(row:VaultRecord,repo:string,account:VaultMode):boolean {
  return serviceOf(row)==="GitHub"&&(row.usedIn||[]).includes(account)&&
