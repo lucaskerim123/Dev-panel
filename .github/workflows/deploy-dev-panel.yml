@@ -160,6 +160,10 @@ jobs:
           ORBITFS_VERCEL_BUILD: "1"
         run: bun run build
 
+      - name: Verify source-domain browser routing safeguards
+        if: steps.profile.outputs.deploy == 'true'
+        run: node --experimental-strip-types --test tests/source-domain-routing.test.mjs
+
       - name: Verify Vercel build output
         if: steps.profile.outputs.deploy == 'true'
         shell: bash
