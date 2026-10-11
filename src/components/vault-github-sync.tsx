@@ -57,7 +57,11 @@ export function VaultGithubSync({session,records,onPersist}:{
   }
   async function run(label:string,task:()=>Promise<void>){
     setBusy(label);setError("");setNotice("");
-    try{await task()}catch(e:any){setError(String(e?.message||"GitHub Vault sync failed."))}
+    try{await task()}catch(e:any){
+      const message=String(e?.message||"GitHub Vault sync failed.");
+      const html=/<!doctype html|<html[\s>]|<body[\s>]|this page didn.t load/i.test(message);
+      setError(html?"GitHub Vault service returned an HTML error instead of API data. The service may be temporarily unavailable; check the Dev Panel server logs before retrying.":message.slice(0,600));
+    }
     finally{setBusy("")}
   }
   async function saveConnection(){
@@ -133,7 +137,7 @@ export function VaultGithubSync({session,records,onPersist}:{
         const previous=(record.githubTargets||[]).filter(t=>!(t.account===reviewedAccount &&
           t.repo===reviewedRepo.fullName && t.scope===reviewedScope && t.kind===reviewedKind && t.keyName===entry.key));
         return {...record,githubTargets:[...previous,{account:reviewedAccount,repo:reviewedRepo.fullName,
-          scope:reviewedScope,kind:reviewedKind,keyName:entry.key}]};
+          scope:reviewedScope,kind:reviewedKind,keyName:entry.key}],syncReceipts:[...(record.syncReceipts||[]).filter(receipt=>!(receipt.provider==="GitHub"&&receipt.destination===reviewedRepo.fullName&&receipt.keyName===entry.key&&receipt.scope===reviewedScope&&receipt.kind===reviewedKind)),{provider:"GitHub" as const,destination:reviewedRepo.fullName,account:reviewedAccount,keyName:entry.key,scope:reviewedScope,kind:reviewedKind,at:new Date().toISOString()}]};
       });
       try{await onPersist(next)}catch{
         throw new Error("GitHub accepted "+applied+" entries, but saving Vault destination labels failed. Inspect GitHub before retrying.");
@@ -156,23 +160,23 @@ export function VaultGithubSync({session,records,onPersist}:{
         const record:VaultRecord={
           id:crypto.randomUUID(),systems:[systemForProject(reviewedRepository.name)],
           otherSystem:"",service:"GitHub",customService:"",
-          keyName:item.name,secret:"",usedIn:[account],
+          keyName:item.name,secret:kind==="variable"?(item.value??""):"",usedIn:[account],
           destinationSystem:reviewedRepository.fullName,needsReview:false,
           githubTargets:[{account,repo:reviewedRepository.fullName,scope,kind,keyName:item.name}]
         };
         if(!saved.has(recordIdentity(record))){additions.push(record);saved.add(recordIdentity(record));}
       }
       if(additions.length)await onPersist([...additions,...records]);
-      setNotice(additions.length+" exact GitHub Actions names added as blank Vault references. Protected secret values remain hidden; no GitHub settings changed.");
+      setNotice(additions.length+" GitHub Actions "+kind+" entries pulled into the encrypted Vault. "+(kind==="variable"?"Readable variable values were saved encrypted when returned by GitHub.":"Secret values cannot be retrieved and remain blank.")+" GitHub was not changed.");
     });
   }
-  return <section className="orbit-panel p-4 space-y-4">
+  return <section className="orbit-panel min-w-0 max-w-full overflow-x-hidden p-4 space-y-4">
     <div className="flex items-start gap-2"><Github size={20} className="mt-0.5"/>
       <div><h2 className="text-base font-semibold">GitHub Actions Vault sync</h2>
         <p className="text-xs text-muted-foreground">Main and Fallback · Repository or existing Production environment · manual review · no release triggered</p>
       </div>
     </div>
-    {error&&<p className="rounded border border-red-400/40 p-2 text-xs text-red-300">{error}</p>}
+    {error&&<p className="rounded border border-red-400/40 p-2 text-xs text-red-300 break-words whitespace-pre-wrap">{error}</p>}
     {notice&&<p className="rounded border p-2 text-xs">{notice}</p>}
     <div className="flex gap-2">{(["main","fallback"] as const).map(a=>
       <button type="button" key={a} className={account===a?"button-primary":"button-secondary"} disabled={!!busy} onClick={()=>chooseAccount(a)}>
@@ -180,7 +184,7 @@ export function VaultGithubSync({session,records,onPersist}:{
     <p className="text-xs text-muted-foreground">Vault connection: {tokenRow?(tokenRow.secret.trim()?"Saved · not verified until repositories load":"Saved blank · add a real token to connect"):"Not configured"}.
       Use a token owned by {account==="main"?"lucaskerim123":"remipetrovich-design"} with access to all required repositories and Actions Secrets/Variables (read/write), Environments (read) and Metadata (read). Two shared connection slots are used, one per account, rather than one per repository. Actual permissions are controlled by GitHub. No tokens are written into GitHub Actions.</p>
     <div className="flex flex-wrap items-end gap-2">
-      <label className="block text-xs font-medium flex-1 min-w-52">GitHub Personal Access Token
+      <label className="block w-full min-w-0 text-xs font-medium sm:min-w-52 sm:flex-1">GitHub Personal Access Token
         <input type="password" autoComplete="off" className="control mt-1 font-mono" value={tokenInput}
           onChange={e=>setTokenInput(e.target.value)} placeholder={tokenRow?"Enter a replacement, change-me or leave blank":"Paste token or change-me"}/></label>
       <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void saveConnection()}>
@@ -208,11 +212,11 @@ export function VaultGithubSync({session,records,onPersist}:{
         <RefreshCw size={14}/> Compare GitHub {scope} {kind}s</button>
       {inspected&&repository&&<div className="space-y-3">
         <p className="text-xs text-muted-foreground">{inventory.length} existing entries in {repository.fullName} /
-          {scope==="production"?(environmentName||"Production"):"Repository"} / {kind}s. No values retrieved.
+          {scope==="production"?(environmentName||"Production"):"Repository"} / {kind}s. {kind==="secret"?"Secret values cannot be retrieved.":"Readable variable values can be pulled into the encrypted Vault."}
           {kind==="variable"?" Warning: GitHub Actions variables are not secret and can be read by permitted users.":""}</p>
-        <p className="text-xs text-muted-foreground">Only keys explicitly assigned to this account and exact repository are available for writing. Import verified names below or edit a Vault entry to assign it.</p>
+        <p className="text-xs text-muted-foreground">Pull restores GitHub secret names with blank values, or GitHub Actions variables with readable values where returned. Sending/replacing requires a separate review. No GitHub delete operation is provided.</p>
         <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importActionsNames()}>
-          <RefreshCw size={14}/> Import exact Actions names (blank values)
+          <RefreshCw size={14}/> Pull / Sync from GitHub (read-only)
         </button>
         <div className="max-h-72 overflow-auto space-y-1">{eligible.map(row=>{
           const key=keyOverrides[row.id]??suggestedDestination(row,repository);

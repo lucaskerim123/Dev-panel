@@ -24,12 +24,19 @@ const BASE_WORKFLOW=process.env.BASE_RELEASE_WORKER_WORKFLOW||"package-base-rele
 const ENGINE_WORKFLOW=process.env.ENGINE_RELEASE_WORKFLOW||"publish-engine-release.yml";
 
 const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`Missing server environment variable: ${name}`);return v};
-const TRUSTED_MASTER_BOOTSTRAP_URL="https://incendiarynetworks.cc/api/v1";
+// Defer server-only environment access until a server handler actually runs.
+// TanStack Start may evaluate imported server function modules in the browser,
+// where process.env.LICENSE_MASTER_URL is intentionally unavailable.
+function trustedMasterBootstrapUrl():string{
+ const value=normalizeOfficialMasterUrl(required("LICENSE_MASTER_URL"));
+ if(!value)throw new Error("Fallback LICENSE_MASTER_URL must be https://lm.incendiarynetworks.cc/api/v1");
+ return value;
+}
 function normalizeOfficialMasterUrl(value:string){
  try{
   const u=new URL(String(value||"").trim());
   const host=u.hostname.toLowerCase(),path=u.pathname.replace(/\/+$/,"");
-  if(u.protocol!=="https:"||(host!=="incendiarynetworks.cc"&&!host.endsWith(".incendiarynetworks.cc"))||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
+  if(u.protocol!=="https:"||host!=="lm.incendiarynetworks.cc"||path!=="/api/v1"||u.username||u.password||u.search||u.hash)return null;
   return u.origin+"/api/v1";
  }catch{return null}
 }
@@ -38,7 +45,7 @@ async function officialMasterConnections(force=false){
  if(!force&&officialApiRegistryCache&&officialApiRegistryCache.expires>Date.now())return officialApiRegistryCache.connections;
  let connections:any[]=[];
  try{
-  const url=new URL(TRUSTED_MASTER_BOOTSTRAP_URL+"/api-connections");
+  const url=new URL(trustedMasterBootstrapUrl()+"/api-connections");
   url.searchParams.set("client","dev_panel");url.searchParams.set("service","license_manager");
   const response=await fetch(url,{cache:"no-store",signal:AbortSignal.timeout(5000)});
   if(response.ok){
@@ -48,24 +55,16 @@ async function officialMasterConnections(force=false){
     .map((row:any)=>({...row,base_url:normalizeOfficialMasterUrl(String(row.base_url))}));
   }
  }catch{}
- if(!connections.length)connections=[{service_key:"license_manager",label:"Primary License Manager API",base_url:TRUSTED_MASTER_BOOTSTRAP_URL,enabled:true,priority:10,settings:{bootstrap:true}}];
+ if(!connections.length)connections=[{service_key:"license_manager",label:"Fallback License Manager API",base_url:trustedMasterBootstrapUrl(),enabled:true,priority:10,settings:{bootstrap:true}}];
  connections.sort((a:any,b:any)=>Number(a.priority||100)-Number(b.priority||100));
  officialApiRegistryCache={expires:Date.now()+20*60*1000,connections};
  return connections;
 }
-let configuredMasterUrlCache:{value:string;expires:number}|null=null;
-async function configuredMasterUrl(force=false){
- if(!force&&configuredMasterUrlCache&&configuredMasterUrlCache.expires>Date.now())return configuredMasterUrlCache.value;
- const official=await officialMasterConnections(force);
- const allowed=new Set(official.map((row:any)=>String(row.base_url)));
- let selected=allowed.has(TRUSTED_MASTER_BOOTSTRAP_URL)?TRUSTED_MASTER_BOOTSTRAP_URL:String(official[0]?.base_url||TRUSTED_MASTER_BOOTSTRAP_URL);
- try{
-  const {data}=await authClient().from("panel_api_connections").select("selected_url").eq("service_key","license_manager").maybeSingle();
-  const saved=normalizeOfficialMasterUrl(String(data?.selected_url||""));
-  if(saved&&allowed.has(saved))selected=saved;
- }catch{}
- configuredMasterUrlCache={value:selected,expires:Date.now()+20*60*1000};
- return selected;
+// Fallback always uses its own Vercel-configured authority URL. The old
+// shared panel_api_connections table is absent and must not be used to
+// introduce another source of truth or accidentally select Main's API.
+async function configuredMasterUrl(_force=false){
+ return trustedMasterBootstrapUrl();
 }
 const normalizeChannel=(value:string)=>String(value||"stable").trim().toLowerCase();
 const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE_COMPATIBILITY_CHANNEL||"stable");
@@ -282,7 +281,10 @@ export const login=createServerFn({method:"POST"}).handler(async({data}:{data:{e
  if(!email||!password)throw new Error("Email and password are required");
  const sb=authClient();
  const {data:user,error}=await sb.from("users").select("id,email,password_hash,password_salt,display_name,role,status").ilike("email",email).maybeSingle();
- if(error)throw new Error("Unable to connect to License Master users");
+ if(error){
+  console.error("Fallback Control Centre user lookup failed", {code:error.code, message:error.message, details:error.details, hint:error.hint});
+  throw new Error(`Unable to query License Master users (${error.code || "unknown"}): ${error.message || "Database request failed"}`);
+ }
  if(!user||user.status!=="active"||!verifyPassword(password,user.password_hash,user.password_salt))throw new Error("Invalid credentials");
  await sb.from("users").update({last_login_at:new Date().toISOString()}).eq("id",user.id);
  const safe={id:user.id,email:user.email,display_name:user.display_name,role:user.role};
@@ -384,25 +386,18 @@ export const updateAccessGroup=createServerFn({method:"POST"}).handler(async({da
 
 export const getApiConnectionState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  readSession(data.token);
- const [official,selectedUrl]=await Promise.all([officialMasterConnections(true),configuredMasterUrl()]);
- let row:any=null;
- try{const result=await authClient().from("panel_api_connections").select("*").eq("service_key","license_manager").maybeSingle();row=result.data||null;}catch{}
- return {authority:"orbitfs-license-manager",bootstrapUrl:TRUSTED_MASTER_BOOTSTRAP_URL,selectedUrl,officialConnections:official,connection:row};
+ const official=await officialMasterConnections(true);
+ return {authority:"orbitfs-license-manager",bootstrapUrl:trustedMasterBootstrapUrl(),selectedUrl:trustedMasterBootstrapUrl(),officialConnections:official,connection:{service_key:"license_manager",selected_url:trustedMasterBootstrapUrl(),managed_by:"fallback_vercel_environment"}};
 });
 
 export const saveApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url:string}})=>{
  const actor=readSession(data.token);
  if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required");
  const requested=normalizeOfficialMasterUrl(data.url);
- if(!requested)throw new Error("API URL must be an official HTTPS /api/v1 endpoint.");
+ if(!requested||requested!==trustedMasterBootstrapUrl())throw new Error("Fallback Dev Panel is pinned to the configured Fallback License Manager API. Change LICENSE_MASTER_URL in the Fallback Vercel project to update it.");
  const official=await officialMasterConnections(true);
- if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
- const now=new Date().toISOString();
- const {error}=await authClient().from("panel_api_connections").upsert({service_key:"license_manager",selected_url:requested,updated_by:actor.email||actor.id,updated_at:now},{onConflict:"service_key"});
- if(error)throw new Error("Unable to save Dev Panel API connection: "+error.message);
- configuredMasterUrlCache=null;
- officialApiRegistryCache=null;
- return {ok:true,selectedUrl:requested};
+ if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("Fallback License Manager is not present in the official API registry.");
+ return {ok:true,selectedUrl:trustedMasterBootstrapUrl(),managedBy:"fallback_vercel_environment"};
 });
 
 export const testApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url?:string}})=>{
@@ -412,8 +407,15 @@ export const testApiConnection=createServerFn({method:"POST"}).handler(async({da
  const official=await officialMasterConnections(true);
  if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
  const started=Date.now();
- const health=await requestJson(requested+"/license/health",{headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"});
- return {ok:true,url:requested,latencyMs:Date.now()-started,health};
+ const health=await requestJson(requested+"/license/health",{cache:"no-store"});
+ if(health?.ok!==true)throw new Error("Fallback License Manager health check did not pass.");
+ // The health endpoint is public and cannot verify machine credentials.
+ // Check a read-only endpoint using the real server-side token before reporting success.
+ const channels=await requestJson(requested+"/release-channels?include_disabled=false",{
+  headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`},cache:"no-store"
+ });
+ if(!Array.isArray(channels?.channels))throw new Error("Authenticated release-channel response is invalid.");
+ return {ok:true,url:requested,latencyMs:Date.now()-started,health,authorization:"verified"};
 });
 
 export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";channel?:string}})=>{
@@ -520,7 +522,25 @@ export const getPanelState=createServerFn({method:"POST"}).handler(async({data}:
    if(!["success","failure","cancelled","skipped"].includes(outcome))continue;
    const nextStatus=outcome==="success"?(authoritativeReceipt?"handed_off":"building"):"draft";
    const displayStatus=outcome==="success"&&!authoritativeKeys.has(draftKey)?"awaiting_receipt":nextStatus;
-   const err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
+   let err=outcome==="success"?null:"GitHub workflow ended with "+outcome+". Inspect the run before retrying.";
+   if(outcome==="failure"){
+    try{
+     const jobResult=await github("/repos/"+workerRepo+"/actions/runs/"+Number(draft.last_run_id)+"/jobs?per_page=100");
+     const job=(jobResult?.jobs||[]).find((j:any)=>j.conclusion==="failure");
+     if(job){
+      const steps=(job.steps||[]).filter((step:any)=>step.conclusion==="failure").map((step:any)=>String(step.name||"")).filter(Boolean);
+      let details="";
+      try{
+       const raw=await operationsGithubText("/repos/"+workerRepo+"/actions/jobs/"+Number(job.id)+"/logs");
+       const parsed=extractOperationFailure(raw)||fallbackOperationFailure(job,raw);
+       details=String((parsed?.lines||[]).join("\n")||parsed?.error||"").slice(-9000);
+      }catch{}
+      const label="Failed job: "+String(job.name||"unknown")+(steps.length?" | Steps: "+steps.join(", "):"");
+      const value=[label,details].filter(Boolean).join("\n");
+      if(value)err=value.replace(/(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]+/gi,"[REDACTED]").replace(/Bearer\s+\S+/gi,"Bearer [REDACTED]");
+     }
+    }catch(extractError){console.error("Failed run diagnostic unavailable",draft.id,extractError);}
+   }
    const {error:attemptError}=await sb.from("panel_release_attempts").update({status:outcome,completed_at:run.updated_at||new Date().toISOString(),run_url:run.html_url||null,error_summary:err}).eq("draft_id",draft.id).eq("run_id",draft.last_run_id);
    if(attemptError)throw attemptError;
    const {error:draftError}=await sb.from("panel_release_drafts").update({status:nextStatus,last_error:err,last_run_url:run.html_url||null,updated_at:new Date().toISOString()}).eq("id",draft.id).eq("status","building").eq("last_run_id",draft.last_run_id);
@@ -1513,8 +1533,22 @@ export async function clearReleaseStateCore(data:{type:"base"|"engine";version:s
 
 export const startFreshRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;type:"base"|"engine";version:string;channel:string}})=>{
  const actor=readSession(data.token);
- if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to clear a release.");
- return clearReleaseStateCore({type:data.type,version:data.version,channel:data.channel});
+ if(!["owner","admin"].includes(String(actor.role||"").toLowerCase()))throw new Error("Admin access required to reset a Stage 1 draft.");
+ const version=String(data.version||"").trim();
+ if(!isOrbitReleaseVersion(version))throw new Error("A valid 2–4 part numeric release version is required.");
+ const channel=normalizeChannel(data.channel||"stable");
+ const releaseType=data.type==="base"?"base":"update";
+ const sb=authClient();
+ const {data:drafts,error:readError}=await sb.from("panel_release_drafts")
+  .select("id,status,last_run_id").eq("release_type",releaseType).eq("version",version).eq("channel",channel);
+ if(readError)throw new Error("Unable to read local Stage 1 drafts: "+readError.message);
+ const active=(drafts||[]).find((draft:any)=>["building","awaiting_receipt"].includes(String(draft.status||"").toLowerCase()));
+ if(active)throw new Error("This draft has an active or pending release attempt. Finish or cancel it before starting a new draft.");
+ const {error:deleteError}=await sb.from("panel_release_drafts").delete()
+  .eq("release_type",releaseType).eq("version",version).eq("channel",channel);
+ if(deleteError)throw new Error("Unable to clear local Stage 1 drafts: "+deleteError.message);
+ return {ok:true,version,channel,releaseType,deletedDrafts:(drafts||[]).length,
+  message:"Stage 1 draft reset. License Manager records, Billing publication and release history were not changed."};
 });
 
 export const controlRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;releaseId:string;action:"withdraw"}})=>{
@@ -1602,6 +1636,9 @@ async function requestJson(url:string,init:RequestInit={}){
    }
  }
  if(!r.ok){
+   if(r.status===401 && new URL(url).hostname==="lm.incendiarynetworks.cc"){
+     throw new Error("Fallback License Manager rejected the Dev Panel API credential (401). Verify the Dev Panel LICENSE_MASTER_API_TOKEN is an active managed key with releases.read permission in Fallback License Manager.");
+   }
    if(contentType.includes("text/html")||/^\\s*<!doctype html/i.test(text)||/^\\s*<html/i.test(text)){
      throw new Error(`License Master API returned HTTP ${r.status} for ${new URL(url).pathname}. The configured LICENSE_MASTER_URL may point at a deployment that does not expose this API route.`);
    }
@@ -1629,8 +1666,10 @@ async function github(path:string,init:RequestInit={}){
   else githubReadCache.clear();
   return value;
  }catch(error:any){
-  if(/rate limit/i.test(String(error?.message||error)))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+60000);
+  const message=String(error?.message||error);
+  if(/rate limit/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+60000);
   if(cached&&cached.staleUntil>Date.now())return cached.value;
+  if(/bad credentials/i.test(message))throw new Error("Fallback GitHub token rejected (401). Replace ORBITFS_FALLBACK_GITHUB_TOKEN in Fallback Dev Panel Vercel Production with an active Remi GitHub token. Update the matching GitHub Actions secret separately. Main credentials must not be used.");
   throw error;
  }
 }
@@ -1819,6 +1858,15 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   packages.filter((row:any)=>row.component===component&&["candidate","current"].includes(row.status)&&row.sourceRepo===MASTER_DATABASE_REPO&&row.sourceCommit===headSha)
    .sort((a:any,b:any)=>new Date(b.createdAt||b.publishedAt||0).getTime()-new Date(a.createdAt||a.publishedAt||0).getTime())[0]||null
  ]));
+ const allComponentsReady=MASTER_DATABASE_COMPONENTS.every(component=>Boolean((ready as any)[component]));
+ const registeredComponents=MASTER_DATABASE_COMPONENTS.filter(component=>Boolean((current as any)[component]||(candidates as any[]).some((row:any)=>row.component===component)));
+ const registeredSources=[...new Set(MASTER_DATABASE_COMPONENTS.flatMap(component=>{
+  const rows=packages.filter((row:any)=>row.component===component&&["candidate","current"].includes(String(row.status).toLowerCase()));
+  return rows.map((row:any)=>String(row.sourceCommit||"")).filter(Boolean);
+ }))];
+ const olderSourceCandidates=registeredComponents.length===MASTER_DATABASE_COMPONENTS.length&&!allComponentsReady&&
+  registeredSources.length===1&&registeredSources[0]!==headSha;
+ const hasManualValidation=buildRuns.some((run:any)=>run.headSha===headSha&&run.event==="workflow_dispatch"&&run.conclusion==="success");
  const deploymentEventsResult=await authClient().from("orbitfs_deployment_events").select("id,installation_id,event_type,status,message,detail,created_at").order("created_at",{ascending:false}).limit(80);
  const activity=(Array.isArray(deploymentEventsResult?.data)?deploymentEventsResult.data:[])
   .filter((row:any)=>{
@@ -1843,6 +1891,15 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
   current,
   candidates,
   ready,
+  manualSync:{
+   upToDate:allComponentsReady,
+   canRun:!allComponentsReady&&hasManualValidation,
+   olderSourceCandidates,
+   registeredSourceCommit:olderSourceCandidates?registeredSources[0]:null,
+   reason:allComponentsReady?"All current-source database packages are already registered.":olderSourceCandidates?
+    "All five components have registered candidates from "+registeredSources[0].slice(0,8)+", but central source is now "+headSha.slice(0,8)+". Source validation/release compatibility must be reconciled before another sync. No job will be queued.":
+    !hasManualValidation?"No successful manually validated package set exists for this source commit. Registration would fail; run the separate test validation first.":null
+  },
   activity,
   automation:{
    releaseIntegration:"automatic",
@@ -1860,10 +1917,45 @@ export const getDatabaseSystemState=createServerFn({method:"POST"}).handler(asyn
  };
 });
 
+export const runDatabaseSystemValidation=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;confirmTestReset:boolean}})=>{
+ requireOperationsUser(data.token);
+ if(data.confirmTestReset!==true)throw new Error("Explicit approval to reset the two disposable validation databases is required.");
+ const source=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
+ const headSha=String(source?.object?.sha||"");
+ if(!/^[a-f0-9]{40}$/i.test(headSha))throw new Error("Cannot verify central database source commit.");
+ const runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,20);
+ const existing=runs.find((run:any)=>run.headSha===headSha&&run.event==="workflow_dispatch"&&["queued","in_progress","waiting","pending"].includes(run.status));
+ if(existing)return {ok:true,reused:true,run:existing,sourceCommit:headSha,message:"Manual database validation is already running."};
+ const startedAt=Date.now();
+ await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_BUILD_WORKFLOW)}/dispatches`,{
+  method:"POST",
+  body:JSON.stringify({ref:MASTER_DATABASE_REF,inputs:{confirm_test_reset:true}})
+ });
+ const run=await latestDispatchedDatabaseRun(MASTER_DATABASE_BUILD_WORKFLOW,startedAt);
+ return {ok:true,run,sourceCommit:headSha,message:"Real-database validation queued for the two disposable test databases."};
+});
+
 export const runDatabaseSystemBuild=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;component:string;registerCandidate?:boolean;reason?:string}})=>{
  requireOperationsUser(data.token);
  const component=String(data.component||"all").trim().toLowerCase();
  if(!(MASTER_DATABASE_BUILD_TARGETS as readonly string[]).includes(component))throw new Error("Invalid database build target.");
+ if(data.registerCandidate){
+  if(component!=="all")throw new Error("Manual candidate sync must check the complete database component set.");
+  const source=await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/git/ref/heads/${encodeURIComponent(MASTER_DATABASE_REF)}`,{cache:"no-store"});
+  const headSha=String(source?.object?.sha||"");
+  if(!/^[a-f0-9]{40}$/i.test(headSha))throw new Error("Cannot verify central database source commit.");
+  const packages=await Promise.all(MASTER_DATABASE_COMPONENTS.map(async item=>{
+   const result=await licenseMaster(`/database-packages?component=${encodeURIComponent(item)}`);
+   const rows=Array.isArray(result?.packages)?result.packages:Array.isArray(result)?result:[];
+   return rows.some((row:any)=>String(row?.source_repo||row?.sourceRepo||"")===MASTER_DATABASE_REPO&&
+    String(row?.source_commit||row?.sourceCommit||"")===headSha&&
+    ["current","candidate"].includes(String(row?.status||"").toLowerCase()));
+  }));
+  if(packages.every(Boolean))return {ok:true,skipped:true,upToDate:true,message:"All central database packages are up to date; no workflow queued."};
+  const runs=await databaseWorkflowRuns(MASTER_DATABASE_BUILD_WORKFLOW,20);
+  if(!runs.some((run:any)=>run.headSha===headSha&&run.event==="workflow_dispatch"&&run.conclusion==="success"))
+   return {ok:true,skipped:true,requiresValidation:true,message:"No validated package set is available for this source commit. No workflow queued."};
+ }
  const startedAt=Date.now();
  await masterDatabaseGithub(`/repos/${MASTER_DATABASE_REPO}/actions/workflows/${encodeURIComponent(MASTER_DATABASE_CONTROL_WORKFLOW)}/dispatches`,{
   method:"POST",
@@ -1917,7 +2009,12 @@ async function repositorySyncConfig(){
 async function repositorySyncGithub(path:string,init:RequestInit={}){
  const cfg=await repositorySyncConfig();
  const token=required(cfg.side==="primary"?"ORBITFS_RELEASE_DISPATCH_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN");
- return requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
+ try{
+  return await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
+ }catch(error:any){
+  if(/bad credentials/i.test(String(error?.message||error)))throw new Error("Fallback GitHub mirror credential rejected (401). Update ORBITFS_FALLBACK_GITHUB_TOKEN before using mirror sync.");
+  throw error;
+ }
 }
 function cleanRepositorySyncRun(run:any){
  return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name}:null;

@@ -1,6 +1,6 @@
 import {useEffect,useMemo,useState} from "react";
 import {Activity,AlertTriangle,CheckCircle2,Database,ExternalLink,PackageCheck,Play,RefreshCw,Server,ShieldCheck,Wrench} from "lucide-react";
-import {getDatabaseSystemState,runDatabaseSystemBuild,runMainServiceDatabaseAction} from "@/lib/panel.server";
+import {getDatabaseSystemState,runDatabaseSystemBuild,runDatabaseSystemValidation,runMainServiceDatabaseAction} from "@/lib/panel.server";
 
 const PRODUCT_TARGETS=[
  ["all","All product databases"],
@@ -51,12 +51,23 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
   .sort((a:any,b:any)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime()),[state]);
 
  const verifyAll=async()=>{
+  if(!state?.manualSync?.canRun)return;
   setBusy("verify");setError("");setNotice("");
   try{
    const result=await runDatabaseSystemBuild({data:{token:session.token,component:"all",registerCandidate:true,reason:"Dev Panel manual verify and sync"}});
-   setNotice(result?.run?.id?`Verification workflow #${result.run.id} queued.`:"Product database verification queued.");
+   setNotice(result?.skipped?result.message:result?.run?.id?`Verification workflow #${result.run.id} queued.`:"Product database verification queued.");
    await load();
   }catch(e:any){setError(e?.message||"Unable to verify product databases.")}
+  finally{setBusy("")}
+ };
+ const validate=async()=>{
+  if(!window.confirm("RUN REAL DATABASE VALIDATION\n\nThis workflow resets the TWO REGISTERED DISPOSABLE V1 TEST DATABASES, validates all five product packages, and registers validated candidates in License Manager. Production databases are not targeted.\n\nConfirm reset of both disposable test databases?"))return;
+  setBusy("validate");setError("");setNotice("");
+  try{
+   const result=await runDatabaseSystemValidation({data:{token:session.token,confirmTestReset:true}});
+   setNotice(result?.run?.url?`Validation queued: workflow #${result.run.runNumber||result.run.id}. Refresh to view its result.`:result?.message||"Manual database validation queued.");
+   await load();
+  }catch(e:any){setError(e?.message||"Unable to start real-database validation.")}
   finally{setBusy("")}
  };
  const rebuild=async()=>{
@@ -84,6 +95,8 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
  const components=["base","engine-shared","mcp","apex","studio"];
  const validation=state?.automation?.latestValidation;
  const automaticReady=state?.automation?.centralReady===true;
+ const syncState=state?.manualSync;
+ const syncDisabled=loading||Boolean(busy)||!syncState?.canRun;
 
  return <section className="orbit-screen space-y-4">
   <div className="orbit-reference-head">
@@ -134,7 +147,7 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
   </section>
 
   <section className="orbit-panel p-4">
-   <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 font-semibold"><PackageCheck size={16}/> Release database packages</div><span className={automaticReady?"text-xs text-emerald-500":"text-xs text-amber-500"}>{automaticReady?"Ready for releases":"Needs verification"}</span></div>
+   <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 font-semibold"><PackageCheck size={16}/> Release database packages</div><span className={automaticReady?"text-xs text-emerald-500":"text-xs text-amber-500"}>{automaticReady?"Ready for releases":state?.manualSync?.olderSourceCandidates?"Registered candidates · source changed":"Needs verification"}</span></div>
    <div className="mt-4 overflow-x-auto">
     <table className="w-full min-w-[700px] text-left text-sm">
      <thead className="text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="pb-2">Component</th><th className="pb-2">Release state</th><th className="pb-2">Schema</th><th className="pb-2">Central source</th><th className="pb-2">Package</th></tr></thead>
@@ -173,7 +186,10 @@ export function DatabaseSystemWorkspace({session}:{session:any}){
     <div className="rounded-lg border p-4">
      <div className="font-semibold">Verify & sync product databases</div>
      <p className="mt-1 text-xs leading-5 text-muted-foreground">Runs the same real Base + Shared Engine + addon validation used by automatic release preparation and refreshes License Manager candidates.</p>
-     <button className="button-primary mt-4" disabled={Boolean(busy)} onClick={()=>void verifyAll()}><RefreshCw size={14} className={busy==="verify"?"animate-spin":""}/>{busy==="verify"?"Verifying…":"Verify & sync product databases"}</button>
+      <button className="button-primary mt-4" disabled={syncDisabled} title={syncState?.reason||undefined} onClick={()=>void verifyAll()}><RefreshCw size={14} className={busy==="verify"?"animate-spin":""}/>{busy==="verify"?"Verifying…":syncState?.upToDate?"Up to date":syncState?.olderSourceCandidates?"Source changed":syncState&&!syncState.canRun?"Verification unavailable":"Verify & sync product databases"}</button>
+      {syncState?.reason&&<p className="mt-2 text-xs text-muted-foreground">{syncState.reason}</p>}
+      {!syncState?.upToDate&&!syncState?.canRun&&<button className="button-secondary mt-3" disabled={loading||Boolean(busy)} onClick={()=>void validate()}><ShieldCheck size={14}/>{busy==="validate"?"Starting validation…":"Run real-database validation"}</button>}
+      {!syncState?.upToDate&&!syncState?.canRun&&<p className="mt-2 text-xs text-muted-foreground">Requires explicit approval to reset the two disposable validation databases. Successful validation registers License Manager candidates; refresh this page to see the updated state.</p>}
     </div>
     <div className="rounded-lg border p-4">
      <div className="font-semibold">Rebuild package only</div>

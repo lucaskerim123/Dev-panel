@@ -63,7 +63,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
   const groupedVisibleEntries=groupVaultItems(visibleEntries,item=>item.row);
   const eligible = useMemo(()=>entries.filter(entry=>entry.assessment.status==="ready").map(entry=>entry.row),[entries]);
   const missingReferences=useMemo(()=>project ? suggestUnsavedVercelKeys(records,project.name,inspected?envs.map(x=>x.key):[]) : [],[records,project,inspected,envs]);
-  const availableConfigs = inspected ? envs.filter(row=>row.type !== "sensitive" && row.visibility === "config" && planProductionKey(envs,row.key).action==="replace") : [];
+  const availableConfigs = inspected ? envs.filter(row=>!["sensitive","secret"].includes(row.type) && row.visibility !== "secret" && planProductionKey(envs,row.key).action==="replace") : [];
   const connectionStatus = tokenRow?.secret ? "Token saved in Vault · not yet verified" : "Not connected · add an account API token";
   function clearReview() {setReview([]);setAck(false);}
   function switchAccount(next:Account) {
@@ -155,7 +155,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
         const appliedItem=review.find(item=>item.id===row.id);
         if(!appliedItem)return row;
         const existing=(row.vercelTargets||[]).filter(t=>!(t.connection===account && t.projectId===sameProject.id));
-        return {...row,vercelTargets:[...existing,{connection:account,projectId:sameProject.id,projectName:sameProject.name,keyName:appliedItem.key}]};
+        return {...row,vercelTargets:[...existing,{connection:account,projectId:sameProject.id,projectName:sameProject.name,keyName:appliedItem.key}],syncReceipts:[...(row.syncReceipts||[]).filter(receipt=>!(receipt.provider==="Vercel"&&receipt.destination===sameProject.name&&receipt.keyName===appliedItem.key)),{provider:"Vercel" as const,destination:sameProject.name,account,keyName:appliedItem.key,at:new Date().toISOString()}]};
       });
       try {await onPersist(updated);}
       catch {throw new Error("Vercel accepted "+applied+" changes, but saving Vault target labels failed. Review Production; do not repeat the sync until checked.");}
@@ -185,23 +185,50 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
     });
   }
 
+  const [pullConflictMode,setPullConflictMode]=useState<"skip"|"override">("skip");
+  function exactVaultMatches(key:string,target:Project) {
+    return records.filter(row=>row.service==="Vercel" && row.keyName===key &&
+      row.usedIn?.includes(account) &&
+      (row.destinationSystem===target.name || row.vercelTargets?.some(t=>
+        t.connection===account && t.projectId===target.id && t.keyName===key)));
+  }
   async function importConfig(row:VercelEnvMeta) {
     if (!project) return;
     const target=project;
     await run("import-"+row.id,async()=>{
+      const matches=exactVaultMatches(row.key,target);
+      if(matches.length>1)throw new Error("Multiple Vault entries match this project and key. Resolve duplicates before pulling values.");
+      if(matches.length===1 && matches[0].secret?.trim() && pullConflictMode==="skip") {
+        setNotice(row.key+" skipped. Existing saved Vault value kept.");
+        return;
+      }
       const fetched=await importVaultVercelConfig({data:{
         ...connectionData(),projectId:target.id,envId:row.id,expectedUpdatedAt:row.updatedAt
       }});
-      const added:VaultRecord={
-        id:crypto.randomUUID(),systems:[systemForProject(target.name)],otherSystem:"",
-        service:"Vercel",customService:"",usedIn:[account],destinationSystem:target.name,needsReview:false,
-        keyName:fetched.key,secret:fetched.value,
-        vercelTargets:[{connection:account,projectId:target.id,projectName:target.name,keyName:fetched.key}]
-      };
-      // Never deduplicate by variable name: the same name may exist in Billing, License Manager and multiple projects.
-      await onPersist([added,...records]);
+      // Compare by exact account, project and key; never overwrite another system's value.
+      const current=exactVaultMatches(fetched.key,target);
+      if(current.length>1)throw new Error("Multiple saved entries match "+fetched.key+". Resolve duplicates first.");
+      const linked={connection:account,projectId:target.id,projectName:target.name,keyName:fetched.key};
+      if(current.length===1){
+        const saved=current[0];
+        const updated=records.map(existing=>existing.id===saved.id?{
+          ...existing,secret:fetched.value,
+          valueSource:"Vercel Production pull",
+          vercelTargets:[...(existing.vercelTargets||[]).filter(t=>!(t.connection===account && t.projectId===target.id)),linked]
+        }:existing);
+        await onPersist(updated);
+        setNotice(fetched.key+" "+(saved.secret?.trim()?"overridden":"filled")+" from "+target.name+" Production. No Vercel settings changed.");
+      }else{
+        const added:VaultRecord={
+          id:crypto.randomUUID(),systems:[systemForProject(target.name)],otherSystem:"",
+          service:"Vercel",customService:"",usedIn:[account],destinationSystem:target.name,needsReview:false,
+          keyName:fetched.key,secret:fetched.value,valueSource:"Vercel Production pull",
+          vercelTargets:[linked]
+        };
+        await onPersist([added,...records]);
+        setNotice(fetched.key+" imported into the encrypted Vault for "+account+" / "+target.name+". No Vercel settings changed.");
+      }
       clearReview();
-      setNotice(fetched.key+" imported from "+target.name+" Production as a separate encrypted Vault entry.");
     });
   }
   async function importNamesOnly(){
@@ -220,7 +247,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
         if(!known.has(recordIdentity(record))){additions.push(record);known.add(recordIdentity(record));}
       }
       if(additions.length)await onPersist([...additions,...records]);
-      setNotice(additions.length+" exact Production key names added as blank encrypted Vault records. Protected values were not accessed. No Vercel variables were changed.");
+      setNotice(additions.length+" Production names pulled into the encrypted Vault as blank references. No Vercel variables were created, overwritten or deleted.");
     });
   }
   return <section className="orbit-panel p-4 space-y-4">
@@ -262,9 +289,9 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
       </div>
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importNamesOnly()}>
-          <ArrowDownToLine size={14}/> Import exact names only (blank values)
+          <ArrowDownToLine size={14}/> Pull / Sync Production names (read-only)
         </button>
-        <span className="text-xs text-muted-foreground">Reads project metadata, never secrets; also works for Sensitive variables.</span>
+        <span className="text-xs text-muted-foreground">Pulls names only, including Sensitive variables. Existing values remain in Vercel. Readable Config values may be imported individually below.</span>
       </div>
       {missingReferences.length>0&&<details className="rounded border p-3 space-y-2">
         <summary className="cursor-pointer text-xs font-semibold">{vaultSystemLabel(systemForProject(project.name))} · {account==="main"?"Main":"Fallback"} · {missingReferences.length} reference names not yet saved (optional)</summary>
@@ -350,13 +377,17 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
       </div>}
       <div className="border-t pt-3 space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold"><ArrowDownToLine size={15}/> Vercel → Vault</div>
-        <p className="text-xs text-muted-foreground">Import readable Config values as separate Vault records. Sensitive and Secret values cannot be retrieved from Vercel.</p>
+        <p className="text-xs text-muted-foreground">Pull readable Config and legacy encrypted values into the matching Vault entry for this exact account, project and key. Values Vercel marks Sensitive or Secret cannot be retrieved. No Vercel variables are changed.</p>
+        <fieldset className="flex flex-wrap gap-4 text-xs"><legend className="font-semibold">When a Vault value already exists</legend>
+          <label className="flex items-center gap-2"><input type="radio" checked={pullConflictMode==="skip"} onChange={()=>setPullConflictMode("skip")}/> Skip existing (keep Vault value)</label>
+          <label className="flex items-center gap-2"><input type="radio" checked={pullConflictMode==="override"} onChange={()=>setPullConflictMode("override")}/> Override existing (replace Vault value from Vercel)</label>
+        </fieldset>
         <div className="max-h-44 overflow-auto">{availableConfigs.map(row=>
           <div key={row.id} className="flex justify-between items-center gap-2 border-b py-2 text-xs">
             <div><strong className="font-mono">{row.key}</strong><span className="block text-muted-foreground">From: {account} / {project.name} / Production</span></div>
-            <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importConfig(row)}>Import separate entry</button>
+            <button type="button" className="button-secondary" disabled={!!busy} onClick={()=>void importConfig(row)}>Pull value into Vault</button>
           </div>)}
-          {!availableConfigs.length&&<p className="text-xs text-muted-foreground">No readable Production-only Config values available to import.</p>}
+          {!availableConfigs.length&&<p className="text-xs text-muted-foreground">No potentially readable Production values available to import.</p>}
         </div>
       </div>
     </div>}

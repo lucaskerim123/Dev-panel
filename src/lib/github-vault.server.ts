@@ -1,4 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
+// A static import lets Nitro/Vercel trace and package libsodium for the server function.
+// Dynamic createRequire left it absent from deployed function bundles.
 import sodium from "libsodium-wrappers";
 import { requireVaultUser } from "@/lib/vault.server";
 import {
@@ -28,7 +30,21 @@ async function githubApi<T>(path: string, githubToken: string, init: RequestInit
   // Provider error bodies may contain sensitive information; never surface or log them.
   if (!response.ok) {
     if (response.status === 401) throw new Error("GitHub rejected the Vault token (401).");
-    if (response.status === 403) throw new Error("GitHub denied this operation (403). Check token repository Secrets, Variables and Environments permissions or rate limits.");
+    if (response.status === 403) {
+      const remaining=response.headers.get("x-ratelimit-remaining");
+      const reset=Number(response.headers.get("x-ratelimit-reset")||0);
+      const retryAfter=response.headers.get("retry-after");
+      if(remaining==="0" || retryAfter) {
+        const wait=retryAfter ? " Retry after "+retryAfter+" seconds." :
+          (reset>0 ? " Rate limit resets at "+new Date(reset*1000).toISOString()+"." : "");
+        throw new Error("GitHub API rate limit (403)."+wait);
+      }
+      const required=path.includes("/actions/secrets") ? "Actions Secrets" :
+        path.includes("/actions/variables") ? "Actions Variables" :
+        path.includes("/environments") ? "Environments" : "Repository access";
+      throw new Error("GitHub denied "+required+" (403) for "+path.split("?")[0].replace(new RegExp("^/repos/[^/]+/[^/]+"),"the selected repository")+
+        ". Check that the saved account token includes this repository and has the required read permissions. No Vault values were changed.");
+    }
     if (response.status === 404) throw new Error("GitHub repository or Actions endpoint unavailable (404). Check selected repository and token permissions.");
     if (response.status === 409 || response.status === 422) throw new Error("GitHub rejected the requested change (HTTP " + response.status + "). Inspect again.");
     if (response.status === 429) throw new Error("GitHub rate limit reached.");
@@ -81,12 +97,14 @@ async function productionEnvironment(owner:string, repo:string, githubToken:stri
   return matches[0]!.name!;
 }
 
-function normalizeRows(items: unknown): GithubItem[] {
+function normalizeRows(items: unknown, kind: GithubKind): GithubItem[] {
   if (!Array.isArray(items)) throw new Error("GitHub did not return an Actions inventory.");
   return items.map((x:any)=>({
     name: typeof x?.name==="string" ? x.name : "",
     updatedAt: typeof x?.updated_at==="string" ? x.updated_at : null,
     createdAt: typeof x?.created_at==="string" ? x.created_at : null,
+    // GitHub Actions variables are readable; encrypted Actions secrets are not.
+    ...(kind==="variable"&&typeof x?.value==="string"?{value:x.value}:{})
   })).filter(x=>Boolean(x.name));
 }
 
@@ -97,7 +115,7 @@ async function inventory(input: Target, owner: string, repo: string) {
   for(let page=1;page<=10;page++){
     const path = base + "?per_page=100&page=" + page;
     const result = await githubApi<{total_count?:number;secrets?:unknown[];variables?:unknown[]}>(path,input.githubToken);
-    const batch = normalizeRows(input.kind==="secret" ? result.secrets : result.variables);
+    const batch = normalizeRows(input.kind==="secret" ? result.secrets : result.variables,input.kind);
     all = all.concat(batch);
     if(batch.length<100) return {items:all,environment:environment||null,base};
   }

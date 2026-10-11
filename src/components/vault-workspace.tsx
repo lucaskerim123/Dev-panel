@@ -1,18 +1,61 @@
 import { useEffect, useMemo, useState } from "react";
 import { KeyRound, Lock, Plus, Search, ShieldCheck, Trash2, Copy, Pencil, X, Eye, EyeOff, Upload, Download } from "lucide-react";
-import { getVaultEnvelope, saveVaultEnvelope } from "@/lib/vault.server";
+import { getVaultEnvelope, saveVaultEnvelope, clearVaultEnvelope } from "@/lib/vault.server";
 import { VaultVercelSync } from "@/components/vault-vercel-sync";
+import { VaultVercelSyncAll } from "@/components/vault-vercel-sync-all";
 import { VaultGithubSync } from "@/components/vault-github-sync";
+import { VaultProviderRecovery } from "@/components/vault-provider-recovery";
 import { VaultInventorySection } from "@/components/vault-inventory-section";
 import { VaultSetupGuide } from "@/components/vault-setup-guide";
-import { VAULT_SYSTEMS, VAULT_SERVICES, normalizeVaultRecord, recordIdentity, type VaultMode } from "@/lib/vault-schema";
+import { VAULT_SYSTEMS, VAULT_SERVICES, normalizeVaultRecord, recordIdentity, vaultDestinations, type VaultMode } from "@/lib/vault-schema";
 import { groupVaultItems } from "@/lib/vault-grouping";
 import { createEnvelope, decryptEnvelope, type VaultEnvelope, type VaultRecord } from "@/lib/vault-crypto";
 import { preserveVaultConnections, isVaultConnection, bestVaultConnection, usableConnectionValue } from "@/lib/vault-connections";
 
 const SYSTEMS=[...VAULT_SYSTEMS];
+const VAULT_DESTINATIONS = [
+  {mode:"main",system:"License",service:"GitHub",value:"lucaskerim123/Custom-licence-manager"},
+  {mode:"main",system:"Billing",service:"GitHub",value:"lucaskerim123/V2_Billing_Store"},
+  {mode:"main",system:"Dev",service:"GitHub",value:"lucaskerim123/Dev-panel"},
+  {mode:"fallback",system:"License",service:"GitHub",value:"remipetrovich-design/OrbitFS-License-Administration"},
+  {mode:"fallback",system:"Billing",service:"GitHub",value:"remipetrovich-design/OrbitFS-Billing-Shopfront"},
+  {mode:"fallback",system:"Dev",service:"GitHub",value:"remipetrovich-design/OrbitFS-Control-Centre"},
+  {mode:"fallback",system:"AI Repair Centre",service:"GitHub",value:"remipetrovich-design/AI-Repair-Centre"},
+  {mode:"main",system:"License",service:"Vercel",value:"custom-licence-manager"},
+  {mode:"main",system:"Billing",service:"Vercel",value:"v2-billing-store"},
+  {mode:"main",system:"Dev",service:"Vercel",value:"base-deploy-panel"},
+  {mode:"fallback",system:"License",service:"Vercel",value:"orbitfs-license-fallback"},
+  {mode:"fallback",system:"Billing",service:"Vercel",value:"orbitfs-billing-fallback"},
+  {mode:"fallback",system:"Dev",service:"Vercel",value:"orbitfs-dev-panel-fallback"}
+] as const;
+const destinationsFor = (_system:string,service:string,_modes:VaultMode[]) =>
+  VAULT_DESTINATIONS.filter(item=>item.service===service);
+
 const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
 const SERVICES=[...VAULT_SERVICES];
+const VAULT_TABS = ["License","Billing","Dev","Base System","Shared Engine","AI Repair Centre","Database","Other"] as const;
+type VaultTab = typeof VAULT_TABS[number];
+const vaultTabLabel=(tab:VaultTab)=>tab==="Base System"?"Base":tab==="Shared Engine"?"Engine":tab;
+function vaultMatchesTab(row:VaultRecord,tab:VaultTab):boolean {
+  const original=row.systems.some(x=>x.toLowerCase()===tab.toLowerCase() || (tab==="Database"&&/database/i.test(x)));
+  const destinations=vaultDestinations(row);
+  const mapped=destinations.some(value=>{
+    const matches=VAULT_DESTINATIONS.some(target=>target.value.toLowerCase()===value.toLowerCase()&&target.system===tab);
+    if(matches)return true;
+    if(tab==="Base System")return /(?:base-system|vercel-base|base-deploy)/i.test(value);
+    if(tab==="Shared Engine")return /(?:engine|updater)/i.test(value);
+    if(tab==="Database")return /(?:database|supabase)/i.test(value);
+    return false;
+  });
+  return original||mapped;
+}
+function vaultMatchesMode(row:VaultRecord,mode:VaultMode):boolean {
+  const selected=vaultDestinations(row);
+  const catalog=VAULT_DESTINATIONS.filter(target=>selected.some(value=>target.value.toLowerCase()===value.toLowerCase()));
+  const explicit=catalog.length>0?catalog.some(target=>target.mode===mode):false;
+  return explicit||(row.usedIn||[]).includes(mode);
+}
+
 
 export function VaultWorkspace({session}:{session:any}){
   const [phase,setPhase]=useState<"loading"|"setup"|"locked"|"open">("loading");
@@ -22,18 +65,28 @@ export function VaultWorkspace({session}:{session:any}){
   const [activePassword,setActivePassword]=useState("");
   const [records,setRecords]=useState<VaultRecord[]>([]);
   const [query,setQuery]=useState("");
+  const [browseMode,setBrowseMode]=useState<Record<"Vercel"|"GitHub",VaultMode>>({Vercel:"main",GitHub:"main"});
+  const [browseTab,setBrowseTab]=useState<Record<"Vercel"|"GitHub",VaultTab>>({Vercel:"License",GitHub:"License"});
+  const [syncProvider,setSyncProvider]=useState<"Vercel"|"GitHub">("Vercel");
+  const [providerSyncOpen,setProviderSyncOpen]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   const [busy,setBusy]=useState(false);
   const [visible,setVisible]=useState<string[]>([]);
   const [draftVisible,setDraftVisible]=useState(false);
   const [importRows,setImportRows]=useState<VaultRecord[]>([]);
+  const [importConflicts,setImportConflicts]=useState<Array<{identity:string;keyName:string;options:Array<{row:VaultRecord;line:number}>}>>([]);
+  const [importConflictChoices,setImportConflictChoices]=useState<Record<string,string>>({});
+  const [importMergedCount,setImportMergedCount]=useState(0);
   const [importMode,setImportMode]=useState<"skip"|"override"|"replace-all">("skip");
   const [replaceApproved,setReplaceApproved]=useState(false);
+  const [showClearVault,setShowClearVault]=useState(false);
+  const [clearConfirmation,setClearConfirmation]=useState("");
   const [editing,setEditing]=useState<VaultRecord|null>(null);
+  const [customDestination,setCustomDestination]=useState(false);
   const [pendingMigration,setPendingMigration]=useState<VaultRecord[]|null>(null);
-  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
-  const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:""});
+  const [draft,setDraft]=useState({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[]});
+  const blankDraft=()=>({system:"Billing",otherSystem:"",service:"Vercel",customService:"",keyName:"",secret:"",purpose:"",usedIn:["main"] as VaultMode[],destinationSystem:"",destinationSystems:[] as string[]});
 
   useEffect(()=>{void loadEnvelope()},[session?.token]);
 
@@ -79,25 +132,86 @@ export function VaultWorkspace({session}:{session:any}){
     try{
       const system=draft.system.trim(),service=draft.service.trim(),keyName=draft.keyName.trim();
       if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyName))throw new Error("Use the exact environment key name (letters, numbers and underscores). No guessed prefixes.");
-      if(!draft.destinationSystem.trim())throw new Error("Choose the exact destination project or repository before saving.");
-      if(!draft.usedIn.length)throw new Error("Select Main and/or Fallback.");
+      if(!draft.destinationSystems.length)throw new Error("Choose at least one exact destination project or repository before saving.");
+      // Explicit destination selection controls targeting; usedIn is a display label only.
       if(!system||!service||!keyName)throw new Error("System, service and key name are required.");
-      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,purpose:draft.purpose,usedIn:draft.usedIn,destinationSystem:draft.destinationSystem.trim(),needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets};
+      const record:VaultRecord={id:editing?.id||crypto.randomUUID(),systems:[system],otherSystem:system==="Other"?draft.otherSystem.trim():"",service,customService:service==="Other"?draft.customService.trim():"",keyName,secret:draft.secret,purpose:draft.purpose,usedIn:Array.from(new Set(draft.destinationSystems.flatMap(value=>VAULT_DESTINATIONS.filter(item=>item.value===value).map(item=>item.mode)).concat(draft.usedIn))) as VaultMode[],destinationSystem:draft.destinationSystems[0]||"",destinationSystems:draft.destinationSystems,needsReview:false,legacyKeyName:editing?.legacyKeyName,vercelTargets:editing?.vercelTargets,githubTargets:editing?.githubTargets,syncReceipts:editing?.keyName===keyName&&editing?.secret===draft.secret?editing?.syncReceipts:[]};
       const next=editing?records.map(row=>row.id===editing.id?record:row):[record,...records];
-      await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setNotice(editing?"Vault entry updated.":"Vault entry saved.");
+      await persist(next);setPendingMigration(null);setEditing(null);setDraft(blankDraft());setCustomDestination(false);setNotice(editing?"Vault entry updated.":"Vault entry saved.");
     }catch(x:any){setError(x.message||"Unable to save Vault entry.")}
     finally{setBusy(false)}
   }
 
-  function downloadEncryptedBackup(){
-    if(!envelope){setError("Encrypted Vault is unavailable.");return;}
-    const blob=new Blob([JSON.stringify({format:"orbitfs-vault-encrypted-backup-v1",envelope},null,2)+"\n"],{type:"application/json"});
-    const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="orbitfs-vault-encrypted-backup.json";a.click();URL.revokeObjectURL(url);
+  async function clearVault(){
+    if(clearConfirmation!=="CLEAR VAULT"||!envelope?.updatedAt||busy)return;
+    setBusy(true);setError("");setNotice("");
+    try{
+      await clearVaultEnvelope({data:{token:session.token,confirmation:clearConfirmation,expectedUpdatedAt:envelope.updatedAt}});
+      setRecords([]);setEnvelope(null);setActivePassword("");setPassword("");setConfirm("");
+      setVisible([]);setDraftVisible(false);setImportRows([]);setEditing(null);
+      setDraft(blankDraft());setPendingMigration(null);setCustomDestination(false);
+      setShowClearVault(false);setClearConfirmation("");
+      setPhase("setup");
+      setNotice("The encrypted Vault has been cleared. GitHub, Vercel and all other databases were not changed.");
+    }catch(e:any){setError(e?.message||"Could not clear the Vault. No reset was confirmed.")}
+    finally{setBusy(false)}
+  }
+
+  async function downloadEncryptedBackup(){
+    setError("");setNotice("");
+    try {
+      // Fetch the latest persisted ciphertext, not an unsaved UI draft.
+      const current=await getVaultEnvelope({data:{token:session.token}});
+      if(!current.exists||!current.envelope)throw new Error("Encrypted Vault is unavailable.");
+      const latest=current.envelope as VaultEnvelope;
+      const savedRecords=await decryptEnvelope(activePassword,latest);
+      if(!Array.isArray(savedRecords))throw new Error("Vault backup validation failed.");
+      const backup={format:"orbitfs-vault-encrypted-backup-v1",envelope:latest};
+      const blob=new Blob([JSON.stringify(backup,null,2)+"\n"],{type:"application/json"});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement("a");
+      link.href=url;
+      link.download="orbitfs-vault-encrypted-backup-"+new Date().toISOString().slice(0,10)+".json";
+      link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+      setNotice("Encrypted backup prepared from the latest saved Vault ("+savedRecords.length+" entries). Keep the downloaded file and your Vault PIN safe; no secret values are written in plaintext.");
+    }catch(e:any){setError("Unable to export a verified Vault backup: "+String(e?.message||"unknown error"));}
   }
 
   function downloadTemplate(){
     const blob=new Blob([JSON.stringify(IMPORT_TEMPLATE,null,2)+"\n"],{type:"application/json"});
     const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="orbitfs-vault-import-template.json";link.click();URL.revokeObjectURL(url);
+  }
+
+  function downloadCurrentValuesJson(){
+    setError("");setNotice("");
+    if(!records.length){setError("The Vault has no saved entries to export.");return;}
+    const populated=records.filter(row=>Boolean(row.secret)).length;
+    if(!window.confirm("Export "+records.length+" Vault entries, including "+populated+" saved plaintext values? The downloaded JSON is NOT encrypted and anyone with the file can read its secrets. Store it securely and delete copies after use."))return;
+    const payload={
+      format:"orbitfs-vault-import-v2",
+      exportedAt:new Date().toISOString(),
+      warning:"UNENCRYPTED FILE: contains any stored Vault secret values. Protect this file.",
+      entries:records.map(row=>({
+        service:row.service,
+        system:row.systems[0]||"Other",
+        keyName:row.keyName,
+        keyValue:row.secret||"",
+        purpose:row.purpose||"",
+        usedIn:row.usedIn||[],
+        destinationSystem:row.destinationSystem||"",
+        destinationSystems:row.destinationSystems?.length?row.destinationSystems: vaultDestinations(row),
+        valueSource:row.valueSource||"Vault saved value"
+      }))
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)+"\\n"],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;
+    link.download="orbitfs-vault-with-values-"+new Date().toISOString().slice(0,10)+".json";
+    link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setNotice("Exported "+records.length+" entries ("+populated+" saved values) as UNENCRYPTED JSON. The existing JSON import accepts this format. Protect the file.");
   }
 
   async function restoreConnectionsFromBackup(event:React.ChangeEvent<HTMLInputElement>){
@@ -124,7 +238,7 @@ export function VaultWorkspace({session}:{session:any}){
   }
 
   async function prepareImport(event:React.ChangeEvent<HTMLInputElement>){
-    setError("");setNotice("");setImportRows([]);setReplaceApproved(false);
+    setError("");setNotice("");setImportRows([]);setImportConflicts([]);setImportConflictChoices({});setImportMergedCount(0);setReplaceApproved(false);
     const file=event.target.files?.[0];event.target.value="";if(!file)return;
     try{
       if(file.size>1024*1024)throw new Error("Import file must be 1 MB or smaller.");
@@ -144,27 +258,54 @@ export function VaultWorkspace({session}:{session:any}){
           otherSystem:"",service:String(item.service||"Other"),customService:"",
           keyName:rawName,secret:rawSecret,purpose:String(item.purpose||""),valueSource:String(item.valueSource||""),
           usedIn:modern?(Array.isArray(item.usedIn)?item.usedIn:[]):undefined,
-          destinationSystem:modern?String(item.destinationSystem||""):""
+          destinationSystem:modern?String(item.destinationSystem||""):"",
+          destinationSystems:modern&&Array.isArray(item.destinationSystems)?item.destinationSystems.map(String):undefined
         };
         return normalizeVaultRecord(record);
       });
-      const seen=new Set<string>();
-      for(const row of rows){
-        const id=recordIdentity(row);
-        if(seen.has(id))throw new Error("Duplicate same-system destination in import: "+row.keyName);
-        seen.add(id);
+      // Import exports often contain multiple records for an identical exact
+      // service/system/mode/destination/key. Collapse identical/blank duplicates,
+      // but never silently choose between two different nonblank credentials.
+      const groups=new Map<string,Array<{row:VaultRecord;line:number}>>();
+      rows.forEach((row,index)=>{
+        const identity=recordIdentity(row);
+        const entries=groups.get(identity)||[];
+        entries.push({row,line:index+1});groups.set(identity,entries);
+      });
+      const merged:VaultRecord[]=[];
+      const conflicts:Array<{identity:string;keyName:string;options:Array<{row:VaultRecord;line:number}>}>=[];
+      let duplicates=0;
+      for(const [identity,entries] of groups){
+        duplicates+=entries.length-1;
+        const values=[...new Set(entries.map(x=>x.row.secret).filter(v=>v.trim()))];
+        // Prefer the populated entry over an empty placeholder, regardless of row order.
+        const preferred=entries.find(x=>x.row.secret===values[0])||entries[0]!;
+        merged.push(preferred.row);
+        if(values.length>1){
+          conflicts.push({identity,keyName:preferred.row.keyName,
+            options:entries.filter(x=>x.row.secret.trim() && values.includes(x.row.secret))});
+        }
       }
-      setImportRows(rows);
+      setImportRows(merged);
+      setImportConflicts(conflicts);
+      setImportConflictChoices({});
+      setImportMergedCount(duplicates);
+      setNotice(merged.length+" unique entries loaded from "+rows.length+" JSON rows. "+
+        (conflicts.length?conflicts.length+" conflicting values need a selection below before import.":"Duplicate blanks and matching values were safely consolidated."));
     }catch(x:any){setError(x.message||"Unable to read import file.")}
   }
 
   async function confirmImport(){
+    if(importConflicts.some(group=>!importConflictChoices[group.identity])){
+      setError("Choose which value to keep for all "+importConflicts.length+" conflicting JSON entries before importing.");
+      return;
+    }
     if(importMode==="replace-all"&&!replaceApproved){setError("Export the old Vault as a backup and confirm the full replacement before proceeding.");return;}
     setBusy(true);setError("");
     try{
       const existing=new Map(records.map(row=>[recordIdentity(row),row]));
       const additions=importRows.filter(row=>!existing.has(recordIdentity(row)));
-      const overrides=importMode==="override"?importRows.filter(row=>existing.has(recordIdentity(row))):[];
+      const overrides=importMode==="override"?importRows.filter(row=>existing.has(recordIdentity(row)) && (Boolean(row.secret.trim()) || !existing.get(recordIdentity(row))?.secret?.trim())):[];
       const replacements=new Map(overrides.map(row=>[recordIdentity(row),row]));
       if(importMode!=="replace-all"&&!additions.length&&!overrides.length)throw new Error("Nothing new to import.");
       const next=records.map(row=>{
@@ -172,40 +313,50 @@ export function VaultWorkspace({session}:{session:any}){
         return replacement?{...replacement,id:row.id,vercelTargets:row.vercelTargets,githubTargets:row.githubTargets}:row;
       });
       const replacement=preserveVaultConnections(records,importMode==="replace-all"?importRows:[...additions,...next]);
-      await persist(replacement);setPendingMigration(null);setImportRows([]);setReplaceApproved(false);
+      await persist(replacement);setPendingMigration(null);setImportRows([]);setImportConflicts([]);setImportConflictChoices({});setImportMergedCount(0);setReplaceApproved(false);
       setNotice(importMode==="replace-all"?"Other keys replaced; saved GitHub/Vercel account connections protected. "+importRows.length+" imported entries processed.":"Added "+additions.length+", replaced "+overrides.length+", skipped "+(importRows.length-additions.length-overrides.length)+".");
     }catch(x:any){setError(x.message||"Import failed.")}finally{setBusy(false)}
   }
 
   async function remove(id:string){
-    if(!window.confirm("Remove this Vault entry?"))return;
+    if(!window.confirm("Remove this entry from the encrypted Vault only? GitHub Actions secrets/variables and Vercel environment variables will NOT be deleted."))return;
     setBusy(true);setError("");
-    try{await persist(records.filter(row=>row.id!==id));setNotice("Vault entry removed.")}
+    try{await persist(records.filter(row=>row.id!==id));setNotice("Vault entry removed locally. GitHub and Vercel were not changed.")}
     catch(x:any){setError(x.message||"Unable to remove Vault entry.")}
     finally{setBusy(false)}
   }
 
   function edit(row:VaultRecord){
     const normalized=normalizeVaultRecord(row);
+    setCustomDestination(false);
     setEditing(row);setDraft({
       system:normalized.systems[0]||"Other",otherSystem:normalized.otherSystem||"",
       service:normalized.service,customService:normalized.customService||"",
       keyName:normalized.keyName,secret:normalized.secret,purpose:normalized.purpose||"",
-      usedIn:normalized.usedIn||[],destinationSystem:normalized.destinationSystem||""
+      usedIn:normalized.usedIn||[],destinationSystem:normalized.destinationSystem||"",destinationSystems:vaultDestinations(normalized)
     });
     requestAnimationFrame(()=>document.getElementById("vault-entry-editor")?.scrollIntoView({behavior:"smooth",block:"start"}));
   }
 
   const filtered=useMemo(()=>{
     const q=query.trim().toLowerCase();
-    return records.filter(row=>!q||[row.systems[0],row.service,row.keyName,row.destinationSystem,...(row.usedIn||[])].some(v=>String(v||"").toLowerCase().includes(q)));
+    return records.filter(row=>!q||[row.systems[0],row.service,row.keyName,...vaultDestinations(row),...(row.usedIn||[])].some(v=>String(v||"").toLowerCase().includes(q)));
   },[records,query]);
+  function openOutboundSync(provider:"GitHub"|"Vercel"){
+    setSyncProvider(provider);
+    setProviderSyncOpen(true);
+    requestAnimationFrame(()=>document.getElementById("vault-provider-sync")?.scrollIntoView({behavior:"smooth",block:"start"}));
+  }
+  const syncCounts={
+    GitHub:records.filter(row=>row.service==="GitHub"&&!isVaultConnection(row)&&vaultDestinations(row).length>0).length,
+    Vercel:records.filter(row=>row.service==="Vercel"&&!isVaultConnection(row)&&vaultDestinations(row).length>0).length
+  };
   const groupedEntries=groupVaultItems(filtered,row=>row);
-  const needingReview=records.filter(row=>row.needsReview||!row.destinationSystem||!row.usedIn?.length);
+  const needingReview=records.filter(row=>row.needsReview||!vaultDestinations(row).length);
 
-  if(phase!=="open")return <section className="space-y-4">
+  if(phase!=="open")return <section className="min-w-0 w-full max-w-full space-y-4 overflow-x-hidden">
     <div className="orbit-reference-page-head"><p>SECURE OPERATIONS</p><h1>Vault</h1><span>Persistent encrypted credentials with a separate Vault unlock.</span></div>
-    <div className="orbit-panel p-4"><div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div><h2>Vercel Production connections</h2><p>Main and Fallback account sync is available after you unlock the Vault. No Vercel variables change until you review and approve them.</p></div></div></div>
+    <div className="orbit-panel min-w-0 max-w-full p-4"><div className="orbit-section-head"><span className="orbit-section-icon"><ShieldCheck size={15}/></span><div><h2>Vercel Production connections</h2><p>Main and Fallback account sync is available after you unlock the Vault. No Vercel variables change until you review and approve them.</p></div></div></div>
     <div className="mx-auto max-w-lg orbit-panel p-5">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Lock size={15}/></span><div><h2>{phase==="setup"?"Create Vault":"Unlock Vault"}</h2><p>{phase==="setup"?"Create a numeric PIN of at least 6 digits to encrypt this Vault.":"Your Dev Panel session is active. Unlock the encrypted Vault separately."}</p></div></div>
       {error&&<div className="mt-4 rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
@@ -219,7 +370,22 @@ export function VaultWorkspace({session}:{session:any}){
   </section>;
 
   return <section className="space-y-4">
-    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
+    <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" type="button" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
+    <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-3" aria-label="Sync Vault to providers">
+      <h2 className="text-sm font-semibold">Sync from Vault → GitHub / Vercel</h2>
+      <p className="text-xs text-muted-foreground">Your saved Vault entries are the desired values for these destinations. Sync compares the exact assigned target, then lets you review and confirm creating or overriding values. Nothing deletes remote secrets or variables.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="button-primary" onClick={()=>openOutboundSync("GitHub")}><Upload size={14}/> Sync Vault → GitHub ({syncCounts.GitHub})</button>
+        <button type="button" className="button-primary" onClick={()=>openOutboundSync("Vercel")}><Upload size={14}/> Sync Vault → Vercel ({syncCounts.Vercel})</button>
+      </div>
+      <p className="text-xs text-muted-foreground">Syncing needs an unlocked Vault, valid account credentials, a selected repository or project, and explicit approval for each write. GitHub secret values cannot be compared remotely, so no automatic secret drift verdict is implied. Runtime services still use provider-side variables; they do not read directly from this browser-encrypted Vault.</p>
+    </section>
+    <VaultVercelSyncAll session={session} records={records} onPersist={persist}/>
+    <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-2" aria-label="Vault encrypted backup">
+      <h2 className="text-sm font-semibold">Backup your current Vault</h2>
+      <p className="text-xs text-muted-foreground">Download the latest saved encrypted entries before redesigning. Your saved keys are not changed.</p>
+      <button type="button" className="button-primary flex w-full items-center justify-center gap-2 sm:w-auto" onClick={()=>void downloadEncryptedBackup()}><Download size={16}/> Download encrypted Vault backup</button>
+    </section>
     {error&&<div className="rounded-lg border border-red-400/40 bg-red-400/10 p-3 text-xs text-red-100">{error}</div>}
     {notice&&<div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">{notice}</div>}
     <div className="orbit-panel p-4 space-y-2">
@@ -233,29 +399,60 @@ export function VaultWorkspace({session}:{session:any}){
         <button type="button" className="button-secondary" disabled={busy} onClick={()=>void (async()=>{setBusy(true);setError("");try{await persist(records);setPendingMigration(null);setNotice("Corrected Vault names saved in encrypted storage. No Vercel or GitHub variables changed.");}catch(e:any){setError(e?.message||"Could not save migration")}finally{setBusy(false)}})()}>Save reviewed Vault migration</button>
       </div>}
     </div>
-    <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
-    <section className="orbit-panel overflow-hidden">
-      <div className="border-b p-4"><h2 className="text-sm font-semibold mb-1">Saved keys · by system and account</h2><p className="text-xs text-muted-foreground mb-3">Open a system, then Main or Fallback. Entries used in both accounts appear in both groups. Search expands matching groups.</p><div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input className="control pl-9" placeholder="Search system, service or key name…" value={query} onChange={e=>setQuery(e.target.value)}/></div></div>
-      <div className="p-3 space-y-3">
-        {groupedEntries.map(group=><details key={group.system+"-"+(query.trim()?"search":"browse")} open={Boolean(query.trim())||group.system==="Billing"} className="rounded-lg border">
-          <summary className="cursor-pointer flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">
-            <span>{group.label}</span><span className="text-xs text-muted-foreground">{group.count} saved keys</span>
-          </summary>
-          <div className="border-t p-3 space-y-2">
-            {group.sections.map(section=><details key={group.system+"-"+section.mode+"-"+(query.trim()?"search":"browse")} open={Boolean(query.trim())||section.mode==="main"} className="rounded-md border">
-              <summary className="cursor-pointer flex justify-between items-center gap-2 px-3 py-2 text-xs font-semibold">
-                <span>{section.label}</span><span className="text-muted-foreground">{section.items.length} keys</span>
-              </summary>
-              <div className="border-t">{section.items.map(row=><div key={row.id} className="border-b p-4 last:border-b-0"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-xs font-semibold break-all">{row.keyName}</p><p className="mt-1 text-[10px] text-muted-foreground">From: {row.systems.join(" / ")} · {row.service}{row.vercelTargets?.length?` · Linked to: ${row.vercelTargets.map(target=>target.connection+" / "+target.projectName).join(", ")}`:""}</p>{row.purpose&&<p className="mt-1 text-xs text-muted-foreground">{row.purpose}</p>}<p className="mt-1 text-xs"><strong>Used in:</strong> {(row.usedIn||[]).map(m=>m==="main"?"Main":"Fallback").join(" / ")||"Needs review"} · <strong>Destination:</strong> {row.destinationSystem||"Not assigned"} {row.legacyKeyName&&<span className="block text-amber-500">Legacy key: {row.legacyKeyName} → {row.keyName}</span>}{row.needsReview&&<span className="block text-amber-500">Unverified legacy key/destination · edit before syncing</span>}</p><p className="mt-2 font-mono text-xs break-all text-muted-foreground">{visible.includes(row.id)?(row.secret||"(blank)"):(row.secret?"••••••••••••":"(blank)")}</p></div><div className="flex gap-1"><button type="button" className="icon-button" title={visible.includes(row.id)?"Hide secret":"Show secret"} aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(current=>current.includes(row.id)?current.filter(id=>id!==row.id):[...current,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button><button type="button" className="icon-button" title="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button><button className="icon-button" title="Edit" onClick={()=>edit(row)}><Pencil size={14}/></button><button className="icon-button" title="Remove" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button></div></div></div>)}</div>
-            </details>)}
+    {(["Vercel","GitHub"] as const).map(provider=>{
+      const mode=browseMode[provider],tab=browseTab[provider];
+      const current=records.filter(row=>row.service===provider&&vaultMatchesMode(row,mode)&&vaultMatchesTab(row,tab)&&
+        (!query.trim()||[row.keyName,row.purpose||"",...vaultDestinations(row)].some(v=>v.toLowerCase().includes(query.trim().toLowerCase()))));
+      return <details key={provider} className="orbit-panel min-w-0 max-w-full overflow-hidden" open={undefined}>
+        <summary className="cursor-pointer px-4 py-4 font-semibold text-sm">{provider} · {records.filter(row=>row.service===provider).length} saved entries</summary>
+        <div className="border-t p-3 sm:p-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={provider+" account mode"}>
+            {(["main","fallback"] as VaultMode[]).map(value=><button type="button" key={value} aria-pressed={mode===value} className={mode===value?"button-primary":"button-secondary"} onClick={()=>setBrowseMode(prev=>({...prev,[provider]:value}))}>{value==="main"?"Main":"Fallback"}</button>)}
           </div>
-        </details>)}
-        {!groupedEntries.length&&<div className="p-8 text-center text-xs text-muted-foreground">{records.length?"No Vault entries match your search.":"No Vault entries yet."}</div>}
-      </div>
-    </section>
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label={provider+" system selector"}>
+            {VAULT_TABS.map(value=><button type="button" key={value} role="tab" aria-selected={tab===value} className={tab===value?"button-primary":"button-secondary"} onClick={()=>setBrowseTab(prev=>({...prev,[provider]:value}))}>{vaultTabLabel(value)}</button>)}
+          </div>
+          <div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input aria-label={provider+" key search"} className="control w-full min-w-0 pl-9" placeholder="Search saved variables and destinations…" value={query} onChange={e=>setQuery(e.target.value)}/></div>
+          <p className="text-xs text-muted-foreground">{current.length} entries · Tabs organise keys; they do not limit where they can be used.</p>
+          <div className="space-y-2">
+            {current.map(row=><article key={row.id} className="min-w-0 rounded-lg border p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="break-all font-mono text-xs font-semibold">{row.keyName}</p>
+                  {row.purpose&&<p className="mt-1 break-words text-xs text-muted-foreground">{row.purpose}</p>}
+                  <div className="mt-2 space-y-1 text-xs">
+                    {vaultDestinations(row).map(destination=>{
+                      const receipt=(row.syncReceipts||[]).filter(item=>item.provider===provider&&item.destination.toLowerCase()===destination.toLowerCase()&&item.keyName===row.keyName).sort((a,b)=>b.at.localeCompare(a.at))[0];
+                      return <p key={destination} className="break-all rounded border px-2 py-1">
+                        <span className="font-medium">{destination}</span> · {receipt?"Sent / accepted":"Assigned · not confirmed sent"}
+                        {receipt&&<span className="block text-muted-foreground">Last sent: {new Date(receipt.at).toLocaleString()} · {receipt.account==="main"?"Main":"Fallback"}{receipt.scope?" · "+receipt.scope:""}{receipt.kind?" · "+receipt.kind:""}</span>}
+                      </p>;
+                    })}
+                    {!vaultDestinations(row).length&&<p className="text-muted-foreground">Not assigned · not sent</p>}
+                    <p className="text-muted-foreground">Assigned means selected for this destination. Sent confirms a recorded provider write; actual application usage is not verified.</p>
+                  </div>
+                  {row.needsReview&&<p className="mt-1 text-xs text-amber-500">Review destination before syncing</p>}
+                  <p className="mt-2 break-all font-mono text-xs">{visible.includes(row.id)?row.secret||"(blank)":row.secret?"••••••••••••":"(blank)"}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-1">
+                  <button type="button" className="icon-button" aria-label={visible.includes(row.id)?"Hide secret":"Show secret"} title={visible.includes(row.id)?"Hide secret":"Show secret"} onClick={()=>setVisible(old=>old.includes(row.id)?old.filter(id=>id!==row.id):[...old,row.id])}>{visible.includes(row.id)?<EyeOff size={14}/>:<Eye size={14}/>}</button>
+                  <button type="button" className="icon-button" title="Copy secret" aria-label="Copy secret" onClick={()=>void navigator.clipboard.writeText(row.secret)}><Copy size={14}/></button>
+                  <button type="button" className="icon-button" title="Edit variable" aria-label="Edit variable" onClick={()=>edit(row)}><Pencil size={14}/></button>
+                  <button type="button" className="icon-button" title="Remove variable" aria-label="Remove variable" onClick={()=>void remove(row.id)}><Trash2 size={14}/></button>
+                </div>
+              </div>
+            </article>)}
+            {!current.length&&<p className="rounded border p-4 text-xs text-muted-foreground">No saved entries match this system and mode. A variable can appear under multiple system tabs when assigned to those destinations.</p>}
+          </div>
+        </div>
+      </details>;
+    })}
+    <details className="orbit-panel min-w-0 max-w-full p-4" open={Boolean(editing)} key={editing?.id||"new-entry"}>
+      <summary className="cursor-pointer text-sm font-semibold">{editing?"Edit saved variable":"Add environment variable"}</summary>
+      <p className="mt-2 text-xs text-muted-foreground">Use the existing encrypted editor. One secret can have multiple destinations in Main and Fallback.</p>
     <form id="vault-entry-editor" onSubmit={save} className="orbit-panel p-4">
       <div className="orbit-section-head"><span className="orbit-section-icon"><Plus size={15}/></span><div><h2>{editing?"Edit saved key":"Add a missing key"}</h2><p>Values are encrypted before saving. A blank value is allowed as an inventory reminder and cannot be pushed to Production.</p></div></div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
         <label className="block text-xs font-medium">Service<select className="control mt-1" value={draft.service} onChange={e=>setDraft({...draft,service:e.target.value})}>{SERVICES.map(x=><option key={x}>{x}</option>)}</select></label>
         <label className="block text-xs font-medium">System<select className="control mt-1" value={draft.system} onChange={e=>setDraft({...draft,system:e.target.value})}>{SYSTEMS.map(x=><option key={x}>{x}</option>)}</select></label>
         {draft.service==="Other"&&<label className="block text-xs font-medium">Other service<input className="control mt-1" value={draft.customService} onChange={e=>setDraft({...draft,customService:e.target.value})}/></label>}
@@ -263,33 +460,111 @@ export function VaultWorkspace({session}:{session:any}){
         <label className="block text-xs font-medium">Key name · exact<input className="control mt-1 font-mono" autoComplete="off" value={draft.keyName} onChange={e=>setDraft({...draft,keyName:e.target.value})} placeholder="e.g. BILLING_API_TOKEN"/></label>
         <label className="block text-xs font-medium">Key value<input className="control mt-1 font-mono" type={draftVisible?"text":"password"} autoComplete="off" value={draft.secret} onChange={e=>setDraft({...draft,secret:e.target.value})}/><button type="button" className="button-secondary mt-1" onClick={()=>setDraftVisible(v=>!v)}>{draftVisible?"Hide value":"Show value"}</button></label>
         <label className="block text-xs font-medium md:col-span-2">What this key is for<input className="control mt-1" value={draft.purpose} onChange={e=>setDraft({...draft,purpose:e.target.value})} placeholder="e.g. Billing API access to License Manager"/></label>
-        <fieldset className="text-xs font-medium"><legend>Used in</legend><div className="flex gap-4 mt-2">{(["main","fallback"] as VaultMode[]).map(mode=><label className="flex gap-2 items-center" key={mode}><input type="checkbox" checked={draft.usedIn.includes(mode)} onChange={e=>setDraft({...draft,usedIn:e.target.checked?[...draft.usedIn,mode]:draft.usedIn.filter(x=>x!==mode)})}/>{mode==="main"?"Main":"Fallback"}</label>)}</div></fieldset>
-        <label className="block text-xs font-medium">Destination system · exact Vercel project or GitHub repository
-          <input className="control mt-1 font-mono" list="vault-destination-suggestions" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="e.g. v2-billing-store"/>
-          <datalist id="vault-destination-suggestions">
-            {["custom-licence-manager","v2-billing-store","base-deploy-panel","orbitfs-license-fallback","orbitfs-billing-fallback","orbitfs-dev-panel-fallback",
-              "lucaskerim123/V2_Billing_Store","remipetrovich-design/OrbitFS-Billing-Shopfront","lucaskerim123/V1-vercel-base","lucaskerim123/V1-vercel-engine",
-              "remipetrovich-design/OrbitFS-Base-System","remipetrovich-design/OrbitFS_Engine"].map(x=><option key={x} value={x}/>)}
-          </datalist>
-        </label>
+        <p className="text-xs text-muted-foreground md:col-span-2">Choose Main and Fallback targets below. The system category is for organisation only; it does not restrict where a variable can be applied.</p>
+        <fieldset className="min-w-0 max-w-full text-xs">
+          <legend className="font-medium">Destinations · select every project or repository that needs this variable</legend>
+          <div className="mt-2 max-h-52 space-y-2 overflow-y-auto rounded border p-3">
+            {(["main","fallback"] as VaultMode[]).map(mode=><div key={mode} className="space-y-1">
+              <p className="font-semibold">{mode==="main"?"Main":"Fallback"}</p>
+              {destinationsFor(draft.system,draft.service,draft.usedIn).filter(item=>item.mode===mode).map(item=><label key={item.value} className="flex min-w-0 items-start gap-2 py-1">
+                <input type="checkbox" className="mt-0.5 shrink-0" checked={draft.destinationSystems.includes(item.value)} onChange={e=>setDraft({...draft,destinationSystems:e.target.checked?[...draft.destinationSystems,item.value]:draft.destinationSystems.filter(value=>value!==item.value)})}/>
+                <span className="min-w-0 break-all">{item.value}</span>
+              </label>)}
+            </div>)}
+          </div>
+          <label className="mt-3 flex items-center gap-2"><input type="checkbox" checked={customDestination} onChange={e=>setCustomDestination(e.target.checked)}/> Add another custom destination</label>
+          {customDestination&&<div className="mt-2 flex min-w-0 flex-wrap gap-2">
+            <input aria-label="Custom destination" className="control min-w-0 flex-1 font-mono" autoComplete="off" value={draft.destinationSystem} onChange={e=>setDraft({...draft,destinationSystem:e.target.value})} placeholder="Project name or owner/repository"/>
+            <button type="button" className="button-secondary" onClick={()=>{const value=draft.destinationSystem.trim();if(value&&!draft.destinationSystems.includes(value))setDraft({...draft,destinationSystems:[...draft.destinationSystems,value],destinationSystem:""})}}>Add</button>
+          </div>}
+          {draft.destinationSystems.filter(value=>!VAULT_DESTINATIONS.some(item=>item.value===value)).map(value=><label key={value} className="mt-2 flex items-center gap-2 text-xs"><input type="checkbox" checked onChange={()=>setDraft({...draft,destinationSystems:draft.destinationSystems.filter(x=>x!==value)})}/><span className="break-all">{value}</span></label>)}
+          <p className="mt-2 text-muted-foreground">The system category only organises this key. Every checked destination may use it after manual comparison and approval.</p>
+        </fieldset>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">Key name is the actual environment variable name, not a Vault label. A key may exist more than once if its System, mode or destination differs. Sync never automatically adds/removes a prefix.</p>
-      <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft())}}><X size={14}/> Cancel</button>}</div>
+      <div className="mt-4 flex gap-2"><button className="button-primary" disabled={busy}>{busy?"Saving…":editing?"Save changes":"Add to Vault"}</button>{editing&&<button type="button" className="button-secondary" onClick={()=>{setEditing(null);setDraft(blankDraft());setCustomDestination(false)}}><X size={14}/> Cancel</button>}</div>
     </form>
-    <section className="orbit-panel p-4 space-y-3">
-      <div className="orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
-      <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button><label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" onChange={e=>void prepareImport(e)}/></label></div>
-      {importRows.length>0&&<div className="space-y-2"><p className="text-xs">{importRows.length} entries ready to import. Review names below; secret values stay hidden.</p><div className="max-h-40 overflow-auto text-xs">{importRows.map(row=><p key={row.id} className="border-b py-1 font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"}</p>)}</div><fieldset className="space-y-2 text-xs"><legend className="font-semibold">When an entry already exists</legend><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} onChange={()=>setImportMode("skip")}/> Skip existing (keep saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} onChange={()=>setImportMode("override")}/> Override existing (replace saved secrets)</label><label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="replace-all"} onChange={()=>{setImportMode("replace-all");setReplaceApproved(false)}}/> Replace old keys with this JSON (keep GitHub/Vercel account connections)</label></fieldset><p className="text-xs text-muted-foreground">{importMode==="replace-all"?`All existing non-connection Vault entries will be replaced with ${importRows.length} imported entries. Existing GitHub/Vercel account connections are preserved.`:`${importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length} matching entries will be ${importMode==="skip"?"skipped":"overwritten"}.`}</p>{importMode==="replace-all"&&<div className="space-y-2 rounded border p-3"><p className="text-xs">Back up before replacing. GitHub/Vercel connections are preserved, but other keys may be replaced and provider secrets generally cannot be read back.</p><button className="button-secondary" type="button" onClick={downloadEncryptedBackup}><Download size={14}/> Export encrypted old Vault backup</button><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={replaceApproved} onChange={e=>setReplaceApproved(e.target.checked)}/> I approve replacing old non-connection entries. My GitHub and Vercel account connections must remain intact.</label></div>}<div className="flex gap-2"><button type="button" className="button-primary" disabled={busy||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{importMode==="replace-all"?"Replace non-connection keys":"Import entries"}</button><button type="button" className="button-secondary" onClick={()=>setImportRows([])}>Cancel</button></div></div>}
-    </section>
-    <details className="orbit-panel p-4" aria-label="Vercel Production sync">
-      <summary className="cursor-pointer font-semibold">2 · Vercel — send keys to Production projects (open only when needed)</summary>
-      <p className="mt-2 text-xs text-muted-foreground">Use one Vercel account at a time. Main and Fallback have separate projects. Select the relevant service, compare before writing, and skip unrelated keys.</p>
-      <div className="mt-3"><VaultVercelSync session={session} records={records} onPersist={persist} onEdit={edit}/></div>
     </details>
-    <details className="orbit-panel p-4" aria-label="GitHub Actions sync">
-      <summary className="cursor-pointer font-semibold">3 · GitHub — send release/deployment settings to repositories (open only when needed)</summary>
-      <p className="mt-2 text-xs text-muted-foreground">One GitHub token per account. Select repository secrets for release workflows or Production environment secrets for service deployment workflows. Do not copy the GitHub account connection token into a workflow.</p>
-      <div className="mt-3"><VaultGithubSync session={session} records={records} onPersist={persist}/></div>
+      <div className="mt-3 orbit-section-head"><span className="orbit-section-icon"><Upload size={15}/></span><div><h2>Import your JSON file</h2><p>Accepts old v1 and new v2 JSON. Matching is by Service + System + exact key + mode + destination, not just the key name. Credentials remain encrypted.</p></div></div>
+      <section className="mt-3 rounded-lg border border-border p-3 space-y-3" aria-label="JSON import and conflict settings">
+        <h3 className="text-sm font-semibold">Import JSON · choose how existing keys are handled</h3>
+        <fieldset className="space-y-2 text-xs">
+          <legend className="font-medium">When the imported key already exists in this Vault</legend>
+          <label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="skip"} disabled={busy} onChange={()=>setImportMode("skip")}/> Skip existing · keep the saved Vault value (default)</label>
+          <label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="override"} disabled={busy} onChange={()=>setImportMode("override")}/> Override existing · update from JSON (blank values never erase saved secrets)</label>
+          <label className="flex items-center gap-2"><input type="radio" name="vault-import-mode" checked={importMode==="replace-all"} disabled={busy} onChange={()=>{setImportMode("replace-all");setReplaceApproved(false)}}/> Replace all non-connection Vault entries · destructive to local Vault only</label>
+        </fieldset>
+        <p className="text-xs text-muted-foreground">Import only edits encrypted Vault entries. GitHub Actions and Vercel variables are never changed or deleted by importing.</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="button-secondary" onClick={downloadTemplate}><Download size={14}/> Download JSON template</button>
+          <button type="button" className="button-secondary" disabled={busy||!records.length} onClick={downloadCurrentValuesJson}><Download size={14}/> Download JSON with saved values (unencrypted)</button>
+          <label className="button-secondary cursor-pointer"><Upload size={14}/> Choose JSON file<input className="sr-only" type="file" accept=".json,application/json" disabled={busy} onChange={e=>void prepareImport(e)}/></label>
+        </div>
+        {importRows.length>0&&<div className="space-y-3 border-t pt-3">
+          <p className="text-xs font-medium">{importRows.length} unique entries ready · {importMergedCount} duplicate rows consolidated. Values remain hidden.</p>
+          {importConflicts.length>0&&<div className="space-y-3 rounded border p-3" aria-label="Resolve imported variable conflicts">
+            <p className="text-xs font-semibold">{importConflicts.length} exact-destination keys have conflicting nonblank values. Choose one JSON row per key; nothing is sent to GitHub or Vercel.</p>
+            {importConflicts.map(group=><fieldset className="space-y-2 rounded border p-2" key={group.identity}>
+              <legend className="font-mono text-xs font-semibold break-all">{group.keyName}</legend>
+              <p className="text-xs text-muted-foreground">Same service, system, mode and destination: {group.options[0]?.row.destinationSystem||"Unassigned"}</p>
+              {group.options.map(option=><label key={option.row.id} className="flex items-center gap-2 text-xs">
+                <input type="radio" name={"conflict-"+group.identity} checked={importConflictChoices[group.identity]===option.row.id} disabled={busy}
+                  onChange={()=>{
+                    setImportConflictChoices(prev=>({...prev,[group.identity]:option.row.id}));
+                    setImportRows(prev=>prev.map(row=>recordIdentity(row)===group.identity?option.row:row));
+                    setError("");
+                  }}/>
+                JSON row {option.line} · value supplied (hidden)
+              </label>)}
+            </fieldset>)}
+          </div>}
+          <div className="max-h-40 overflow-auto text-xs space-y-1">{importRows.map(row=><p key={row.id} className="border-b py-1 break-all font-mono">{row.service} / {row.systems[0]} / {row.keyName} → {row.destinationSystem||"Unassigned"} {row.secret?"· value supplied":"· blank value"}</p>)}</div>
+          <p className="text-xs text-muted-foreground">Matching entries: {importRows.filter(row=>records.some(saved=>recordIdentity(saved)===recordIdentity(row))).length}. Selection: {importMode==="skip"?"Skip saved keys":importMode==="override"?"Override saved keys":"Replace all non-connection entries"}.</p>
+          {importMode==="replace-all"&&<div className="rounded border p-3 space-y-2">
+            <p className="text-xs">This removes existing non-connection Vault records not present in the JSON. It never changes GitHub or Vercel. Download an encrypted backup first.</p>
+            <button type="button" className="button-secondary" onClick={downloadEncryptedBackup}><Download size={14}/> Download encrypted backup</button>
+            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={replaceApproved} onChange={e=>setReplaceApproved(e.target.checked)}/> Confirm replacing local non-connection entries; keep saved provider connections</label>
+          </div>}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="button-primary" disabled={busy||importConflicts.some(group=>!importConflictChoices[group.identity])||(importMode==="replace-all"&&!replaceApproved)} onClick={()=>void confirmImport()}>{busy?"Importing…":importMode==="skip"?"Import · skip existing":importMode==="override"?"Import · override existing":"Replace local Vault entries"}</button>
+            <button type="button" className="button-secondary" disabled={busy} onClick={()=>{setImportRows([]);setImportConflicts([]);setImportConflictChoices({});setImportMergedCount(0)}}>Cancel import</button>
+          </div>
+        </div>}
+      </section>
+
+
+    <details className="orbit-panel min-w-0 max-w-full p-4 space-y-3">
+      <summary className="cursor-pointer text-sm font-semibold">Recovery / Configuration / Setup</summary>
+      <div className="mt-4 rounded-lg border border-red-500/40 p-3 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">Clear encrypted Vault entries</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Deletes only the encrypted Vault copy, including saved provider connection tokens. It never removes or changes any GitHub Actions secrets, GitHub Actions variables, or Vercel environment variables. To restore the inventory, reconnect your provider accounts and use Pull / Sync from Providers.</p>
+        </div>
+        {!showClearVault?<button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(true);setClearConfirmation("");}}><Trash2 size={14}/> Clear Vault…</button>:
+        <div className="space-y-2">
+          <label className="block text-xs font-medium" htmlFor="vault-clear-confirm">Type CLEAR VAULT to confirm deletion of all {records.length} saved entries</label>
+          <input id="vault-clear-confirm" className="control w-full" autoComplete="off" spellCheck={false} value={clearConfirmation} onChange={e=>setClearConfirmation(e.target.value)} placeholder="CLEAR VAULT"/>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="button-secondary" disabled={busy||clearConfirmation!=="CLEAR VAULT"} onClick={()=>void clearVault()}>{busy?"Clearing…":"Delete all Vault entries"}</button>
+            <button type="button" className="button-secondary" disabled={busy} onClick={()=>{setShowClearVault(false);setClearConfirmation("");}}>Cancel</button>
+          </div>
+        </div>}
+      </div>
+
+
+      <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
+    </details>
+
+    <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
+    <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer text-sm font-semibold">Sync Vault → Provider · compare / review / create / override</summary>
+      <p className="mt-2 text-xs text-muted-foreground">Pull reads existing provider entries into the encrypted Vault without changing the provider. Send is a separate, manually reviewed create/override action. No provider deletion is available.</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="Send variables provider">
+        {(["Vercel","GitHub"] as const).map(provider=><button type="button" key={provider} role="tab" aria-selected={syncProvider===provider} className={syncProvider===provider?"button-primary":"button-secondary"} onClick={()=>setSyncProvider(provider)}>Send to {provider}</button>)}
+      </div>
+      <div className="mt-4">
+        {syncProvider==="Vercel"?<VaultVercelSync session={session} records={records} onPersist={persist} onEdit={edit}/>:<VaultGithubSync session={session} records={records} onPersist={persist}/>}
+      </div>
     </details>
     <details className="orbit-panel p-4">
       <summary className="cursor-pointer text-xs font-semibold">Advanced · Restore lost account connections</summary>
@@ -302,5 +577,6 @@ export function VaultWorkspace({session}:{session:any}){
       <p className="mt-2 text-xs text-muted-foreground">These are examples from Vercel and GitHub. Expand only when you need a name that is not already in the saved keys above.</p>
       <VaultInventorySection records={records} onPersist={persist}/>
     </details>
+
   </section>;
 }
