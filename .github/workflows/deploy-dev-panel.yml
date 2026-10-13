@@ -26,6 +26,8 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_CLI_VERSION: 59.23.1
     steps:
+      # Main production stays commit-driven. This commit retries the latest main SHA;
+      # the active-mode gate below still protects the inactive repository.
       - name: Check active GitHub profile
         id: profile
         shell: bash
