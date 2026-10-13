@@ -1692,7 +1692,7 @@ async function github(path:string,init:RequestInit={}){
   const message=String(error?.message||error);
   if(/rate limit/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+60000);
   if(cached&&cached.staleUntil>Date.now())return cached.value;
-  if(/bad credentials/i.test(message))throw new Error("Fallback GitHub token rejected (401). Replace ORBITFS_FALLBACK_GITHUB_TOKEN in Fallback Dev Panel Vercel Production with an active Remi GitHub token. Update the matching GitHub Actions secret separately. Main credentials must not be used.");
+  if(/bad credentials/i.test(message))throw new Error("Main GitHub credential rejected (401). Verify ORBITFS_RELEASE_DISPATCH_TOKEN in Main Dev Panel Vercel Production belongs to lucaskerim123 and has access to the selected Main repository.");
   throw error;
  }
 }
