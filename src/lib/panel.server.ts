@@ -30,7 +30,7 @@ const required=(name:string)=>{const v=process.env[name];if(!v)throw new Error(`
 function trustedMasterBootstrapUrl():string{
  // Each deployed panel is pinned to its own technical authority.
  // The other API may be tested but cannot become the runtime bootstrap.
- return "https://incendiarynetworks.cc/api/v1";
+ return localGithubProfileName()==="fallback"?"https://lm.incendiarynetworks.cc/api/v1":"https://incendiarynetworks.cc/api/v1";
 }
 function normalizeOfficialMasterUrl(value:string){
  try{
@@ -415,10 +415,10 @@ export const testApiConnection=createServerFn({method:"POST"}).handler(async({da
  if(requested!==trustedMasterBootstrapUrl()){
   const started=Date.now();
   const response=await fetch(requested+"/source-configuration",{cache:"no-store",signal:AbortSignal.timeout(5000)});
-  if(!response.ok)throw new Error("Inactive API is paused or unavailable.");
+  if(!response.ok)throw new Error("Inactive mode API is paused or unavailable.");
   const status=await response.json() as {mode?:string};
-  if(status.mode!=="main"&&status.mode!=="fallback")throw new Error("Other API could not be verified.");
-  return {ok:true,url:requested,latencyMs:Date.now()-started,authorization:"not_checked",message:"Read-only connection check. No mode change."};
+  if(status.mode!=="main"&&status.mode!=="fallback")throw new Error("Other API did not identify authoritative mode.");
+  return {ok:true,url:requested,latencyMs:Date.now()-started,authorization:"not_checked",message:"Read-only connection check. No production mode changed."};
  }
  const started=Date.now();
  const health=await requestJson(requested+"/license/health",{cache:"no-store"});
