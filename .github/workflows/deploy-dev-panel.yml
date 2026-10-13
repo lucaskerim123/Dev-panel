@@ -39,8 +39,28 @@ jobs:
             echo "Manual standby preparation approved for this repository only."
             exit 0
           fi
-          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
-          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          # Check the shared source authority directly: the deployed Dev Panel
+          # may be broken and must not block its own source-code repair.
+          modes=()
+          for endpoint in \
+            "https://incendiarynetworks.cc/api/v1/source-configuration" \
+            "https://lm.incendiarynetworks.cc/api/v1/source-configuration"; do
+            if response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 --max-time 15 "$endpoint")"; then
+              mode="$(node -e 'try { const x=JSON.parse(process.argv[1]); process.stdout.write(x.mode==="main"?"primary":x.mode==="fallback"?"fallback":"") } catch {}' "$response")"
+              if [ -n "$mode" ]; then modes+=("$mode"); fi
+            fi
+          done
+          if [ "${#modes[@]}" -eq 0 ]; then
+            echo "::error::No authoritative source mode available; production deployment blocked."
+            exit 1
+          fi
+          active="${modes[0]}"
+          for mode in "${modes[@]}"; do
+            if [ "$mode" != "$active" ]; then
+              echo "::error::Source authorities disagree; production deployment blocked."
+              exit 1
+            fi
+          done
           echo "Active GitHub profile: $active"
           echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
           if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
@@ -195,8 +215,28 @@ jobs:
             echo "Manual standby service deployment allowed before cutover."
             exit 0
           fi
-          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 --max-time 15 https://dev.incendiarynetworks.cc/api/github-profile)"
-          active="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(String(value.profile||""))' "$response")"
+          # Check the shared source authority directly: the deployed Dev Panel
+          # may be broken and must not block its own source-code repair.
+          modes=()
+          for endpoint in \
+            "https://incendiarynetworks.cc/api/v1/source-configuration" \
+            "https://lm.incendiarynetworks.cc/api/v1/source-configuration"; do
+            if response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 --max-time 15 "$endpoint")"; then
+              mode="$(node -e 'try { const x=JSON.parse(process.argv[1]); process.stdout.write(x.mode==="main"?"primary":x.mode==="fallback"?"fallback":"") } catch {}' "$response")"
+              if [ -n "$mode" ]; then modes+=("$mode"); fi
+            fi
+          done
+          if [ "${#modes[@]}" -eq 0 ]; then
+            echo "::error::No authoritative source mode available; production deployment blocked."
+            exit 1
+          fi
+          active="${modes[0]}"
+          for mode in "${modes[@]}"; do
+            if [ "$mode" != "$active" ]; then
+              echo "::error::Source authorities disagree; production deployment blocked."
+              exit 1
+            fi
+          done
           if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
             echo "::error::Production deployment blocked: active profile is $active, repository requires $EXPECTED_GITHUB_PROFILE."
             exit 1
