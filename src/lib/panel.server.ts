@@ -390,7 +390,7 @@ export const updateAccessGroup=createServerFn({method:"POST"}).handler(async({da
 export const getApiConnectionState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  readSession(data.token);
  const official=await officialMasterConnections(true);
- return {authority:"orbitfs-license-manager",bootstrapUrl:trustedMasterBootstrapUrl(),selectedUrl:trustedMasterBootstrapUrl(),officialConnections:official,connection:{service_key:"license_manager",selected_url:trustedMasterBootstrapUrl(),managed_by:localGithubProfileName()==="fallback"?"fallback_vercel_environment":"main_vercel_environment"}};
+ return {authority:"orbitfs-license-manager",bootstrapUrl:trustedMasterBootstrapUrl(),selectedUrl:trustedMasterBootstrapUrl(),apiOptions:[{id:"main",label:"Main API",url:trustedMasterBootstrapUrl()},{id:"fallback",label:"Fallback API (connection check only)",url:"https://lm.incendiarynetworks.cc/api/v1"}],officialConnections:official,connection:{service_key:"license_manager",selected_url:trustedMasterBootstrapUrl(),managed_by:localGithubProfileName()==="fallback"?"fallback_vercel_environment":"main_vercel_environment"}};
 });
 
 export const saveApiConnection=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;url:string}})=>{
@@ -407,9 +407,15 @@ export const testApiConnection=createServerFn({method:"POST"}).handler(async({da
  readSession(data.token);
  const requested=data.url?normalizeOfficialMasterUrl(data.url):await configuredMasterUrl();
  if(!requested)throw new Error("API URL is invalid.");
- const official=await officialMasterConnections(true);
- if(!official.some((row:any)=>String(row.base_url)===requested))throw new Error("That URL is not an enabled official OrbitFS API for Dev Panel.");
+ const configured=trustedMasterBootstrapUrl();
+ const fallback="https://lm.incendiarynetworks.cc/api/v1";
+ if(requested!==configured&&requested!==fallback)throw new Error("Only the configured Main API or Fallback API can be tested.");
  const started=Date.now();
+ if(requested===fallback&&requested!==configured){
+  const profile=await requestJson(requested+"/github-profile",{cache:"no-store"});
+  if(profile?.profile!=="fallback")throw new Error("Fallback API did not confirm its identity.");
+  return {ok:true,url:requested,latencyMs:Date.now()-started,authorization:"not_checked",message:"Fallback API reachable (read-only). Main remains the configured authority."};
+ }
  const health=await requestJson(requested+"/license/health",{cache:"no-store"});
  if(health?.ok!==true)throw new Error("License Manager health check did not pass.");
  // The health endpoint is public and cannot verify machine credentials.
