@@ -1017,10 +1017,10 @@ function ApiConnectionsPage({session}:any){
  const official=Array.isArray(state?.officialConnections)?state.officialConnections:[];
  const options=Array.isArray(state?.apiOptions)?state.apiOptions:[];
  const selected=options.find((row:any)=>String(row.url)===url);
- const save=async()=>{setBusy("save");setMessage("");setPageError("");try{const result=await saveApiConnection({data:{token:session.token,url}});setUrl(result.selectedUrl);setMessage("Main License Manager API configuration confirmed.");await loadApiConnections()}catch(x:any){setPageError(x.message||"Unable to save API connection.")}finally{setBusy("")}};
+ const save=async()=>{setBusy("save");setMessage("");setPageError("");try{const result=await saveApiConnection({data:{token:session.token,url}});setUrl(result.selectedUrl);setMessage("Configured License Manager API confirmed.");await loadApiConnections()}catch(x:any){setPageError(x.message||"Unable to save API connection.")}finally{setBusy("")}};
  const test=async()=>{setBusy("test");setMessage("");setPageError("");try{const result=await testApiConnection({data:{token:session.token,url}});setMessage(result.message||("Connected · "+result.latencyMs+"ms"))}catch(x:any){setPageError(x.message||"API connection test failed.")}finally{setBusy("")}};
  return <section className="space-y-4">
-  <PageHead title="API Connections" detail="Main Dev Panel. Select a License Manager endpoint to inspect or test. Repository mode and production configuration remain unchanged."/>
+  <PageHead title="API Connections" detail="Choose Main or Fallback API for a connection check. Production operations remain bound to this panel's own mode."/>
   {pageError&&<Alert tone="error" onClose={()=>setPageError("")}>{pageError}</Alert>}
   {message&&<Alert tone="success" onClose={()=>setMessage("")}>{message}</Alert>}
   <section className="orbit-panel p-4">
@@ -1028,11 +1028,11 @@ function ApiConnectionsPage({session}:any){
    <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
     <div>
      <Field label="License Manager API"><select className="control mt-1" value={url} onChange={e=>setUrl(e.target.value)}>{options.map((row:any)=><option key={row.id} value={row.url}>{row.label} — {row.url}</option>)}</select></Field>
-     <p className="mt-2 text-[10px] leading-5 text-muted-foreground">Main uses its own configured License Manager API. Fallback is available for a read-only connectivity check only; it cannot change Main's configuration or repository mode.</p>
-     <div className="mt-3 flex flex-wrap gap-2"><button className="button-primary" disabled={Boolean(busy)||!url||url!==state?.selectedUrl} onClick={()=>void save()}>{busy==="save"?"Checking…":"Confirm Main API"}</button><button className="button-secondary" disabled={Boolean(busy)||!url} onClick={()=>void test()}>{busy==="test"?"Testing…":"Test connection"}</button><button className="button-secondary" disabled={!state?.selectedUrl||Boolean(busy)} onClick={()=>setUrl(String(state?.selectedUrl||""))}>Use Main API</button></div>
+     <p className="mt-2 text-[10px] leading-5 text-muted-foreground">The selected API is for testing only. Production operations use this panel's configured authority; selecting the other mode never switches repositories or credentials.</p>
+     <div className="mt-3 flex flex-wrap gap-2"><button className="button-primary" disabled={Boolean(busy)||!url||url!==state?.selectedUrl} onClick={()=>void save()}>{busy==="save"?"Checking…":"Confirm Main API"}</button><button className="button-secondary" disabled={Boolean(busy)||!url} onClick={()=>void test()}>{busy==="test"?"Testing…":"Test connection"}</button><button className="button-secondary" disabled={!state?.selectedUrl||Boolean(busy)} onClick={()=>setUrl(String(state?.selectedUrl||""))}>Use configured API</button></div>
     </div>
     <div className="orbit-kv-list">
-     <div><span>Status</span><code>{selected?(selected.id==="main"?"Main configured":"Fallback · read-only"):"Unavailable"}</code></div>
+     <div><span>Status</span><code>{selected?(selected.id==="main"?"Configured authority":"Other API · read-only"):"Unavailable"}</code></div>
      <div><span>Bootstrap</span><code>{state?.bootstrapUrl||"—"}</code></div>
      <div><span>Registry entries</span><code>{official.length}</code></div>
      <div><span>Selected</span><code>{state?.selectedUrl||"—"}</code></div>
