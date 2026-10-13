@@ -2208,7 +2208,6 @@ let operationsStateCache:{profile:"primary"|"fallback";value:any;expires:number}
 
 export const getOperationsState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;force?:boolean}})=>{
  requireOperationsUser(data.token);
- await requireLocalGithubProfileActive();
  const profile=localGithubProfileName();
  if(!data.force&&operationsStateCache&&operationsStateCache.profile===profile&&operationsStateCache.expires>Date.now())return operationsStateCache.value;
  const keys:OperationsSystem[]=["licenseManager","billingStore"];
@@ -2230,7 +2229,6 @@ export const getOperationsState=createServerFn({method:"POST"}).handler(async({d
 
 export const getOperationsRunDetail=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string;system:OperationsSystem}})=>{
  requireOperationsUser(data.token);
- await requireLocalGithubProfileActive();
  const cfg=await operationsConfig(data.system);
  return operationsRunDetail(cfg,true,true);
 });
