@@ -40,6 +40,7 @@ for (const fn of functions) {
   }
   const scopedRequire = createRequire(join(fn, "__vault_sodium_check.cjs"));
   const sodium = scopedRequire("libsodium-wrappers");
+  await sodium.ready;
   if (!sodium || typeof sodium.crypto_box_seal !== "function") {
     throw new Error("Vercel function missing usable libsodium wrappers: " + fn);
   }
