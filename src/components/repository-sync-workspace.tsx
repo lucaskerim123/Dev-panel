@@ -24,7 +24,7 @@ export function RepositorySyncWorkspace({session}: {session:{token:string}}){
  const conclusion=String(latest?.conclusion||"");
  const status=running?"Sync in progress":conclusion==="success"?"Last run successful":conclusion==="failure"?"Last run failed":latest?"Last run: "+(conclusion||latest.status||"unknown"):"No sync run reported";
  const start=async()=>{
-  if(!state||running)return;
+  if(!state||running||state.enabled!==true)return;
   const directionLabel=state.sourceOwner+" → "+state.targetOwner;
   if(!window.confirm("SYNC ALL FIVE REPOSITORIES: "+directionLabel+"? The current GitHub workflow replaces destination files (including deletions) and does not fully protect mode-specific source configuration. Review both sides before continuing."))return;
   setBusy("start");setNotice("");setError("");
@@ -39,6 +39,7 @@ export function RepositorySyncWorkspace({session}: {session:{token:string}}){
   </div>
   {error&&<div role="alert" className="rounded-xl border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>}
   {notice&&<div role="status" className="rounded-xl border border-blue-400/40 bg-blue-500/10 px-4 py-3 text-sm text-blue-100">{notice}</div>}
+  {state&&state.enabled!==true&&<div role="status" className="rounded-xl border border-border bg-card p-4 text-sm">Cross-mode repository sync is <strong>disabled</strong>. Activation requires an explicit server-side setting; no synchronization will run automatically.</div>}
   <div className="grid gap-3 md:grid-cols-3">
    <div className="rounded-xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">Direction</p><div className="mt-2 flex items-center gap-2 font-semibold text-foreground"><GitBranch size={16}/>{state?state.sourceOwner+" → "+state.targetOwner:"Loading…"}</div><p className="mt-2 text-xs text-muted-foreground">Determined by the active source mode.</p></div>
    <div className="rounded-xl border border-border bg-card p-4"><p className="text-xs text-muted-foreground">GitHub Actions</p><p className="mt-2 font-semibold">{running?<Loader2 className="mr-2 inline animate-spin" size={16}/>:conclusion==="success"?<CheckCircle2 className="mr-2 inline" size={16}/>:<GitBranch className="mr-2 inline" size={16}/>} {status}</p><p className="mt-2 text-xs text-muted-foreground">Updated every 8 seconds · {displayDate(latest?.updated_at)}</p></div>
@@ -57,7 +58,7 @@ export function RepositorySyncWorkspace({session}: {session:{token:string}}){
   </div>
   <div className="rounded-xl border border-amber-400/30 bg-amber-500/5 p-4">
    <div className="flex gap-3"><AlertTriangle className="mt-0.5 shrink-0 text-amber-300" size={18}/><div><p className="text-sm font-semibold">Current workflow is not a safe merge</p><p className="mt-1 text-xs leading-5 text-muted-foreground">It copies files in the selected direction, can delete target files, and excludes GitHub workflow files. This screen does not claim that application features or mode-specific settings match. Review changes before dispatching.</p></div></div>
-   <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" className="button-primary" disabled={!state||running||busy!==""} onClick={()=>void start()}>{running?<Loader2 className="animate-spin" size={15}/>:<ShieldCheck size={15}/>} {running?"Sync running":busy==="start"?"Starting…":state?.buttonLabel||"Sync repositories"}</button><span className="text-xs text-muted-foreground">Runs existing GitHub workflow · no deployment requested by this page</span></div>
+   <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" className="button-primary" disabled={!state||state.enabled!==true||running||busy!==""} onClick={()=>void start()}>{running?<Loader2 className="animate-spin" size={15}/>:<ShieldCheck size={15}/>} {running?"Sync running":busy==="start"?"Starting…":state?.buttonLabel||"Sync repositories"}</button><span className="text-xs text-muted-foreground">Runs existing GitHub workflow · no deployment requested by this page</span></div>
   </div>
  </section>;
 }
