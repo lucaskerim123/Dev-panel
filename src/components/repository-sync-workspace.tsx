@@ -24,12 +24,14 @@ export function RepositorySyncWorkspace({session}: {session:{token:string}}){
  const latest=state?.activeRun||state?.latestRun;
  const conclusion=String(latest?.conclusion||"");
  const status=running?"Sync in progress":conclusion==="success"?"Last run successful":conclusion==="failure"?"Last run failed":latest?"Last run: "+(conclusion||latest.status||"unknown"):"No sync run reported";
- const start=async()=>{
+ const canApply=enabled&&!running&&latest?.conclusion==="success"&&latest?.preview===true;
+ const start=async(operation:"preview"|"apply")=>{
   if(!state||running||state.enabled!==true)return;
+  if(operation==="apply"&&!canApply){setError("Run and review a successful preview before applying code changes.");return;}
   const directionLabel=state.sourceOwner+" → "+state.targetOwner;
-  if(!window.confirm("SYNC ALL FIVE REPOSITORIES: "+directionLabel+"? Portable code changes are copied across all five repositories. Existing destination files are not deleted; protected mode configuration and variables are excluded. Independent changes can cause a conflict. Continue?"))return;
+  if(!window.confirm((operation==="preview"?"PREVIEW ONLY — NO REPOSITORY CHANGES: ":"APPLY REVIEWED CHANGES TO ALL FIVE REPOSITORIES: ")+directionLabel+"? Mode-specific files and env values stay untouched. Conflicts block the workflow. Continue?"))return;
   setBusy("start");setNotice("");setError("");
-  try{const result=await runRepositorySync({data:{token:session.token}});setNotice(result.message||"Sync requested.");await load();}
+  try{const result=await runRepositorySync({data:{token:session.token,operation}});setNotice(result.message||"Sync requested.");await load();}
   catch(e:any){setError(e.message||"Sync dispatch failed.")}
   finally{setBusy("")}
  };
@@ -57,10 +59,10 @@ export function RepositorySyncWorkspace({session}: {session:{token:string}}){
     </div>)}
    </div>
   </div>
-  <div className="rounded-xl border border-border bg-card p-4 text-sm space-y-2"><p className="font-semibold">Activation checklist</p><p>1. GitHub Actions repository variable <code>ORBITFS_REPOSITORY_SYNC_ENABLED=true</code> on the current control repository (Main Dev-panel or Fallback Control-Centre).</p><p>2. Dev Panel Vercel Production environment variable with the same name and value; redeploy after changing it.</p><p>3. Press Refresh, review the source → target direction, then explicitly confirm Sync. Neither activation nor a mode switch triggers a run.</p><p>Environment values and mode-owned files remain independent. If development introduces a new required variable, add it separately to the correct Fallback destination; synchronization never transfers its value.</p></div>
+  <div className="rounded-xl border border-border bg-card p-4 text-sm space-y-2"><p className="font-semibold">Activation checklist</p><p>1. GitHub Actions repository variable <code>ORBITFS_REPOSITORY_SYNC_ENABLED=true</code> on the current control repository (Main Dev-panel or Fallback Control-Centre).</p><p>2. Dev Panel Vercel Production environment variable with the same name and value; redeploy after changing it.</p><p>3. Press Preview all five, inspect the linked GitHub run and resolve any conflicts. Only a successful latest preview unlocks Apply reviewed sync. A mode switch never starts synchronization.</p><p>Environment values and mode-owned files remain independent. If development introduces a new required variable, add it separately to the correct Fallback destination; synchronization never transfers its value.</p></div>
   <div className="rounded-xl border border-amber-400/30 bg-amber-500/5 p-4">
    <div className="flex gap-3"><AlertTriangle className="mt-0.5 shrink-0 text-amber-300" size={18}/><div><p className="text-sm font-semibold">Manual code synchronization — safeguards</p><p className="mt-1 text-xs leading-5 text-muted-foreground">New portable files and shared feature updates can transfer. The workflow refuses destination-file deletions, protects environment files and selected mode-owned configuration, and stops on detected independent changes. It is not a semantic three-way merge; inspect conflicts and build both sides before release.</p></div></div>
-   <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" className="button-primary" disabled={!state||state.enabled!==true||running||busy!==""} onClick={()=>void start()}>{running?<Loader2 className="animate-spin" size={15}/>:<ShieldCheck size={15}/>} {running?"Sync running":busy==="start"?"Starting…":state?.buttonLabel||"Sync repositories"}</button><span className="text-xs text-muted-foreground">Manual GitHub workflow; changing code on main can separately trigger the Dev Panel production deployment.</span></div>
+   <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" className="button-primary" disabled={!enabled||running||busy!==""} onClick={()=>void start("preview")}>{running?<Loader2 className="animate-spin" size={15}/>:<ShieldCheck size={15}/>} {running?"Running…":busy==="start"?"Submitting…":"Preview all five"}</button><button type="button" className="button-secondary" disabled={!canApply||busy!==""} onClick={()=>void start("apply")}>Apply reviewed sync</button><span className="text-xs text-muted-foreground">Preview changes without pushing. Apply separately after a successful preview.</span></div>
   </div>
  </section>;
 }
