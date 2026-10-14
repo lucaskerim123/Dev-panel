@@ -17,6 +17,7 @@ const VAULT_DESTINATIONS = [
   {mode:"main",system:"License",service:"GitHub",value:"lucaskerim123/Custom-licence-manager"},
   {mode:"main",system:"Billing",service:"GitHub",value:"lucaskerim123/V2_Billing_Store"},
   {mode:"main",system:"Dev",service:"GitHub",value:"lucaskerim123/Dev-panel"},
+  {mode:"main",system:"Database",service:"GitHub",value:"lucaskerim123/Master-Database-System"},
   {mode:"fallback",system:"License",service:"GitHub",value:"remipetrovich-design/OrbitFS-License-Administration"},
   {mode:"fallback",system:"Billing",service:"GitHub",value:"remipetrovich-design/OrbitFS-Billing-Shopfront"},
   {mode:"fallback",system:"Dev",service:"GitHub",value:"remipetrovich-design/OrbitFS-Control-Centre"},
@@ -28,8 +29,6 @@ const VAULT_DESTINATIONS = [
   {mode:"fallback",system:"Billing",service:"Vercel",value:"orbitfs-billing-fallback"},
   {mode:"fallback",system:"Dev",service:"Vercel",value:"orbitfs-dev-panel-fallback"}
 ] as const;
-const destinationsFor = (_system:string,service:string,modes:VaultMode[]) =>
-  VAULT_DESTINATIONS.filter(item=>item.service===service&&modes.includes(item.mode));
 
 const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
 const SERVICES=[...VAULT_SERVICES];
