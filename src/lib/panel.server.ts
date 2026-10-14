@@ -2044,6 +2044,8 @@ const OPERATIONS_DEPLOY_WORKFLOW=process.env.OPERATIONS_DEPLOY_WORKFLOW||"produc
 const LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW=process.env.LICENSE_MANAGER_QUICK_DEPLOY_WORKFLOW||"quick-deploy.yml";
 const BILLING_STORE_QUICK_DEPLOY_WORKFLOW=process.env.BILLING_STORE_QUICK_DEPLOY_WORKFLOW||"quick-redesign-deploy.yml";
 const REPOSITORY_SYNC_WORKFLOW="sync-github-mirrors.yml";
+// Off by default: installing or deploying this code must never activate cross-mode sync.
+const repositorySyncEnabled=()=>process.env.ORBITFS_REPOSITORY_SYNC_ENABLED==="true";
 
 async function repositorySyncConfig(){
  await requireLocalGithubProfileActive();
@@ -2079,10 +2081,11 @@ export const getRepositorySyncState=createServerFn({method:"POST"}).handler(asyn
  const runs=Array.isArray(result?.workflow_runs)?result.workflow_runs:[];
  const latest=[...runs].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  const active=runs.filter((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase())).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
- return {...cfg,active:Boolean(active),activeRun:cleanRepositorySyncRun(active),latestRun:cleanRepositorySyncRun(latest)};
+ return {...cfg,enabled:repositorySyncEnabled(),active:Boolean(active),activeRun:cleanRepositorySyncRun(active),latestRun:cleanRepositorySyncRun(latest)};
 });
 export const runRepositorySync=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
+ if(!repositorySyncEnabled())throw new Error("Repository synchronization is disabled. Explicitly enable ORBITFS_REPOSITORY_SYNC_ENABLED=true before a manual sync.");
  const cfg=await repositorySyncConfig();
  const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
  const active=(before?.workflow_runs||[]).find((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()));
