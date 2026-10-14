@@ -8,7 +8,9 @@ function source(kind:"base"|"engine",profile:"primary"|"fallback"){
  return kind==="base"?def.base.repo:def.engine.repo;
 }
 function token(profile:"primary"|"fallback"){
- const name=profile==="primary"?(process.env.MAIN_GITHUB_RELEASE_TOKEN?"MAIN_GITHUB_RELEASE_TOKEN":"ORBITFS_RELEASE_DISPATCH_TOKEN"):(process.env.FALLBACK_GITHUB_TOKEN?"FALLBACK_GITHUB_TOKEN":"ORBITFS_FALLBACK_GITHUB_TOKEN");
+ const name=profile==="primary"
+  ? (["MAIN_GITHUB_RELEASE_TOKEN","MAIN_GITHUB_TOKEN","ORBITFS_RELEASE_DISPATCH_TOKEN"].find(key=>process.env[key]?.trim())||"MAIN_GITHUB_TOKEN")
+  : (["FALLBACK_GITHUB_RELEASE_TOKEN","FALLBACK_GITHUB_TOKEN","ORBITFS_FALLBACK_GITHUB_TOKEN"].find(key=>process.env[key]?.trim())||"FALLBACK_GITHUB_TOKEN");
  const value=process.env[name]||"";
  if(!value)throw Error("GitHub read access for "+profile+" is not configured");
  return value;
