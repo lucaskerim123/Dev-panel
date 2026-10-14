@@ -431,8 +431,9 @@ jobs:
                 if [ "$argument" = "--exclude=$changed" ]; then protected=true; break; fi
               done
               if [ "$protected" = true ]; then continue; fi
-              # A path deleted on both sides is already reconciled; do not treat the deletion as divergence.
-              if [ ! -e "$src/$changed" ] && [ ! -e "$dst/$changed" ]; then continue; fi
+              # Destination-only diagnostic/support files are preserved by additive rsync.
+              # They must not be treated as conflicts when the source has no path.
+              if [ ! -e "$src/$changed" ]; then continue; fi
               if [ -f "$src/$changed" ] && [ -f "$dst/$changed" ] && cmp -s "$src/$changed" "$dst/$changed"; then continue; fi
               echo "::error::$key has an independent portable change: $changed. Manual conflict resolution required."
               exit 1
