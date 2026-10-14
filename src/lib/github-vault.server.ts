@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 // A static import lets Nitro/Vercel trace and package libsodium for the server function.
 // Dynamic createRequire left it absent from deployed function bundles.
-import sodium from "libsodium-wrappers";
+import { createRequire } from "node:module";
+const loadModule = createRequire(import.meta.url);
 import { requireVaultUser } from "@/lib/vault.server";
 import {
   allowedVaultValue, assertReviewedGithubWrite, planGithubKey, targetPath, GITHUB_OWNERS,
@@ -161,6 +162,7 @@ export const writeVaultGithubAction = createServerFn({method:"POST"}).handler(
       // GitHub accepts libsodium sealed boxes, never plaintext. Values cannot be read back.
       const publicKey=await githubApi<{key?:string;key_id?:string}>(endpoint+"/public-key",data.githubToken);
       if(!publicKey.key || !publicKey.key_id) throw new Error("GitHub did not supply an Actions secret public key.");
+      const sodium = loadModule("libsodium-wrappers");
       await sodium.ready;
       const recipient=sodium.from_base64(publicKey.key,sodium.base64_variants.ORIGINAL);
       if(recipient.length!==32) throw new Error("GitHub returned an invalid Actions secret public key.");
