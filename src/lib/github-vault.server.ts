@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-// A static import lets Nitro/Vercel trace and package libsodium for the server function.
-// Dynamic createRequire left it absent from deployed function bundles.
+// Load libsodium's CommonJS entry through Node's loader in Vercel's ESM server.
+// This avoids the CommonJS __dirname runtime failure during GitHub secret writes.
 import { createRequire } from "node:module";
 const loadModule = createRequire(import.meta.url);
 import { requireVaultUser } from "@/lib/vault.server";
