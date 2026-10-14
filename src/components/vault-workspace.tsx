@@ -466,7 +466,7 @@ export function VaultWorkspace({session}:{session:any}){
           <div className="mt-2 max-h-52 space-y-2 overflow-y-auto rounded border p-3">
             {(["main","fallback"] as VaultMode[]).map(mode=><div key={mode} className="space-y-1">
               <p className="font-semibold">{mode==="main"?"Main":"Fallback"}</p>
-              {destinationsFor(draft.system,draft.service,draft.usedIn).filter(item=>item.mode===mode).map(item=><label key={item.value} className="flex min-w-0 items-start gap-2 py-1">
+              {VAULT_DESTINATIONS.filter(item=>item.service===draft.service&&item.mode===mode).map(item=><label key={item.value} className="flex min-w-0 items-start gap-2 py-1">
                 <input type="checkbox" className="mt-0.5 shrink-0" checked={draft.destinationSystems.includes(item.value)} onChange={e=>setDraft({...draft,destinationSystems:e.target.checked?[...draft.destinationSystems,item.value]:draft.destinationSystems.filter(value=>value!==item.value)})}/>
                 <span className="min-w-0 break-all">{item.value}</span>
               </label>)}
