@@ -1,6 +1,7 @@
 import { createStart, createCsrfMiddleware, createMiddleware } from "@tanstack/react-start";
 
 import { renderErrorPage } from "./lib/error-page";
+import { activePanelRedirect, allowedDocumentRequest } from "./lib/source-domain-routing";
 import { attachSupabaseAuth } from "@/integrations/supabase/auth-attacher";
 
 const errorMiddleware = createMiddleware().server(async ({ next }) => {
@@ -31,6 +32,10 @@ const AUTHORITIES = ['https://incendiarynetworks.cc/api/v1/source-configuration'
 // A minimal readiness endpoint stays online without serving standby UI.
 const sourceModeGuard = createMiddleware().server(async ({ next, request }) => {
   const path = new URL(request.url).pathname;
+  if (allowedDocumentRequest(request)) {
+    const redirect = await activePanelRedirect(request);
+    if (redirect) return redirect;
+  }
   if (path === '/_handover_health') {
     return new Response(JSON.stringify({ ready: true, family: FAMILY }), {
       status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
