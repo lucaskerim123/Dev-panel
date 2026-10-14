@@ -89,7 +89,7 @@ export function VaultVercelSync({session,records,onPersist,onEdit}:{
       const changes = new Map([["VERCEL_TOKEN_"+account.toUpperCase(),token],["VERCEL_TEAM_ID_"+account.toUpperCase(),team]]);
       const seen = new Set<string>();
       const next = records.map(row=>{
-        if (changes.has(row.keyName)) {
+        if (changes.has(row.keyName) && row.usedIn?.includes(account)) {
           seen.add(row.keyName);return {...row,secret:changes.get(row.keyName)!};
         }
         return row;
