@@ -2072,7 +2072,7 @@ async function repositorySyncGithub(path:string,init:RequestInit={}){
  }
 }
 function cleanRepositorySyncRun(run:any){
- return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name}:null;
+ return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name,preview:run?.inputs?.preview==="true"}:null;
 }
 export const getRepositorySyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
