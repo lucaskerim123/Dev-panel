@@ -370,6 +370,7 @@ export function VaultWorkspace({session}:{session:any}){
 
   return <section className="space-y-4">
     <div className="orbit-reference-head"><div><p className="orbit-reference-kicker">SECURE OPERATIONS</p><h1>Vault</h1><span>Central encrypted credentials · {records.length} {records.length===1?"entry":"entries"}</span></div><div className="orbit-reference-actions"><button className="button-secondary" type="button" onClick={lock}><Lock size={14}/> Lock Vault</button></div></div>
+    <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
     <section className="orbit-panel min-w-0 w-full max-w-full p-4 space-y-3" aria-label="Sync Vault to providers">
       <h2 className="text-sm font-semibold">Sync from Vault → GitHub / Vercel</h2>
       <p className="text-xs text-muted-foreground">Your saved Vault entries are the desired values for these destinations. Sync compares the exact assigned target, then lets you review and confirm creating or overriding values. Nothing deletes remote secrets or variables.</p>
@@ -554,7 +555,6 @@ export function VaultWorkspace({session}:{session:any}){
       <VaultSetupGuide session={session} records={records} onPersist={persist} onEdit={edit}/>
     </details>
 
-    <VaultProviderRecovery session={session} records={records} onPersist={persist}/>
     <details id="vault-provider-sync" className="orbit-panel min-w-0 max-w-full p-4" open={providerSyncOpen} onToggle={e=>setProviderSyncOpen(e.currentTarget.open)}>
       <summary className="cursor-pointer text-sm font-semibold">Sync Vault → Provider · compare / review / create / override</summary>
       <p className="mt-2 text-xs text-muted-foreground">Pull reads existing provider entries into the encrypted Vault without changing the provider. Send is a separate, manually reviewed create/override action. No provider deletion is available.</p>
