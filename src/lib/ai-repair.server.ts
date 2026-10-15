@@ -1,17 +1,14 @@
 import {createServerFn} from "@tanstack/react-start";
 import {requireOwner} from "@/lib/panel.server";
-import {activeGithubProfileName,githubProfileDefinitions,githubTokenForProfile} from "@/lib/github-profile";
+import {activeGithubProfileName,githubProfileDefinitions,githubToken} from "@/lib/github-profile";
 
 const timeout=()=>AbortSignal.timeout(12000);
 function source(kind:"base"|"engine",profile:"primary"|"fallback"){
  const def=githubProfileDefinitions()[profile];
  return kind==="base"?def.base.repo:def.engine.repo;
 }
-function token(profile:"primary"|"fallback"){
- return githubTokenForProfile(profile);
-}
 async function github(repo:string,path:string,profile:"primary"|"fallback",accept="application/vnd.github+json"){
- const response=await fetch("https://api.github.com/repos/"+repo+path,{headers:{Authorization:"Bearer "+token(profile),Accept:accept,"X-GitHub-Api-Version":"2022-11-28"},cache:"no-store",signal:timeout()});
+ const response=await fetch("https://api.github.com/repos/"+repo+path,{headers:{Authorization:"Bearer "+await githubToken(repo),Accept:accept,"X-GitHub-Api-Version":"2022-11-28"},cache:"no-store",signal:timeout()});
  if(!response.ok)throw Error("GitHub "+repo+" returned HTTP "+response.status);
  return response;
 }
