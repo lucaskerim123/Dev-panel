@@ -387,6 +387,26 @@ jobs:
                 excludes+=(--exclude="tools/build-database-package.mjs")
                 ;;
               license)
+                # API key environments are repository identities, not feature drift.
+                # Normalize the temporary source to the target identity, so future
+                # shared API key fixes can still synchronize without copying MAIN
+                # credentials or changing FALLBACK's authentication boundary.
+                api_key_file="$src/lib/core/api-keys.ts"
+                test -f "$api_key_file" || { echo "::error::Missing License Manager API key identity file."; exit 1; }
+                if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
+                  api_key_environment="fallback"
+                else
+                  api_key_environment="main"
+                fi
+                API_KEY_FILE="$api_key_file" API_KEY_ENV="$api_key_environment" node <<'NODE'
+          const fs = require('fs');
+          const file = process.env.API_KEY_FILE;
+          const content = fs.readFileSync(file, 'utf8');
+          const identity = /export const API_KEY_ENVIRONMENT = '(main|fallback)' as const;/g;
+          const matches = [...content.matchAll(identity)];
+          if (matches.length !== 1) throw new Error('Unexpected License Manager API key identity declaration');
+          fs.writeFileSync(file, content.replace(identity, "export const API_KEY_ENVIRONMENT = '" + process.env.API_KEY_ENV + "' as const;"));
+          NODE
                 excludes+=(--exclude="app/api/v1/engine-bootstrap/route.ts")
                 excludes+=(--exclude="app/api/v1/license/validate/route.ts")
                 excludes+=(--exclude="app/api/v1/releases/route.ts")
