@@ -2320,12 +2320,29 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
   if(deployedRun?.head_sha===mainSha)throw new Error("No deployment needed. The latest main commit is already deployed to production.");
   if(!latestScan||latestScan.status!=="completed"||latestScan.conclusion!=="success")throw new Error("Deploy is blocked until the exact current main commit has a successful Full Scan. A scan for an older commit cannot be reused.");
  }
+ // Quick Deploy collects the entire outstanding commit range, not only HEAD.
+ // This is a read-only comparison; it does not dispatch a scan.
+ let quickUpdates:{baselineSha:string|null;currentSha:string;commits:Array<{sha:string;message:string}>}|null=null;
+ if(action==="override-deploy"&&data.system==="devPanel"){
+  const [ref,normal,quick]=await Promise.all([
+   github("/repos/"+cfg.repo+"/git/ref/heads/main"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.deploy+"/runs?branch=main&status=success&per_page=1"),
+   github("/repos/"+cfg.repo+"/actions/workflows/"+cfg.quickDeploy+"/runs?branch=main&status=success&per_page=1")
+  ]);
+  const currentSha=String(ref?.object?.sha||"");
+  if(!currentSha)throw new Error("Cannot resolve the latest main commit for Quick Deploy.");
+  const latest=[normal?.workflow_runs?.[0],quick?.workflow_runs?.[0]].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
+  const baselineSha=String(latest?.head_sha||"")||null;
+  if(baselineSha===currentSha)throw new Error("No new commits to Quick Deploy: current main is already marked deployed.");
+  const rows=baselineSha?await operationsAllCompareCommits(cfg.repo,baselineSha,currentSha):[];
+  quickUpdates={baselineSha,currentSha,commits:rows.map((c:any)=>({sha:String(c.sha||""),message:String(c.commit?.message||"").split("\n")[0]}))};
+ }
  const startedAt=Date.now();
  await github("/repos/"+cfg.repo+"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main"})});
  operationsStateCache=null;
  operationsScanCache.delete(localGithubProfileName()+":"+data.system);
  const run=await findOperationsRun(cfg,workflow,startedAt);
- return {ok:true,run,action,system:data.system,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?"OVERRIDE DEPLOY":"production deployment")+" queued."};
+ return {ok:true,run,action,system:data.system,quickUpdates,message:cfg.label+" "+(action==="ci"?"Full Scan":action==="override-deploy"?(quickUpdates?(quickUpdates.baselineSha?quickUpdates.commits.length+" outstanding commits collected; ":"initial complete main source selected; "):"")+"Quick Deploy":"production deployment")+" queued."};
 });
 
 async function operationsFullTree(repo:string,treeSha:string){
