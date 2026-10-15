@@ -2067,7 +2067,7 @@ async function repositorySyncGithub(path:string,init:RequestInit={}){
  try{
   return await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
  }catch(error:any){
-  if(/bad credentials/i.test(String(error?.message||error)))throw new Error("Fallback GitHub mirror credential rejected (401). Update ORBITFS_FALLBACK_GITHUB_TOKEN before using mirror sync.");
+  if(/bad credentials/i.test(String(error?.message||error)))throw new Error("GitHub sync credential rejected (401) for "+cfg.side+". Verify the active account credential before retrying.");
   throw error;
  }
 }
@@ -2077,13 +2077,13 @@ function cleanRepositorySyncRun(run:any){
 export const getRepositorySyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
  const cfg=await repositorySyncConfig();
- const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+ const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
  const runs=Array.isArray(result?.workflow_runs)?result.workflow_runs:[];
  // GitHub's list response may omit workflow_dispatch inputs. Hydrate the
  // latest run through the single-run endpoint before using it for approval.
  const newest=(result?.workflow_runs||[]).slice().sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0];
  if(newest?.id) {
-  const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+newest.id).catch(()=>null);
+  const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+newest.id);
   if(details?.inputs)newest.inputs=details.inputs;
  }
  const latest=[...runs].sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
@@ -2095,25 +2095,25 @@ export const runRepositorySync=createServerFn({method:"POST"}).handler(async({da
  if(!repositorySyncEnabled())throw new Error("Repository synchronization is disabled. Explicitly enable ORBITFS_REPOSITORY_SYNC_ENABLED=true before a manual sync.");
  const operation=data.operation==="apply"?"apply":"preview";
  const cfg=await repositorySyncConfig();
- const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+ const before=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
  const active=(before?.workflow_runs||[]).find((run:any)=>["queued","in_progress","waiting","requested","pending"].includes(String(run?.status||"").toLowerCase()));
  if(active)return {ok:true,alreadyRunning:true,run:cleanRepositorySyncRun(active),message:"Repository sync is already running."};
  if(operation==="apply"){
   const runs=(before?.workflow_runs||[]).filter((run:any)=>String(run?.status||"")==="completed").sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime());
   const latestRun=runs[0];
   if(latestRun?.id){
-   const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+latestRun.id).catch(()=>null);
+   const details=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/runs/"+latestRun.id);
    if(details?.inputs)latestRun.inputs=details.inputs;
   }
-  const preview=runs.find((run:any)=>run?.conclusion==="success"&&String(run?.inputs?.preview)==="true");
-  if(!preview||preview.id!==runs[0]?.id)throw new Error("A successful preview must be the latest completed synchronization run before Apply.");
+  const preview=latestRun?.conclusion==="success"&&String(latestRun?.inputs?.preview)==="true";
+  if(!preview)throw new Error("The latest completed sync run must be a successful, verified preview before Apply.");
  }
  const startedAt=Date.now();
  await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main",inputs:{confirmation:"SYNC",preview:operation==="preview"?"true":"false"}})});
  let run:any=null;
  for(let attempt=0;attempt<8&&!run;attempt++){
   await new Promise(resolve=>setTimeout(resolve,700));
-  const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10").catch(()=>({workflow_runs:[]}));
+  const result=await repositorySyncGithub("/repos/"+cfg.controlRepo+"/actions/workflows/"+REPOSITORY_SYNC_WORKFLOW+"/runs?event=workflow_dispatch&branch=main&per_page=10");
   run=(result?.workflow_runs||[]).filter((candidate:any)=>new Date(candidate.created_at||0).getTime()>=startedAt-5000).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
  }
  return {ok:true,alreadyRunning:false,run:cleanRepositorySyncRun(run),message:(operation==="preview"?"Preview queued (no pushes): ":"Apply queued: ")+cfg.sourceOwner+" → "+cfg.targetOwner+"."};
