@@ -419,10 +419,17 @@ jobs:
             # Destination edits made after a previous mirror must not be discarded.
             last_mirror="$(git -C "$dst" log -1 --format=%H --grep="Sync main from mirror source" || true)"
             if [ -z "$last_mirror" ]; then
-              echo "::error::$key has no reviewed mirror baseline. Refusing to overwrite destination main."
-              exit 1
-            fi
-            while IFS= read -r changed; do
+              # First synchronization must never overwrite an existing destination
+              # file. New portable files may be copied after a clean preflight.
+              echo "::notice::$key has no mirror baseline; validating an additive-only bootstrap."
+              bootstrap_conflicts="$(rsync -ani --existing "${excludes[@]}" "$src/" "$dst/" | grep -vE '^\\.d' || true)"
+              if [ -n "$bootstrap_conflicts" ]; then
+                echo "::error::$key initial sync has differing existing portable files. Review and reconcile these paths manually before bootstrapping."
+                printf '%s\\n' "$bootstrap_conflicts"
+                exit 1
+              fi
+            else
+              while IFS= read -r changed; do
               [ -n "$changed" ] || continue
               case "$changed" in
                 .github/workflows/*|.env|.env.*|.vercel/*|supabase/config.toml) continue ;;
@@ -438,7 +445,8 @@ jobs:
               if [ -f "$src/$changed" ] && [ -f "$dst/$changed" ] && cmp -s "$src/$changed" "$dst/$changed"; then continue; fi
               echo "::error::$key has an independent portable change: $changed. Manual conflict resolution required."
               exit 1
-            done < <(git -C "$dst" diff --name-only "$last_mirror" HEAD)
+              done < <(git -C "$dst" diff --name-only "$last_mirror" HEAD)
+            fi
             echo "::notice::$key protected configuration is excluded from this transfer."
             rsync -a "${excludes[@]}" "$src/" "$dst/"
 
