@@ -2,6 +2,11 @@ name: Deploy Dev Panel
 
 on:
   workflow_call:
+    inputs:
+      quick_deploy:
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -24,8 +29,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_CLI_VERSION: 59.23.1
     steps:
-      # Main production stays commit-driven. This commit retries the latest main SHA;
-      # the active-mode gate below still protects the inactive repository.
+      # Manual dispatch only. The active-mode gate applies to every entrypoint.
       - name: Check active GitHub profile
         id: profile
         shell: bash
@@ -33,12 +37,7 @@ jobs:
           EXPECTED_GITHUB_PROFILE: primary
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            test "$GITHUB_REF" = "refs/heads/main"
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-            echo "Manual standby preparation approved for this repository only."
-            exit 0
-          fi
+          test "$GITHUB_REF" = "refs/heads/main"
           # Check the shared source authority directly: the deployed Dev Panel
           # may be broken and must not block its own source-code repair.
           modes=()
@@ -210,11 +209,7 @@ jobs:
           EXPECTED_GITHUB_PROFILE: primary
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            test "$GITHUB_REF" = "refs/heads/main"
-            echo "Manual standby service deployment allowed before cutover."
-            exit 0
-          fi
+          test "$GITHUB_REF" = "refs/heads/main"
           # Check the shared source authority directly: the deployed Dev Panel
           # may be broken and must not block its own source-code repair.
           modes=()
@@ -239,6 +234,19 @@ jobs:
           done
           if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
             echo "::error::Production deployment blocked: active profile is $active, repository requires $EXPECTED_GITHUB_PROFILE."
+            exit 1
+          fi
+
+      - name: Verify successful Full Scan for exact commit
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          result="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/dev-panel-full-scan.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          if ! jq -e --arg sha "$GITHUB_SHA" '.workflow_runs | any(.head_sha == $sha and .status == "completed" and .conclusion == "success")' <<<"$result" >/dev/null; then
+            echo "::error::Normal deployment requires a successful manually dispatched Full Scan for this exact main SHA."
             exit 1
           fi
 
