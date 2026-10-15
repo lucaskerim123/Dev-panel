@@ -67,6 +67,8 @@ export function VaultWorkspace({session}:{session:any}){
   const [browseMode,setBrowseMode]=useState<Record<"Vercel"|"GitHub",VaultMode>>({Vercel:"main",GitHub:"main"});
   const [browseTab,setBrowseTab]=useState<Record<"Vercel"|"GitHub",VaultTab>>({Vercel:"License",GitHub:"License"});
   const [syncProvider,setSyncProvider]=useState<"Vercel"|"GitHub">("Vercel");
+  const [exportMode,setExportMode]=useState<VaultMode>("main");
+  const [exportSystem,setExportSystem]=useState<VaultTab>("Dev");
   const [providerSyncOpen,setProviderSyncOpen]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
@@ -211,6 +213,34 @@ export function VaultWorkspace({session}:{session:any}){
     link.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
     setNotice("Exported "+records.length+" entries ("+populated+" saved values) as UNENCRYPTED JSON. The existing JSON import accepts this format. Protect the file.");
+  }
+
+  function downloadSystemModeJson(mode:VaultMode,tab:VaultTab){
+    setError("");setNotice("");
+    const selected=records.filter(row=>vaultMatchesMode(row,mode)&&vaultMatchesTab(row,tab));
+    if(!selected.length){setError("No saved keys for "+mode+" / "+tab+".");return;}
+    const populated=selected.filter(row=>Boolean(row.secret)).length;
+    if(!window.confirm("Download ONLY "+selected.length+" "+mode+" / "+tab+" keys across all providers, including "+populated+" plaintext secret values? The JSON is NOT encrypted."))return;
+    const payload={
+      format:"orbitfs-vault-import-v2",
+      exportedAt:new Date().toISOString(),
+      warning:"UNENCRYPTED FILE: contains saved Vault secret values. Protect this file.",
+      entries:selected.map(row=>({
+        service:row.service,system:row.systems[0]||"Other",
+        keyName:row.keyName,keyValue:row.secret||"",purpose:row.purpose||"",
+        usedIn:row.usedIn||[],destinationSystem:row.destinationSystem||"",
+        destinationSystems:row.destinationSystems?.length?row.destinationSystems:vaultDestinations(row),
+        valueSource:row.valueSource||"Vault saved value"
+      }))
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)+"\\n"],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;
+    link.download="orbitfs-vault-"+mode+"-"+tab.toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-"+new Date().toISOString().slice(0,10)+".json";
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setNotice("Exported "+selected.length+" "+mode+" / "+tab+" keys ("+populated+" saved secrets) across providers. JSON is unencrypted; no other system selected.");
   }
 
   function downloadSelectedSystemJson(provider:"Vercel"|"GitHub",mode:VaultMode,tab:VaultTab){
@@ -420,6 +450,20 @@ export function VaultWorkspace({session}:{session:any}){
       <h2 className="text-base font-semibold">Vault · organised by system</h2>
       <p className="text-xs text-muted-foreground">Service is the provider. System is the OrbitFS product. Every key is tied to an explicit account mode and exact destination; prefixes are never guessed during sync.</p>
       <p className="text-xs text-muted-foreground">{records.length} saved entries · {needingReview.length} need destination review. Verified Production names below come from real Main Vercel settings, not invented runtime requirements.</p>
+      <div className="flex flex-wrap items-end gap-2 rounded border p-3" aria-label="Download keys for one system and mode">
+        <label className="text-xs font-medium">Account mode
+          <select className="control mt-1" value={exportMode} onChange={e=>setExportMode(e.target.value as VaultMode)}>
+            <option value="main">Main</option><option value="fallback">Fallback</option>
+          </select>
+        </label>
+        <label className="text-xs font-medium">System
+          <select className="control mt-1" value={exportSystem} onChange={e=>setExportSystem(e.target.value as VaultTab)}>
+            {VAULT_TABS.map(tab=><option value={tab} key={tab}>{vaultTabLabel(tab)}</option>)}
+          </select>
+        </label>
+        <button type="button" className="button-secondary" disabled={busy||!records.some(row=>vaultMatchesMode(row,exportMode)&&vaultMatchesTab(row,exportSystem))} onClick={()=>downloadSystemModeJson(exportMode,exportSystem)}><Download size={14}/> Download selected system JSON (key names + secrets)</button>
+        <p className="w-full text-xs text-muted-foreground">Exports only the selected Main or Fallback system, including its saved GitHub, Vercel, Supabase and other provider keys. Plaintext JSON: keep secure.</p>
+      </div>
       {pendingMigration&&<div className="rounded border p-3 space-y-2">
         <strong className="text-sm">Review legacy Vault conversion</strong>
         <p className="text-xs">The existing Vault was decrypted in your browser. Only key names verified against the actual Main Production inventory were normalised. Other names and all values were retained. Your previous encrypted Vault is unchanged until you save.</p>
