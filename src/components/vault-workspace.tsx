@@ -213,6 +213,35 @@ export function VaultWorkspace({session}:{session:any}){
     setNotice("Exported "+records.length+" entries ("+populated+" saved values) as UNENCRYPTED JSON. The existing JSON import accepts this format. Protect the file.");
   }
 
+  function downloadSelectedSystemJson(provider:"Vercel"|"GitHub",mode:VaultMode,tab:VaultTab){
+    setError("");setNotice("");
+    // Export the selected provider + account + system, independently of the search input.
+    const selected=records.filter(row=>row.service===provider&&vaultMatchesMode(row,mode)&&vaultMatchesTab(row,tab));
+    if(!selected.length){setError("No saved keys for "+mode+" / "+tab+" / "+provider+".");return;}
+    const populated=selected.filter(row=>Boolean(row.secret)).length;
+    if(!window.confirm("Download ONLY "+selected.length+" "+mode+" / "+tab+" / "+provider+" keys, including "+populated+" plaintext secret values? This JSON is NOT encrypted. Keep it secure."))return;
+    const payload={
+      format:"orbitfs-vault-import-v2",
+      exportedAt:new Date().toISOString(),
+      warning:"UNENCRYPTED FILE: contains saved Vault secret values. Protect this file.",
+      entries:selected.map(row=>({
+        service:row.service,system:row.systems[0]||"Other",keyName:row.keyName,
+        keyValue:row.secret||"",purpose:row.purpose||"",usedIn:row.usedIn||[],
+        destinationSystem:row.destinationSystem||"",
+        destinationSystems:row.destinationSystems?.length?row.destinationSystems:vaultDestinations(row),
+        valueSource:row.valueSource||"Vault saved value"
+      }))
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)+"\\n"],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;
+    link.download="orbitfs-vault-"+mode+"-"+tab.toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-"+provider.toLowerCase()+"-"+new Date().toISOString().slice(0,10)+".json";
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setNotice("Exported only "+selected.length+" "+mode+" / "+tab+" / "+provider+" entries ("+populated+" values) as UNENCRYPTED JSON. Other systems were not included.");
+  }
+
   async function restoreConnectionsFromBackup(event:React.ChangeEvent<HTMLInputElement>){
     const file=event.target.files?.[0];event.target.value="";if(!file)return;
     setError("");setNotice("");setBusy(true);
@@ -413,6 +442,7 @@ export function VaultWorkspace({session}:{session:any}){
           </div>
           <div className="relative"><Search size={14} className="absolute left-3 top-3 text-muted-foreground"/><input aria-label={provider+" key search"} className="control w-full min-w-0 pl-9" placeholder="Search saved variables and destinations…" value={query} onChange={e=>setQuery(e.target.value)}/></div>
           <p className="text-xs text-muted-foreground">{current.length} entries · Tabs organise keys; they do not limit where they can be used.</p>
+          <button type="button" className="button-secondary" disabled={busy||!records.some(row=>row.service===provider&&vaultMatchesMode(row,mode)&&vaultMatchesTab(row,tab))} onClick={()=>downloadSelectedSystemJson(provider,mode,tab)}><Download size={14}/> Download {mode==="main"?"Main":"Fallback"} / {vaultTabLabel(tab)} / {provider} JSON (names + secrets)</button>
           <div className="space-y-2">
             {current.map(row=><article key={row.id} className="min-w-0 rounded-lg border p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
