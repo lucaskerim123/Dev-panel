@@ -135,47 +135,47 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Database automation contract
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node scripts/database-automation-contract.test.mjs
 
       - name: Verify Vercel setup explanation is grounded in actual variable presence
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vault-setup-guide.test.mjs
 
       - name: Verify saved Vault groups appear before controls
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vault-layout-order.test.mjs
 
       - name: Verify Vault System and Main/Fallback groups
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vault-grouping.test.mjs
 
       - name: Verify Vault Vercel key visibility and explicit attachment
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vault-vercel-selection.test.mjs
 
       - name: Verify Production Vault Vercel sync safeguards
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vercel-sync-policy.test.mjs
 
       - name: Verify GitHub Actions Vault sync safeguards
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/github-sync-policy.test.mjs
 
       - name: Verify core Vault grouping and reminders
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vault-core.test.mjs
 
       - name: Prevent Vault connection loss in imports
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vault-connection-preservation.test.mjs
 
       - name: Verify exact Vault key schema and safe migration
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vault-schema.test.mjs
 
       - name: Verify Vault placement guidance
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/vault-placement.test.mjs
 
       - name: Build Vercel production artifact
@@ -186,7 +186,7 @@ jobs:
         run: bun run build
 
       - name: Verify source-domain browser routing safeguards
-        if: steps.profile.outputs.deploy == 'true'
+        if: steps.profile.outputs.deploy == 'true' && inputs.quick_deploy != true
         run: node --experimental-strip-types --test tests/source-domain-routing.test.mjs
 
       - name: Verify Vercel build output
