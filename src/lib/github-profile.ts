@@ -83,17 +83,62 @@ export async function activeGithubProfile():Promise<GithubProfile>{
  await requireLocalGithubProfileActive();
  return LOCAL_PROFILE;
 }
+const tokenNames:Record<GithubProfileName,string[]>={
+ primary:["MAIN_GITHUB_TOKEN","MAIN_GITHUB_RELEASE_TOKEN","ORBITFS_PRIMARY_GITHUB_TOKEN","ORBITFS_RELEASE_DISPATCH_TOKEN"],
+ fallback:["FALLBACK_GITHUB_TOKEN","ORBITFS_FALLBACK_GITHUB_TOKEN","FALLBACK_GITHUB_RELEASE_TOKEN"]
+};
+
+// Never log or return credential contents. Each panel is restricted to its own
+// repository family and refuses credentials that cannot read that family's repo.
+let validatedTokenCache:{profile:GithubProfileName;token:string;expires:number}|null=null;
+function configuredGithubTokens(profile:GithubProfileName){
+ const seen=new Set<string>();
+ return tokenNames[profile].flatMap(name=>{
+  const token=String(process.env[name]||"").trim();
+  if(!token||seen.has(token))return [];
+  seen.add(token);
+  return [{name,token}];
+ });
+}
 export function githubTokenForProfile(profile:GithubProfileName){
- const preferred=profile==="primary"
-  ? ["MAIN_GITHUB_TOKEN","MAIN_GITHUB_RELEASE_TOKEN","ORBITFS_PRIMARY_GITHUB_TOKEN","ORBITFS_RELEASE_DISPATCH_TOKEN"]
-  : ["FALLBACK_GITHUB_TOKEN","ORBITFS_FALLBACK_GITHUB_TOKEN","FALLBACK_GITHUB_RELEASE_TOKEN"];
- const value=preferred.map(name=>String(process.env[name]||"").trim()).find(Boolean)||"";
- if(!value)throw new Error("Missing GitHub credential for "+profile+" account. Configure "+preferred[0]+".");
- return value;
+ const entries=configuredGithubTokens(profile);
+ if(!entries.length)throw new Error("Missing GitHub credential for "+profile+" account. Configure "+tokenNames[profile][0]+".");
+ // Synchronous consumers retain the configured-priority token. The validated
+ // operations path below never treats a configured token as verified.
+ return validatedTokenCache?.profile===profile&&validatedTokenCache.expires>Date.now()
+  ?validatedTokenCache.token:entries[0].token;
 }
 export async function githubToken(){
  await requireLocalGithubProfileActive();
- return githubTokenForProfile(LOCAL_PROFILE.name);
+ const profile=LOCAL_PROFILE.name;
+ const entries=configuredGithubTokens(profile);
+ if(!entries.length)throw new Error("Missing GitHub credential for "+profile+" account. Configure "+tokenNames[profile][0]+".");
+ if(validatedTokenCache?.profile===profile&&validatedTokenCache.expires>Date.now()
+  &&entries.some(entry=>entry.token===validatedTokenCache?.token))return validatedTokenCache.token;
+ const repo=LOCAL_PROFILE.devPanel.repo;
+ const rejected:string[]=[];
+ for(const {name,token} of entries){
+  let response:Response;
+  try{
+   response=await fetch("https://api.github.com/repos/"+repo,{
+    headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},
+    cache:"no-store",signal:AbortSignal.timeout(8000)
+   });
+  }catch{
+   throw new Error("GitHub credential validation unavailable. Operations blocked; no credential switching performed.");
+  }
+  if(response.ok){
+   validatedTokenCache={profile,token,expires:Date.now()+60_000};
+   return token;
+  }
+  if(response.status===401||response.status===403||response.status===404){
+   rejected.push(name+" (HTTP "+response.status+")");
+   continue;
+  }
+  throw new Error("GitHub credential validation failed with HTTP "+response.status+". Operations blocked.");
+ }
+ validatedTokenCache=null;
+ throw new Error("No configured "+profile+" GitHub credential can access "+repo+". Checked: "+rejected.join(", ")+". Verify GitHub token permissions in the MAIN Vercel project.");
 }
 export async function githubProfiles(){return {primary:PRIMARY,fallback:FALLBACK,active:await activeGithubProfileName(),local:LOCAL_PROFILE.name};}
 export function githubProfileDefinitions(){return {primary:PRIMARY,fallback:FALLBACK};}
