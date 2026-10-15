@@ -90,7 +90,7 @@ jobs:
         if: steps.profile.outputs.run == 'true'
         shell: bash
         env:
-          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          BASE_CHECKOUT_TOKEN: ${{ secrets.MAIN_GITHUB_TOKEN || secrets.MAIN_GITHUB_RELEASE_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$BASE_CHECKOUT_TOKEN" || {
@@ -115,7 +115,7 @@ jobs:
         with:
           repository: lucaskerim123/V1-vercel-base
           ref: base-release
-          token: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          token: ${{ secrets.MAIN_GITHUB_TOKEN || secrets.MAIN_GITHUB_RELEASE_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
           fetch-depth: 0
 
       - name: Verify exact inspected Base source
@@ -158,7 +158,7 @@ jobs:
       - name: Verify private Base checkout credential
         shell: bash
         env:
-          BASE_CHECKOUT_TOKEN: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          BASE_CHECKOUT_TOKEN: ${{ secrets.MAIN_GITHUB_TOKEN || secrets.MAIN_GITHUB_RELEASE_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$BASE_CHECKOUT_TOKEN" || {
@@ -187,7 +187,7 @@ jobs:
         with:
           repository: lucaskerim123/V1-vercel-base
           ref: base-release
-          token: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          token: ${{ secrets.MAIN_GITHUB_TOKEN || secrets.MAIN_GITHUB_RELEASE_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
           fetch-depth: 0
           path: base-source
 
