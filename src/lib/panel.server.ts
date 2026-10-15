@@ -2069,7 +2069,7 @@ async function repositorySyncConfig(){
 }
 async function repositorySyncGithub(path:string,init:RequestInit={}){
  const cfg=await repositorySyncConfig();
- const token=githubTokenForProfile(cfg.side);
+ const token=await githubToken(cfg.controlRepo);
  try{
   return await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}});
  }catch(error:any){
@@ -2155,7 +2155,7 @@ const operationsGithubTextCache=new Map<string,{value:string;expires:number;stal
 async function operationsGithubText(path:string){
  const cached=operationsGithubTextCache.get(path);
  if(cached&&cached.expires>Date.now())return cached.value;
- const token=await githubToken();
+ const token=await githubToken(/^\/repos\/([^/]+\/[^/]+)(?:\/|$)/.exec(path)?.[1]);
  const response=await fetch("https://api.github.com"+path,{headers:{accept:"application/vnd.github+json",authorization:"Bearer "+token,"x-github-api-version":process.env.GITHUB_API_VERSION||"2022-11-28"},cache:"no-store",redirect:"follow"});
  const text=await response.text();
  if(response.ok)operationsGithubTextCache.set(path,{value:text,expires:Date.now()+60000,staleUntil:Date.now()+5*60*1000});
