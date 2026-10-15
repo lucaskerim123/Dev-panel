@@ -425,7 +425,7 @@ jobs:
               bootstrap_conflicts="$(rsync -ani --existing "${excludes[@]}" "$src/" "$dst/" | grep -vE '^\\.d' || true)"
               if [ -n "$bootstrap_conflicts" ]; then
                 echo "::error::$key initial sync has differing existing portable files. Review and reconcile these paths manually before bootstrapping."
-                printf '%s\\n' "$bootstrap_conflicts"
+                printf '%s\n' "$bootstrap_conflicts"
                 exit 1
               fi
             else
