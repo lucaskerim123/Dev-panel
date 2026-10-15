@@ -90,7 +90,7 @@ const tokenNames:Record<GithubProfileName,string[]>={
 
 // Never log or return credential contents. Each panel is restricted to its own
 // repository family and refuses credentials that cannot read that family's repo.
-let validatedTokenCache:{profile:GithubProfileName;token:string;expires:number}|null=null;
+let validatedTokenCache=new Map<string,{token:string;expires:number}>();
 function configuredGithubTokens(profile:GithubProfileName){
  const seen=new Set<string>();
  return tokenNames[profile].flatMap(name=>{
@@ -103,19 +103,20 @@ function configuredGithubTokens(profile:GithubProfileName){
 export function githubTokenForProfile(profile:GithubProfileName){
  const entries=configuredGithubTokens(profile);
  if(!entries.length)throw new Error("Missing GitHub credential for "+profile+" account. Configure "+tokenNames[profile][0]+".");
- // Synchronous consumers retain the configured-priority token. The validated
- // operations path below never treats a configured token as verified.
- return validatedTokenCache?.profile===profile&&validatedTokenCache.expires>Date.now()
-  ?validatedTokenCache.token:entries[0].token;
+ const saved=validatedTokenCache.get(profile+":"+githubProfileDefinitions()[profile].devPanel.repo);
+ return saved&&saved.expires>Date.now()&&entries.some(entry=>entry.token===saved.token)?saved.token:entries[0].token;
 }
-export async function githubToken(){
+export async function githubToken(repository?:string){
  await requireLocalGithubProfileActive();
  const profile=LOCAL_PROFILE.name;
+ const allowed=new Set([LOCAL_PROFILE.devPanel.repo,LOCAL_PROFILE.licenseManager.repo,LOCAL_PROFILE.billingStore.repo,LOCAL_PROFILE.base.repo,LOCAL_PROFILE.engine.repo]);
+ const repo=repository||LOCAL_PROFILE.devPanel.repo;
+ if(!allowed.has(repo))throw new Error("GitHub credential validation blocked: repository is outside the active MAIN/FALLBACK family.");
  const entries=configuredGithubTokens(profile);
  if(!entries.length)throw new Error("Missing GitHub credential for "+profile+" account. Configure "+tokenNames[profile][0]+".");
- if(validatedTokenCache?.profile===profile&&validatedTokenCache.expires>Date.now()
-  &&entries.some(entry=>entry.token===validatedTokenCache?.token))return validatedTokenCache.token;
- const repo=LOCAL_PROFILE.devPanel.repo;
+ const cacheKey=profile+":"+repo;
+ const cached=validatedTokenCache.get(cacheKey);
+ if(cached&&cached.expires>Date.now()&&entries.some(entry=>entry.token===cached.token))return cached.token;
  const rejected:string[]=[];
  for(const {name,token} of entries){
   let response:Response;
@@ -125,20 +126,20 @@ export async function githubToken(){
     cache:"no-store",signal:AbortSignal.timeout(8000)
    });
   }catch{
-   throw new Error("GitHub credential validation unavailable. Operations blocked; no credential switching performed.");
+   throw new Error("GitHub credential validation unavailable for "+repo+". Operations blocked.");
   }
   if(response.ok){
-   validatedTokenCache={profile,token,expires:Date.now()+60_000};
+   validatedTokenCache.set(cacheKey,{token,expires:Date.now()+60_000});
    return token;
   }
   if(response.status===401||response.status===403||response.status===404){
    rejected.push(name+" (HTTP "+response.status+")");
    continue;
   }
-  throw new Error("GitHub credential validation failed with HTTP "+response.status+". Operations blocked.");
+  throw new Error("GitHub credential validation for "+repo+" failed with HTTP "+response.status+". Operations blocked.");
  }
- validatedTokenCache=null;
- throw new Error("No configured "+profile+" GitHub credential can access "+repo+". Checked: "+rejected.join(", ")+". Verify GitHub token permissions in the MAIN Vercel project.");
+ validatedTokenCache.delete(cacheKey);
+ throw new Error("No configured "+profile+" GitHub credential can access "+repo+". Checked: "+rejected.join(", ")+". Verify repository permissions on the configured GitHub tokens.");
 }
 export async function githubProfiles(){return {primary:PRIMARY,fallback:FALLBACK,active:await activeGithubProfileName(),local:LOCAL_PROFILE.name};}
 export function githubProfileDefinitions(){return {primary:PRIMARY,fallback:FALLBACK};}
