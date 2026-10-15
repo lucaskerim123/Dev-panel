@@ -1712,7 +1712,7 @@ async function github(path:string,init:RequestInit={}){
  if(key&&githubInFlight.has(key))return githubInFlight.get(key)!;
  const request=(async()=>{
   try{
-   const value=await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+await githubToken(),"x-github-api-version":"2022-11-28",...(init.headers||{})}});
+   const value=await requestJson("https://api.github.com"+path,{...init,headers:{authorization:"Bearer "+await githubToken(/^\/repos\/([^/]+\/[^/]+)(?:\/|$)/.exec(path)?.[1]),"x-github-api-version":"2022-11-28",...(init.headers||{})}});
    if(key)githubReadCache.set(key,{value,expires:Date.now()+120_000,staleUntil:Date.now()+30*60*1000});
    return value;
   }catch(error:any){
@@ -1728,7 +1728,13 @@ async function github(path:string,init:RequestInit={}){
 }
 async function licenseMaster(path:string,init:RequestInit={}){
  const base=await configuredMasterUrl();
- return requestJson(`${base}${path}`,{...init,headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN")}`,...(init.headers||{})}});
+ try{
+  return await requestJson(`${base}${path}`,{...init,headers:{authorization:`Bearer ${required("LICENSE_MASTER_API_TOKEN").trim()}`,...(init.headers||{})}});
+ }catch(error:any){
+  const message=String(error?.message||error);
+  if(/bad credentials|unauthorized|\b401\b/i.test(message))throw new Error("MAIN License Manager authorization failed for "+path.split("?")[0]+" at "+new URL(base).hostname+". Check the active managed API key and required release scope; no GitHub token is used for this request.");
+  throw error;
+ }
 }
 
 async function billingStoreReset(input:{releaseIds:string[];version:string;releaseType:"base"|"update";channel:string}){
