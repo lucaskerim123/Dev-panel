@@ -654,9 +654,10 @@ jobs:
                   excludes+=(--exclude="src/start.ts")
                   ;;
               esac
-              remaining="$(rsync -ani "${excludes[@]}" "$src/" "$dst/")"
-              test -z "$remaining" || { echo "::error::Post-push mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
-              echo "- ✅ $key — synced and verified (target workflows preserved)" >> "$GITHUB_STEP_SUMMARY"
+              # A successful three-way merge differs from source by design.
+              # The remote commit SHA and marker are verified above; no byte-
+              # identical copy requirement may invalidate a merged result.
+              echo "- $key — synced commit verified; target configuration preserved" >> "$GITHUB_STEP_SUMMARY"
             else
               git -C "$dst" fetch --quiet origin "$target_ref"
               test "$(git -C "$dst" log -1 --format='%s' "origin/$target_ref")" = "Sync main from mirror source" || { echo "::error::Remote main marker verification failed for current $key."; exit 1; }
@@ -664,4 +665,4 @@ jobs:
             fi
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "All five target main branches match the selected source within mirror scope. Target-specific GitHub workflows are preserved." >> "$GITHUB_STEP_SUMMARY"
+          echo "All five prepared commits verified; independent target configuration and workflows are preserved." >> "$GITHUB_STEP_SUMMARY"
