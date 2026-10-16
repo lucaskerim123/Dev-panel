@@ -2383,8 +2383,8 @@ export const runOperation=createServerFn({method:"POST"}).handler(async({data}:{
   if(!currentSha)throw new Error("Cannot resolve the latest main commit for Quick Deploy.");
   const latest=[normal?.workflow_runs?.[0],quick?.workflow_runs?.[0]].filter(Boolean).sort((a:any,b:any)=>new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())[0]||null;
   const baselineSha=String(latest?.head_sha||"")||null;
-  if(baselineSha===currentSha)throw new Error("No new commits to Quick Deploy: current main is already marked deployed.");
-  const rows=baselineSha?await operationsAllCompareCommits(cfg.repo,baselineSha,currentSha):[];
+  // Explicit manual Quick Deploy can redeploy current main without requiring new commits.
+  const rows=baselineSha&&baselineSha!==currentSha?await operationsAllCompareCommits(cfg.repo,baselineSha,currentSha):[];
   quickUpdates={baselineSha,currentSha,commits:rows.map((c:any)=>({sha:String(c.sha||""),message:String(c.commit?.message||"").split("\n")[0]}))};
  }
  const startedAt=Date.now();
