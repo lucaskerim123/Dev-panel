@@ -69,6 +69,7 @@ function Index() {
   const [runVersion, setRunVersion] = useState("");
   const [runChannel, setRunChannel] = useState("stable");
   const restoredRunRef = useRef(false);
+  const lastComposerTypeRef = useRef<"base"|"engine"|null>(null);
   const [handoff, setHandoff] = useState<any>(null);
   const [releasePageEpoch,setReleasePageEpoch] = useState(0);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -320,7 +321,6 @@ function Index() {
   // Preserve prepared source inspection when navigating away and back to the
   // same release type. Only reset when switching between Base and Update,
   // whose files, release refs and authoritative baselines are different.
-  const lastComposerTypeRef=useRef<"base"|"engine"|null>(null);
   const navigateTab=(next:Tab)=>{
     if(next==="base"||next==="engine"){
       if(lastComposerTypeRef.current&&lastComposerTypeRef.current!==next){
