@@ -35,7 +35,7 @@ export function ReleaseWorkspace(p:any){
  const [error,setError]=useState("");
  // Keep the GitHub preparation reference across navigation and refreshes.
  // This stores only run metadata, never session credentials.
- const promotionStorageKey="orbitfs:source-preparation:"+p.type+":"+String(p.baseline?.repo||"");
+ const promotionStorageKey="orbitfs:source-preparation:main:"+p.type;
  const [promotionRun,setPromotionRun]=useState<any>(()=>{
   if(typeof window==="undefined")return null;
   try{return JSON.parse(window.localStorage.getItem(promotionStorageKey)||"null")}catch{return null}
