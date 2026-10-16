@@ -1475,12 +1475,9 @@ export const deleteAuthoritativeRelease=createServerFn({method:"POST"}).handler(
  const release=current?.release;
  if(!release)throw new Error("Release was not found in License Manager");
  let status=String(release.status||"").toLowerCase();
- const everPublished=status==="published"||Boolean(release.published_at);
- if(everPublished)throw new Error("Published release history cannot be permanently deleted.");
- if(!release.published_at&&status!=="draft"&&!release.archived_at){
-  await licenseMaster(`/releases/${encodeURIComponent(id)}`,{method:"POST",body:JSON.stringify({action:"archive",reason:"Archived automatically before permanent deletion by Dev Panel"})});
-  status="archived";
- }
+ // Only a currently published release is protected from deletion.
+ // License Manager remains authoritative; published_at is historical metadata.
+ if(status==="published")throw new Error("Currently published releases cannot be deleted. Unpublish or withdraw this release first.");
  const expected=`DELETE_RELEASE:${id}:${release.version}`;
 
  await billingStoreReset({
@@ -1749,11 +1746,17 @@ async function billingStoreReset(input:{releaseIds:string[];version:string;relea
  base.search="";
  base.hash="";
  const secret=required("DEV_PANEL_EVENT_SECRET");
- return requestJson(base.origin+"/api/internal/orbitfs/release-reset",{
-  method:"POST",
-  headers:{authorization:"Bearer "+secret},
-  body:JSON.stringify(input)
- });
+ try{
+  return await requestJson(base.origin+"/api/internal/orbitfs/release-reset",{
+   method:"POST",
+   headers:{authorization:"Bearer "+secret},
+   body:JSON.stringify(input)
+  });
+ }catch(error:any){
+  const message=String(error?.message||error);
+  if(/unauthorized|\\b401\\b/i.test(message))throw new Error("Billing Store rejected release cleanup authorization (401). Verify DEV_PANEL_EVENT_SECRET matches on MAIN Dev Panel and Billing Store, then manually deploy both projects. No release was deleted.");
+  throw error;
+ }
 }
 
 
