@@ -1719,7 +1719,10 @@ async function github(path:string,init:RequestInit={}){
    const message=String(error?.message||error);
    if(/rate limit|secondary rate|abuse detection|HTTP 429|API rate/i.test(message))githubRateLimitedUntil=Math.max(githubRateLimitedUntil,Date.now()+5*60_000);
    if(cached&&cached.staleUntil>Date.now())return cached.value;
-   if(/bad credentials/i.test(message))throw new Error("GitHub credential rejected (401). Check the selected source profile's GitHub token and repository permissions.");
+   if(/bad credentials|HTTP 401|Request failed \(401\)/i.test(message)){
+    const repo=/^\/repos\/([^/]+\/[^/]+)(?:\/|$)/.exec(path)?.[1]||"unknown repository";
+    throw new Error("MAIN GitHub authentication rejected (401) for "+repo+" while requesting "+path.split("?")[0]+". Check the active Dev Panel deployment's MAIN GitHub credential and repository permissions.");
+   }
    throw error;
   }
  })();
