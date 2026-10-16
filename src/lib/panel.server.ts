@@ -1798,7 +1798,7 @@ async function masterDatabaseToken(){
 }
 async function masterDatabaseGithub(path:string,init:RequestInit={}){
  await requireLocalGithubProfileActive();
- if(!path.startsWith("/repos/"+MASTER_DATABASE_REPO+"/"))throw new Error("Master Database GitHub request outside pinned MAIN repository blocked.");
+ if(path!=="/repos/"+MASTER_DATABASE_REPO&&!path.startsWith("/repos/"+MASTER_DATABASE_REPO+"/"))throw new Error("Master Database GitHub request outside pinned MAIN repository blocked.");
  const request=async(token:string)=>requestJson("https://api.github.com"+path,{
   ...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}
  });
