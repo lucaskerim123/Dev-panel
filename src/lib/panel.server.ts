@@ -72,18 +72,16 @@ const ENGINE_BASE_COMPATIBILITY_CHANNEL=normalizeChannel(process.env.ENGINE_BASE
 
 function detectUpdateComponents(files:any[]){
  const out:string[]=[];
- const add=(value:string)=>{if(["base","apex","mcp","studio"].includes(value)&&!out.includes(value))out.push(value)};
+ const add=(value:string)=>{if(["base","engine-shared","apex","mcp","studio"].includes(value)&&!out.includes(value))out.push(value)};
  for(const item of files||[]){
   const path=String(item?.filename||item?.file||"").toLowerCase().replaceAll("\\","/");
   const migration=path.match(/^supabase\/migrations\/(shared|base|apex|mcp|studio)\/\d{14}_[a-z0-9._-]+\.sql$/i);
   const sourcePath=path.startsWith("src/")||/^(package(-lock)?\.json|tsconfig\.json|vite\.config\.ts|\.npmrc)$/.test(path);
-  if(migration&&migration[1]!=="shared")add(migration[1].toLowerCase());
+  if(migration)add(migration[1]==="shared"?"engine-shared":migration[1].toLowerCase());
   if(path.includes("/addons/apex/"))add("apex");
   if(path.includes("/addons/mcp/"))add("mcp");
   if(path.includes("/addons/studio/"))add("studio");
-  if(!migration&&sourcePath&&!path.includes("/addons/apex/")&&!path.includes("/addons/mcp/")&&!path.includes("/addons/studio/")){
-   add("apex");add("mcp");add("studio");
-  }
+  if(!migration&&sourcePath&&!path.includes("/addons/apex/")&&!path.includes("/addons/mcp/")&&!path.includes("/addons/studio/"))add("engine-shared");
  }
  return out;
 }
@@ -219,7 +217,7 @@ async function initialEngineSourceBaseline(head:string){
  if(String(parsed?.sourceRepository||"")!==ENGINE_REPO||String(parsed?.releaseBranch||"")!==ENGINE_REF)throw new Error("Engine update baseline declaration does not match the configured Update source.");
  if(!isOrbitReleaseVersion(initialReleaseVersion))throw new Error("Engine update baseline declaration is missing a valid 2–4 part numeric initialReleaseVersion");
  if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("Could not resolve the exact UPDATE_RELEASE snapshot SHA.");
- return {sha:head,ref:"release/update-baseline.json",initialReleaseVersion,locked:true,mode:"snapshot",components:["apex","mcp","studio"]};
+ return {sha:head,ref:"release/update-baseline.json",initialReleaseVersion,locked:true,mode:"snapshot",components:["engine-shared","apex","mcp","studio"]};
 }
 
 type PanelUser={id:string;email:string;display_name:string;role:string};
@@ -578,7 +576,7 @@ export const saveReleaseDraft=createServerFn({method:"POST"}).handler(async({dat
  const releaseType=data.type==="base"?"base":"update";
  const repo=data.type==="base"?BASE_REPO:ENGINE_REPO;
  const ref=data.type==="base"?BASE_REF:ENGINE_REF;
- const components=data.type==="base"?["base"]:[...new Set((data.components||[]).map(x=>String(x).trim().toLowerCase()).filter(x=>["base","apex","mcp","studio"].includes(x)))];
+ const components=data.type==="base"?["base"]:[...new Set((data.components||[]).map(x=>String(x).trim().toLowerCase()).filter(x=>["base","engine-shared","apex","mcp","studio"].includes(x)))];
  if(data.type==="engine"&&!components.length)throw new Error("Select at least one Update component before saving.");
  const expectedTemplate=data.type==="base"?"base_deployment_log":"update_changelog";
  const template=String(data.changelogTemplate||expectedTemplate);
@@ -1173,7 +1171,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  const {BASE_REPO,BASE_REF,BASE_WORKER_REPO,BASE_WORKER_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const version=data.version.trim();
  if(!isOrbitReleaseVersion(version))throw new Error("Version must use 2–4 numeric parts, e.g. 1.0, 1.2.3 or 1.2.3.4");
- if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Apex, MCP, or Studio).");
+ if(data.type==="engine"&&!data.components.length)throw new Error("Select at least one update target (Base, Shared Engine Host, Apex, MCP, or Studio).");
  const channel=normalizeChannel(data.channel);
  const repackage=Boolean(data.repackage);
  const repackageReleaseId=String(data.repackageReleaseId||"").trim();
@@ -1315,7 +1313,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  }
 
  const selectedComponents = data.type === "engine"
-   ? [...new Set((data.components || []).map((x:string)=>String(x).trim().toLowerCase()).filter((x:string)=>["base","apex","mcp","studio"].includes(x)))]
+   ? [...new Set((data.components || []).map((x:string)=>String(x).trim().toLowerCase()).filter((x:string)=>["base","engine-shared","apex","mcp","studio"].includes(x)))]
    : ["base"];
  const databasePackages=await ensureAutomaticReleaseDatabasePackages(data.type,selectedComponents);
  const detectedComponents=data.type==="engine"?(initialUpdate?(initialUpdateConfig?.components||["apex","mcp","studio"]):detectUpdateComponents(detectedFiles)):[];
@@ -1383,6 +1381,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   source_sha:head,
   database_source_commit:String(databasePackages.sourceCommit||""),
   base:String(selectedComponents.includes("base")),
+  engine_shared:String(selectedComponents.includes("engine-shared")),
   apex:String(selectedComponents.includes("apex")),
   mcp:String(selectedComponents.includes("mcp")),
   studio:String(selectedComponents.includes("studio")),
@@ -1878,11 +1877,11 @@ async function latestDispatchedDatabaseRun(workflow:string,startedAt:number){
 
 function requiredDatabaseComponentsForRelease(type:"base"|"engine",components:string[]){
  if(type==="base")return ["base"];
- const selected=[...new Set((components||[]).map(value=>String(value||"").trim().toLowerCase()).filter(value=>["base","mcp","apex","studio"].includes(value)))];
+ const selected=[...new Set((components||[]).map(value=>String(value||"").trim().toLowerCase()).filter(value=>["base","engine-shared","mcp","apex","studio"].includes(value)))];
  const required:string[]=[];
  if(selected.includes("base"))required.push("base");
  const engineComponents=selected.filter(value=>["mcp","apex","studio"].includes(value));
- if(engineComponents.length)required.push("engine-shared",...engineComponents);
+ if(engineComponents.length||selected.includes("engine-shared"))required.push("engine-shared",...engineComponents);
  return [...new Set(required)];
 }
 async function resolvedAutomaticDatabasePackages(requiredComponents:string[],expectedSourceCommit:string){
