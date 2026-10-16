@@ -48,3 +48,12 @@ test('Operator can deselect detected Engine Host to package Base only and vice v
  assert.match(workspace,/onClick=\{\(\)=>p\.setComponents\(\(old:string\[\]\)=>old\.includes\(name\)\?/);
  assert.doesNotMatch(workspace,/if\(detected\)return/);
 });
+
+test('an Engine Host-only release can follow a Base-only release with the same Engine source',()=>{
+ assert.match(server,/components:Array\.isArray\(baseline\.manifest\?\.components\)\?baseline\.manifest\.components:\[\]/);
+ assert.match(server,/const previouslyReleasedTargets=new Set/);
+ assert.match(server,/const hasNewUpdateTarget=data\.type==="engine"&&selectedComponents\.some/);
+ assert.match(server,/&&!hasNewUpdateTarget/);
+ assert.match(workspace,/const newEngineTargetNotInBaseline=!base&&inspected&&componentRows\.some/);
+ assert.match(workspace,/newEngineTargetNotInBaseline\|\|\(repackageMode&&inspected\)/);
+});
