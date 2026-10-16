@@ -93,7 +93,8 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
       throw new Error("Vault placeholder values cannot be pushed to Production.");
     if (data.action !== "create" && data.action !== "replace") throw new Error("Invalid sync action.");
     if (data.vercelType !== undefined && !["secret","config"].includes(data.vercelType)) throw new Error("Invalid Vercel variable type.");
-    const targetType = data.vercelType === "config" ? "plain" : "sensitive";
+    const visibility = data.vercelType === "config" ? "config" : "secret";
+    const targetType = visibility === "config" ? "plain" : "sensitive";
     // Compare a fresh server-side snapshot to the exact action reviewed in the browser.
     const current = await readEnvironments(data);
     const plan = assertReviewedProductionWrite(current, data);
@@ -101,7 +102,7 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
     if (plan.action === "create") {
       await vercelApi(projectPath + scope(data.teamId), data.vercelToken, {
         method: "POST",
-        body: JSON.stringify({key: data.key, value: data.value, type: targetType, target: ["production"]}),
+        body: JSON.stringify({key: data.key, value: data.value, type: targetType, visibility, target: ["production"]}),
       });
     } else if (plan.action === "replace") {
       const currentRow = current.find(row => row.id === plan.expectedId)!;
@@ -109,7 +110,7 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
       await vercelApi(
         projectPath + "/" + encodeURIComponent(plan.expectedId) + scope(data.teamId),
         data.vercelToken,
-        {method: "PATCH", body: JSON.stringify({value: data.value, type: targetType})}
+        {method: "PATCH", body: JSON.stringify({value: data.value, type: targetType, visibility})}
       );
     }
     // Values marked Secret by Vercel are deliberately unreadable. Verify metadata presence, not plaintext equality.
@@ -117,7 +118,7 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
     if (planProductionKey(after, data.key).action !== "replace")
       throw new Error("Vercel accepted the write but verification was inconclusive. Check Production before retrying.");
     const actual = after.find(row => row.key === data.key);
-    if (!actual || actual.type !== targetType) throw new Error("Vercel variable type could not be verified. Reinspect Production before retrying.");
+    if (!actual || actual.visibility !== visibility) throw new Error("Vercel variable visibility could not be verified. Reinspect Production before retrying.");
     return {ok: true, key: data.key, action: plan.action, target: "production" as const, presenceVerified: true, typeVerified: true, valueVerified: false};
   }
 );
