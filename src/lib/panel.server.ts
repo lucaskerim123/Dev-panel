@@ -1317,8 +1317,9 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
    : ["base"];
  const databasePackages=await ensureAutomaticReleaseDatabasePackages(data.type,selectedComponents);
  const detectedComponents=data.type==="engine"?(initialUpdate?(initialUpdateConfig?.components||["apex","mcp","studio"]):detectUpdateComponents(detectedFiles)):[];
- const missingDetectedComponents=detectedComponents.filter((component:string)=>!selectedComponents.includes(component));
- if(missingDetectedComponents.length)throw new Error(`Stage 1 targets do not cover detected Update changes: ${missingDetectedComponents.join(", ")}. Re-inspect the Update source before building.`);
+ // File changes indicate suggested targets, not mandatory additions.
+ // The selected targets alone authorize which deployment payloads are built.
+ const excludedDetectedComponents=detectedComponents.filter((component:string)=>!selectedComponents.includes(component));
 
  const compactDispatchFile=(file:any)=>({
   filename:String(file?.filename||""),
@@ -1349,6 +1350,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   initialUpdate,
   sourceBaselineKind,
   detectedComponents,
+  excludedDetectedComponents,
   changedFiles: dispatchFiles,
   changedFilesTruncated: detectedFiles.length > dispatchFiles.length,
   components: selectedComponents,
