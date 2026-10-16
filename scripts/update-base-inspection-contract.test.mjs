@@ -17,8 +17,9 @@ test('server inspects Base release source independently and rejects stale select
  assert.match(server,/if\(data\.type==="engine"\)\{\s*const inspectedRepo=BASE_REPO,inspectedRef=BASE_REF;/);
  assert.match(server,/await completeSourceDiff\(inspectedRepo,baselineSourceSha,head\)/);
  assert.match(server,/baseBaseline:baseBaselineInfo,baseInspection/);
- assert.match(server,/if\(inspectedBaseBaselineSha!==baselineSourceCommit\)throw/);
- assert.match(server,/if\(baseHead!==inspectedBaseSourceSha\)throw/);
+ assert.match(server,/if\(inspectedBaseBaselineSha&&inspectedBaseBaselineSha!==baselineSourceCommit\)throw/);
+ assert.match(server,/if\(inspectedBaseSourceSha&&baseHead!==inspectedBaseSourceSha\)throw/);
+ assert.doesNotMatch(server,/BASE must be inspected in Update Releases before packaging/);
  assert.match(route,/inspectedBaseSourceSha:type==="engine"\?/);
  assert.match(route,/inspectedBaseBaselineSha:type==="engine"\?/);
 });
@@ -30,4 +31,12 @@ test('BASE cannot be packaged just because the button is selected without a veri
  assert.match(workspace,/title="Base source inspection"/);
  assert.match(workspace,/baseInspection\.changedFiles\.map/);
  assert.doesNotMatch(workspace,/\(baseTargetSelected&&inspected\)/);
+});
+
+test('Shared Engine Host is independently selectable, source-detected and dispatched',()=>{
+ assert.match(server,/add\("engine-shared"\)/);
+ assert.match(server,/engine_shared:String\(selectedComponents\.includes\("engine-shared"\)\)/);
+ assert.match(server,/selected\.includes\("engine-shared"\)/);
+ assert.match(workspace,/\["base","engine-shared","apex","mcp","studio"\]/);
+ assert.match(workspace,/name==="engine-shared"\?"ENGINE HOST"/);
 });
