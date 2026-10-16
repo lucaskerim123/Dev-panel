@@ -6,6 +6,8 @@ export type VaultRecord={
   customService:string;
   keyName:string;
   secret:string;
+  /** Vercel visibility; config values are readable to authorized project members. */
+  vercelType?:"secret"|"config";
   purpose?:string;
   valueSource?:string;
   /** Main/Fallback are source modes, not key-name prefixes. */
