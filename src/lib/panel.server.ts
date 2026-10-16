@@ -891,7 +891,7 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
  const inspectedAt=new Date().toISOString();
  const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha||null,channel:ENGINE_BASE_COMPATIBILITY_CHANNEL}:null;
  const from=String(baseline?.source_sha||"");
- const baselineInfo:any=baseline?{id:baseline.id,version:baseline.version,sourceSha:baseline.source_sha,kind:data.type==="base"?"published_base":"published_update",channel}:null;
+ const baselineInfo:any=baseline?{id:baseline.id,version:baseline.version,sourceSha:baseline.source_sha,components:Array.isArray(baseline.manifest?.components)?baseline.manifest.components:[],kind:data.type==="base"?"published_base":"published_update",channel}:null;
 
  if(!from&&data.type==="engine"){
    const initial=await initialEngineSourceBaseline(head);
@@ -1304,17 +1304,19 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
   sourceDiffMeta=diff;
  }
 
- const hasCapturedBaseChanges=data.type==="engine"&&Boolean(updateBaseSource);
- if(!initialRelease&&!initialUpdate&&previousSourceCommit===head&&!repackage&&!hasCapturedBaseChanges){
-  throw new Error(`No ${data.type==="base"?"Base":"Update"} source changes detected since the authoritative published baseline. There is nothing new to release.`);
- }
- if(!initialRelease&&!initialUpdate&&!detectedFiles.length&&!repackage&&!hasCapturedBaseChanges){
-  throw new Error(`No ${data.type==="base"?"Base":"Update"} file changes were detected against the authoritative published baseline. There is nothing new to release.`);
- }
-
  const selectedComponents = data.type === "engine"
    ? [...new Set((data.components || []).map((x:string)=>String(x).trim().toLowerCase()).filter((x:string)=>["base","engine-shared","apex","mcp","studio"].includes(x)))]
    : ["base"];
+ const previouslyReleasedTargets=new Set((Array.isArray(previousRelease?.manifest?.components)?previousRelease.manifest.components:[]).map((value:any)=>String(value||"").trim().toLowerCase()));
+ const hasNewUpdateTarget=data.type==="engine"&&selectedComponents.some((component:string)=>component!=="base"&&!previouslyReleasedTargets.has(component));
+ const hasCapturedBaseChanges=data.type==="engine"&&Boolean(updateBaseSource);
+ if(!initialRelease&&!initialUpdate&&previousSourceCommit===head&&!repackage&&!hasCapturedBaseChanges&&!hasNewUpdateTarget){
+  throw new Error(`No ${data.type==="base"?"Base":"Update"} source changes detected since the authoritative published baseline. There is nothing new to release.`);
+ }
+ if(!initialRelease&&!initialUpdate&&!detectedFiles.length&&!repackage&&!hasCapturedBaseChanges&&!hasNewUpdateTarget){
+  throw new Error(`No ${data.type==="base"?"Base":"Update"} file changes were detected against the authoritative published baseline. There is nothing new to release.`);
+ }
+
  const databasePackages=await ensureAutomaticReleaseDatabasePackages(data.type,selectedComponents);
  const detectedComponents=data.type==="engine"?(initialUpdate?(initialUpdateConfig?.components||["apex","mcp","studio"]):detectUpdateComponents(detectedFiles)):[];
  // File changes indicate suggested targets, not mandatory additions.
