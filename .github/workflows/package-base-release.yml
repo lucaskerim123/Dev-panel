@@ -86,11 +86,35 @@ jobs:
           fi
           echo "run=true" >> "$GITHUB_OUTPUT"
 
+      - name: Select verified MAIN Base checkout token
+        if: steps.profile.outputs.run == 'true'
+        id: checkout-token
+        shell: bash
+        env:
+          TOKEN_1: ${{ secrets.MAIN_GITHUB_TOKEN }}
+          TOKEN_2: ${{ secrets.MAIN_GITHUB_RELEASE_TOKEN }}
+          TOKEN_3: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for var in TOKEN_1 TOKEN_2 TOKEN_3; do
+            candidate="${!var}"
+            [ -n "$candidate" ] || continue
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 12 -H "Authorization: Bearer $candidate" -H 'Accept: application/vnd.github+json' https://api.github.com/repos/lucaskerim123/V1-vercel-base)"
+            if [ "$status" = 200 ]; then
+              echo "::add-mask::$candidate"
+              echo "value=$candidate" >> "$GITHUB_OUTPUT"
+              echo "Verified MAIN Base checkout credential against the source repository."
+              exit 0
+            fi
+          done
+          echo "::error::No configured MAIN credential could read the private Base source repository."
+          exit 1
+
       - name: Verify private Base checkout credential
         if: steps.profile.outputs.run == 'true'
         shell: bash
         env:
-          BASE_CHECKOUT_TOKEN: ${{ secrets.MAIN_GITHUB_TOKEN || secrets.MAIN_GITHUB_RELEASE_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          BASE_CHECKOUT_TOKEN: ${{ steps.checkout-token.outputs.value }}
         run: |
           set -euo pipefail
           test -n "$BASE_CHECKOUT_TOKEN" || {
@@ -115,7 +139,7 @@ jobs:
         with:
           repository: lucaskerim123/V1-vercel-base
           ref: base-release
-          token: ${{ secrets.MAIN_GITHUB_TOKEN || secrets.MAIN_GITHUB_RELEASE_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          token: ${{ steps.checkout-token.outputs.value }}
           fetch-depth: 0
 
       - name: Verify exact inspected Base source
@@ -155,10 +179,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+      - name: Select verified MAIN Base checkout token
+        if: steps.profile.outputs.run == 'true'
+        id: checkout-token
+        shell: bash
+        env:
+          TOKEN_1: ${{ secrets.MAIN_GITHUB_TOKEN }}
+          TOKEN_2: ${{ secrets.MAIN_GITHUB_RELEASE_TOKEN }}
+          TOKEN_3: ${{ secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for var in TOKEN_1 TOKEN_2 TOKEN_3; do
+            candidate="${!var}"
+            [ -n "$candidate" ] || continue
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 12 -H "Authorization: Bearer $candidate" -H 'Accept: application/vnd.github+json' https://api.github.com/repos/lucaskerim123/V1-vercel-base)"
+            if [ "$status" = 200 ]; then
+              echo "::add-mask::$candidate"
+              echo "value=$candidate" >> "$GITHUB_OUTPUT"
+              echo "Verified MAIN Base checkout credential against the source repository."
+              exit 0
+            fi
+          done
+          echo "::error::No configured MAIN credential could read the private Base source repository."
+          exit 1
+
       - name: Verify private Base checkout credential
         shell: bash
         env:
-          BASE_CHECKOUT_TOKEN: ${{ secrets.MAIN_GITHUB_TOKEN || secrets.MAIN_GITHUB_RELEASE_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          BASE_CHECKOUT_TOKEN: ${{ steps.checkout-token.outputs.value }}
         run: |
           set -euo pipefail
           test -n "$BASE_CHECKOUT_TOKEN" || {
@@ -187,7 +235,7 @@ jobs:
         with:
           repository: lucaskerim123/V1-vercel-base
           ref: base-release
-          token: ${{ secrets.MAIN_GITHUB_TOKEN || secrets.MAIN_GITHUB_RELEASE_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN }}
+          token: ${{ steps.checkout-token.outputs.value }}
           fetch-depth: 0
           path: base-source
 
