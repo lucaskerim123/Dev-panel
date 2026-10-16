@@ -219,6 +219,7 @@ function Index() {
       const bootstrapVersion=r.initialUpdate?String(r.baseline?.initialReleaseVersion||r.baseline?.version||"").trim():"";
       setBaseline({
         ...(r.baseline || {}),
+        baseInspection:r.baseInspection||null,
         repo:r.repo,
         ref:r.ref,
         head:r.head,
@@ -242,7 +243,8 @@ function Index() {
       if (type === "engine") {
         if(!String(minBase||"").trim())setMinBase(resolvedMinBase);
         if(bootstrapVersion)setVersion(bootstrapVersion);
-        setComponents(detectedComponents);
+        // Keep manually chosen BASE and optional targets when re-inspecting Engine.
+        setComponents((previous:string[])=>[...new Set([...detectedComponents,...previous])]);
       }
       setChangelogTemplate(type === "base" ? "base_deployment_log" : "update_changelog");
       setChangelogDraft(buildChangelog(type, {
@@ -251,7 +253,7 @@ function Index() {
         files: r.files || [],
         commits: r.commits || [],
         notes,
-        components:type==="engine"?detectedComponents:components,
+        components:type==="engine"?[...new Set([...detectedComponents,...components])]:components,
         minBase:resolvedMinBase,
         protocol,
         repo: r.repo,
@@ -269,7 +271,7 @@ function Index() {
           ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · locked bootstrap snapshot · ${r.files.length} tracked files · targets: ${detectedComponents.join(", ")||"none"}.`
           : r.hasSourceChanges
             ? `${r.repo}@${r.ref} resolved at ${r.head.slice(0,8)} · ${r.files.length} file changes since published ${type==="base"?"Base":"Update"} baseline · +${summary.added||0} added · ~${summary.modified||0} modified · −${summary.deleted||0} deleted${summary.renamed?` · ${summary.renamed} renamed`:""}${type==="engine"&&detectedComponents.length?` · targets: ${detectedComponents.join(", ")}`:""}.`
-            : type==="engine" ? `${r.repo}@${r.ref} matches the published Update baseline. No Engine/add-on source changes were detected; you can still select BASE and the worker will capture current base-release changes before packaging.` : `${r.repo}@${r.ref} is already up to date with the published Base baseline. No added, modified, deleted or renamed files were detected; a new release is blocked until source changes exist.`);
+            : type==="engine" ? `${r.repo}@${r.ref} matches the published Update baseline. No Engine/add-on source changes detected; BASE inspection: ${r.baseInspection?.ready ? String(r.baseInspection.changedFileCount)+" changed files ready" : r.baseInspection?.error||"unavailable"}.` : `${r.repo}@${r.ref} is already up to date with the published Base baseline. No added, modified, deleted or renamed files were detected; a new release is blocked until source changes exist.`);
     } catch (x: any) {
       setError(x.message || "Unable to inspect source.");
     } finally { setBusy(""); }
@@ -286,6 +288,8 @@ function Index() {
           changelogTemplate,
           inspectedSourceSha:String(baseline?.head||""),
           inspectedPublishedBaselineSha:baseline?.publishedBaselineSha??null,
+          inspectedBaseSourceSha:type==="engine"?String(baseline?.baseInspection?.head||""):"",
+          inspectedBaseBaselineSha:type==="engine"?String(baseline?.baseInspection?.baselineSourceSha||""):"",
           repackage:Boolean(options?.repackage),
           repackageReleaseId:options?.repackageReleaseId||null,
         }
