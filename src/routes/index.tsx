@@ -317,12 +317,16 @@ function Index() {
     setNotice("");
   };
 
-  // A deliberate click on Base/Update always opens that page's overview.
-  // Live work is persisted in drafts and can be resumed from the overview.
+  // Preserve prepared source inspection when navigating away and back to the
+  // same release type. Only reset when switching between Base and Update,
+  // whose files, release refs and authoritative baselines are different.
+  const lastComposerTypeRef=useRef<"base"|"engine"|null>(null);
   const navigateTab=(next:Tab)=>{
     if(next==="base"||next==="engine"){
-      resetComposer();
-      setReleasePageEpoch(value=>value+1);
+      if(lastComposerTypeRef.current&&lastComposerTypeRef.current!==next){
+        resetComposer();
+      }
+      lastComposerTypeRef.current=next;
     }
     setTab(next);
   };
