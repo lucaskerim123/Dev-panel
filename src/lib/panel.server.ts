@@ -1766,13 +1766,51 @@ const MASTER_DATABASE_MIGRATION_WORKFLOW=String(process.env.MASTER_DATABASE_MIGR
 const MASTER_DATABASE_COMPONENTS=["base","engine-shared","mcp","apex","studio"] as const;
 const MASTER_DATABASE_BUILD_TARGETS=["all",...MASTER_DATABASE_COMPONENTS,"license-manager-dev-panel","billing-storefront"] as const;
 
+// Master Database is an explicitly pinned MAIN dependency. Validate each
+// configured candidate against that repository before use, just as source
+// inspection does; a stale first env var must not block release builds.
+let masterDatabaseValidatedToken:{token:string;expires:number}|null=null;
+async function masterDatabaseToken(){
+ const names=["MAIN_MASTER_DATABASE_GITHUB_TOKEN","MASTER_DATABASE_GITHUB_TOKEN","MAIN_GITHUB_RELEASE_TOKEN","MAIN_GITHUB_TOKEN","ORBITFS_PRIMARY_GITHUB_TOKEN","ORBITFS_RELEASE_DISPATCH_TOKEN"];
+ const candidates=[...new Set(names.map(name=>String(process.env[name]||"").trim()).filter(Boolean))];
+ if(!candidates.length)throw new Error("No MAIN Master Database GitHub credential configured.");
+ if(masterDatabaseValidatedToken&&masterDatabaseValidatedToken.expires>Date.now()&&candidates.includes(masterDatabaseValidatedToken.token))return masterDatabaseValidatedToken.token;
+ const results:string[]=[];
+ for(const token of candidates){
+  let response:Response;
+  try{
+   response=await fetch("https://api.github.com/repos/"+MASTER_DATABASE_REPO,{
+    headers:{authorization:"Bearer "+token,accept:"application/vnd.github+json","x-github-api-version":"2022-11-28"},
+    cache:"no-store",signal:AbortSignal.timeout(8000)
+   });
+  }catch{
+   throw new Error("MAIN Master Database GitHub credential validation is unavailable. No release action dispatched.");
+  }
+  if(response.ok){
+   masterDatabaseValidatedToken={token,expires:Date.now()+60_000};
+   return token;
+  }
+  results.push(String(response.status));
+  if(![401,403,404].includes(response.status))throw new Error("Master Database GitHub validation HTTP "+response.status+". No release action dispatched.");
+ }
+ masterDatabaseValidatedToken=null;
+ throw new Error("No configured MAIN token can access "+MASTER_DATABASE_REPO+" (GitHub HTTP statuses: "+results.join(", ")+"). No release action dispatched.");
+}
 async function masterDatabaseGithub(path:string,init:RequestInit={}){
- const token=String(process.env.MAIN_MASTER_DATABASE_GITHUB_TOKEN||process.env.MASTER_DATABASE_GITHUB_TOKEN||process.env.MAIN_GITHUB_RELEASE_TOKEN||process.env.MAIN_GITHUB_TOKEN||process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||"").trim();
- if(!token)throw new Error("Master Database GitHub control token is not configured.");
- return requestJson("https://api.github.com"+path,{
-  ...init,
-  headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}
+ await requireLocalGithubProfileActive();
+ if(!path.startsWith("/repos/"+MASTER_DATABASE_REPO+"/"))throw new Error("Master Database GitHub request outside pinned MAIN repository blocked.");
+ const request=async(token:string)=>requestJson("https://api.github.com"+path,{
+  ...init,headers:{authorization:"Bearer "+token,"x-github-api-version":"2022-11-28",accept:"application/vnd.github+json",...(init.headers||{})}
  });
+ const token=await masterDatabaseToken();
+ try{return await request(token)}
+ catch(error:any){
+  if(!/bad credentials|\\b401\\b|\\b403\\b/i.test(String(error?.message||error)))throw error;
+  masterDatabaseValidatedToken=null;
+  const next=await masterDatabaseToken();
+  if(next===token)throw new Error("MAIN Master Database GitHub credential rejected for "+path.split("?")[0]+". No release action dispatched.");
+  return request(next);
+ }
 }
 function cleanDatabaseRun(run:any){
  return run?{
