@@ -33,7 +33,22 @@ export function ReleaseWorkspace(p:any){
  const [actionBusy,setActionBusy]=useState("");
  const [message,setMessage]=useState("");
  const [error,setError]=useState("");
- const [promotionRun,setPromotionRun]=useState<any>(null);
+ // Keep the GitHub preparation reference across navigation and refreshes.
+ // This stores only run metadata, never session credentials.
+ const promotionStorageKey="orbitfs:source-preparation:"+p.type+":"+String(p.baseline?.repo||"");
+ const [promotionRun,setPromotionRun]=useState<any>(()=>{
+  if(typeof window==="undefined")return null;
+  try{return JSON.parse(window.localStorage.getItem(promotionStorageKey)||"null")}catch{return null}
+ });
+ useEffect(()=>{
+  try{
+   if(promotionRun)window.localStorage.setItem(promotionStorageKey,JSON.stringify(promotionRun));
+   else window.localStorage.removeItem(promotionStorageKey);
+  }catch{}
+ },[promotionStorageKey,promotionRun]);
+ useEffect(()=>{
+  try{setPromotionRun(JSON.parse(window.localStorage.getItem(promotionStorageKey)||"null"))}catch{setPromotionRun(null)}
+ },[promotionStorageKey]);
  const [branchSync,setBranchSync]=useState<any>(null);
  const [sourceCheckNonce,setSourceCheckNonce]=useState(0);
  const [lastAutoRefresh,setLastAutoRefresh]=useState<string|null>(null);
@@ -61,14 +76,20 @@ export function ReleaseWorkspace(p:any){
     const next:any=await getReleaseBranchSyncState({data:{token:p.session.token,type:p.type,channel:p.channel}});
     if(cancelled)return;
     setBranchSync(next);
-    // No recurring status queries; explicit Refresh only.
+    if(next.activeRun?.id){
+     setPromotionRun((current:any)=>{
+      if(current?.runId===next.activeRun.id)return current;
+      return {runId:next.activeRun.id,runUrl:next.activeRun.url,status:next.activeRun.status,sourceSha:next.activeRun.headSha||next.sourceSha,completed:false};
+     });
+    }
+    // A preparation started before navigation must be recoverable from GitHub.
    }catch{
     if(cancelled)return;
     setBranchSync((current:any)=>({...current,error:true}));
     // No recurring status queries; explicit Refresh only.
    }
   };
-  if(sourceCheckNonce>0)void refresh();
+  void refresh();
   return()=>{cancelled=true;if(timer)window.clearTimeout(timer)};
  },[p.session.token,p.type,p.channel,sourceCheckNonce]);
  useEffect(()=>{
@@ -102,7 +123,10 @@ export function ReleaseWorkspace(p:any){
    }catch(x:any){if(!cancelled)setError(x?.message||"Unable to refresh promotion status.");}
   };
   void poll();
-  return()=>{cancelled=true};
+  const timer=window.setInterval(()=>{
+   if(document.visibilityState==="visible")void poll();
+  },12000);
+  return()=>{cancelled=true;window.clearInterval(timer)};
  },[promotionRun?.runId,promotionRun?.sourceSha,promotionRun?.completed,promotionRun?.conclusion,base,p.session.token,p.type,p.channel,branchSync?.releaseRef,p.baseline?.ref]);
  // A historical run must not hijack a new wizard or an unrelated draft.
  // New builds use the version/channel of the run that this page actually started.
