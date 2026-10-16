@@ -2081,13 +2081,13 @@ function repositorySyncIsPreview(run:any):boolean{
  // GitHub run-list and single-run APIs can omit workflow_dispatch inputs.
  // New manual runs label the operation explicitly; never trust an unlabeled
  // success as authorization to apply repository changes.
- const name=String(run?.name||"");
+ const name=String(run?.display_title||run?.name||"");
  if(/^OrbitFS sync PREVIEW(?: · |$)/.test(name))return true;
  if(/^OrbitFS sync APPLY(?: · |$)/.test(name))return false;
  return run?.inputs?.preview===true||run?.inputs?.preview==="true";
 }
 function cleanRepositorySyncRun(run:any){
- return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name,preview:repositorySyncIsPreview(run)}:null;
+ return run?{id:run.id,status:run.status,conclusion:run.conclusion,run_number:run.run_number,head_sha:run.head_sha,created_at:run.created_at,updated_at:run.updated_at,html_url:run.html_url,name:run.name,display_title:run.display_title,preview:repositorySyncIsPreview(run)}:null;
 }
 export const getRepositorySyncState=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}})=>{
  requireOperationsUser(data.token);
