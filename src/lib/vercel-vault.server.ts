@@ -100,7 +100,7 @@ export const writeVaultVercelProduction = createServerFn({method:"POST"}).handle
     const plan = assertReviewedProductionWrite(current, data);
     const projectPath = "/v9/projects/" + encodeURIComponent(data.projectId) + "/env";
     if (plan.action === "create") {
-      await vercelApi(projectPath + scope(data.teamId), data.vercelToken, {
+      await vercelApi("/v10/projects/" + encodeURIComponent(data.projectId) + "/env" + scope(data.teamId), data.vercelToken, {
         method: "POST",
         body: JSON.stringify({key: data.key, value: data.value, type: targetType, visibility, target: ["production"]}),
       });
