@@ -866,6 +866,30 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
      .sort((a:any,b:any)=>new Date(b.published_at||b.created_at||0).getTime()-new Date(a.published_at||a.created_at||0).getTime())[0]||null;
  } catch {}
 
+ // Update inspection must cover BASE independently of Engine's source diff.
+ // A Base-only update can be prepared even when UPDATE_RELEASE has no new files.
+ let baseInspection:any=null;
+ if(data.type==="engine"){
+  const inspectedRepo=BASE_REPO,inspectedRef=BASE_REF;
+  try{
+   if(!baseBaseline)throw new Error("No approved published Base baseline with a valid database snapshot is available.");
+   const publishedRepo=String(baseBaseline.source_repo||"").trim();
+   const publishedRef=String(baseBaseline.source_ref||"").trim();
+   const baselineSourceSha=String(baseBaseline.source_sha||"").trim();
+   if(publishedRepo!==inspectedRepo||publishedRef!==inspectedRef||!/^[a-f0-9]{40}$/i.test(baselineSourceSha))throw new Error("Published Base baseline is not from the active Base repository and release ref.");
+   const source=await github(`/repos/${inspectedRepo}/git/ref/heads/${encodeURIComponent(inspectedRef)}`);
+   const head=String(source?.object?.sha||"").trim();
+   if(!/^[a-f0-9]{40}$/i.test(head))throw new Error("Could not resolve the current Base release ref.");
+   const diff=head===baselineSourceSha?{files:[],summary:sourceChangeSummary([]),diffComplete:true}:await completeSourceDiff(inspectedRepo,baselineSourceSha,head);
+   const changedFiles=diff.files||[];
+   baseInspection={repo:inspectedRepo,ref:inspectedRef,head,baselineReleaseId:String(baseBaseline.id||""),baselineVersion:String(baseBaseline.version||""),baselineSourceSha,
+    changedFileCount:changedFiles.length,changedFiles:changedFiles.slice(0,100).map((entry:any)=>({filename:entry.filename,status:entry.status})),
+    changeSummary:diff.summary||sourceChangeSummary(changedFiles),diffComplete:diff.diffComplete===true,
+    ready:changedFiles.length>0&&diff.diffComplete===true,
+    error:changedFiles.length===0?"Base release source matches the currently published Base; no Base patch is available.":diff.diffComplete!==true?"Base source comparison was incomplete. Re-inspect before packaging.":null};
+  }catch(error:any){baseInspection={repo:inspectedRepo,ref:inspectedRef,ready:false,error:String(error?.message||error),changedFiles:[],changedFileCount:0};}
+ }
+
  const inspectedAt=new Date().toISOString();
  const baseBaselineInfo=baseBaseline?{id:baseBaseline.id,version:baseBaseline.version,sourceSha:baseBaseline.source_sha||null,channel:ENGINE_BASE_COMPATIBILITY_CHANNEL}:null;
  const from=String(baseline?.source_sha||"");
@@ -877,7 +901,7 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
    const summary=sourceChangeSummary(files);
    const info={id:null,version:initial.initialReleaseVersion,sourceSha:head,kind:"initial_snapshot",ref:initial.ref,locked:initial.locked,initialReleaseVersion:initial.initialReleaseVersion,channel};
    return {
-    repo,ref,head,baseline:info,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:true,
+    repo,ref,head,baseline:info,baseBaseline:baseBaselineInfo,baseInspection,initialRelease:false,initialUpdate:true,
     inspectionMode:"initial_snapshot",detectedComponents:initial.components,files,commits:[],
     changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt,publishedBaselineSha:from||null
    };
@@ -886,21 +910,21 @@ export async function inspectSourceCore(data:{type:"base"|"engine";channel?:stri
    const files=await sourceSnapshotFiles(repo,head);
    const summary=sourceChangeSummary(files);
    return {
-    repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,initialRelease:true,initialUpdate:false,
+    repo,ref,head,baseline:null,baseBaseline:baseBaselineInfo,baseInspection,initialRelease:true,initialUpdate:false,
     inspectionMode:"full_snapshot",detectedComponents:[],files,commits:[],
     changeSummary:summary,diffComplete:true,baselineFileCount:0,currentFileCount:files.length,hasSourceChanges:files.length>0,inspectedAt,publishedBaselineSha:from||null
    };
  }
 
  if(from===head)return {
-  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:false,
+  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,baseInspection,initialRelease:false,initialUpdate:false,
   inspectionMode:"compare",detectedComponents:[],files:[],commits:[],
   changeSummary:sourceChangeSummary([]),diffComplete:true,baselineFileCount:null,currentFileCount:null,hasSourceChanges:false,inspectedAt,publishedBaselineSha:from||null
  };
 
  const diff=await completeSourceDiff(repo,from,head);
  return {
-  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,initialRelease:false,initialUpdate:false,
+  repo,ref,head,baseline:baselineInfo,baseBaseline:baseBaselineInfo,baseInspection,initialRelease:false,initialUpdate:false,
   inspectionMode:"compare",
   detectedComponents:data.type==="engine"?detectUpdateComponents(diff.files):[],
   files:diff.files,commits:diff.commits,changeSummary:diff.summary,diffComplete:diff.diffComplete,
