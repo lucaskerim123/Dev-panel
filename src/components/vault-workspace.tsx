@@ -197,7 +197,7 @@ export function VaultWorkspace({session}:{session:any}){
         service:row.service,
         system:row.systems[0]||"Other",
         keyName:row.keyName,
-        keyValue:row.secret||"",vercelType:row.vercelType||"secret",vercelType:row.vercelType||"secret",
+        keyValue:row.secret||"",vercelType:row.vercelType||"secret",
         purpose:row.purpose||"",
         usedIn:row.usedIn||[],
         destinationSystem:row.destinationSystem||"",
