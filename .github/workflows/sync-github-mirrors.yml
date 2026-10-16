@@ -1,4 +1,5 @@
 name: Sync GitHub mirrors
+run-name: OrbitFS sync ${{ inputs.preview == 'true' && 'PREVIEW' || 'APPLY' }} · ${{ github.actor }}
 
 on:
   workflow_dispatch:
