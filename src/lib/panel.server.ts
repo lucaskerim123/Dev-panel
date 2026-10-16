@@ -1169,7 +1169,7 @@ export const promoteReleaseBranch=createServerFn({method:"POST"}).handler(async(
  };
 });
 
-export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null},actor:any){
+export async function startReleaseCore(data:{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;inspectedBaseSourceSha?:string;inspectedBaseBaselineSha?:string;repackage?:boolean;repackageReleaseId?:string|null},actor:any){
  const {BASE_REPO,BASE_REF,BASE_WORKER_REPO,BASE_WORKER_REF,ENGINE_REPO,ENGINE_REF}=await githubContext();
  const version=data.version.trim();
  if(!isOrbitReleaseVersion(version))throw new Error("Version must use 2–4 numeric parts, e.g. 1.0, 1.2.3 or 1.2.3.4");
@@ -1230,9 +1230,14 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
    if(baselineSourceRepo!==BASE_REPO||baselineSourceRef!==BASE_REF||!/^[a-f0-9]{40}$/i.test(baselineSourceCommit)){
     throw new Error("The compatible published Base does not have a valid source identity for the active Base release branch.");
    }
+   const inspectedBaseSourceSha=String(data.inspectedBaseSourceSha||"").trim();
+   const inspectedBaseBaselineSha=String(data.inspectedBaseBaselineSha||"").trim();
+   if(!/^[a-f0-9]{40}$/i.test(inspectedBaseSourceSha)||!inspectedBaseBaselineSha)throw new Error("BASE must be inspected in Update Releases before packaging. Re-inspect with BASE selected.");
+   if(inspectedBaseBaselineSha!==baselineSourceCommit)throw new Error("The published Base baseline has changed since inspection. Re-inspect the Base target before packaging.");
    const baseBranch=await github(`/repos/${BASE_REPO}/git/ref/heads/${encodeURIComponent(BASE_REF)}`);
    const baseHead=String(baseBranch?.object?.sha||"").trim();
    if(!/^[a-f0-9]{40}$/i.test(baseHead))throw new Error(`Could not resolve ${BASE_REPO}@${BASE_REF} for the Base target.`);
+   if(baseHead!==inspectedBaseSourceSha)throw new Error("Base release source changed after inspection. Re-inspect BASE before packaging so the update includes the reviewed source commit.");
    if(baseHead===baselineSourceCommit)throw new Error(`Base was selected, but ${BASE_REF} matches published Base v${baselineBase.version}. Make Base changes first or deselect Base.`);
    const baseDiff=await completeSourceDiff(BASE_REPO,baselineSourceCommit,baseHead);
    if(!baseDiff.files.length)throw new Error(`Base was selected, but no Base files changed between published v${baselineBase.version} and ${BASE_REF}.`);
@@ -1466,7 +1471,7 @@ export async function startReleaseCore(data:{type:"base"|"engine";version:string
  }
  return {ok:true,repo:workerRepo,ref:workerRef,sourceRepo:repo,sourceRef:ref,sourceSha:head,workflow,channel,runId:runId||null,draftId:draft.id,attemptNumber};
 }
-export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}&{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;repackage?:boolean;repackageReleaseId?:string|null}})=>{
+export const startRelease=createServerFn({method:"POST"}).handler(async({data}:{data:{token:string}&{type:"base"|"engine";version:string;channel:string;notes:string;changelogDraft:string;files:any[];components:string[];minimumBaseVersion:string;protocol:string;changelogTemplate:string;inspectedSourceSha?:string;inspectedPublishedBaselineSha?:string|null;inspectedBaseSourceSha?:string;inspectedBaseBaselineSha?:string;repackage?:boolean;repackageReleaseId?:string|null}})=>{
  const actor=readSession(data.token);
  return startReleaseCore(data,actor);
 });
