@@ -7,10 +7,10 @@ const server=readFileSync(new URL('../src/lib/panel.server.ts',import.meta.url),
 const workspace=readFileSync(new URL('../src/components/release-workspace.tsx',import.meta.url),'utf8');
 
 test('Update re-inspection preserves manually selected BASE while adding detected Engine targets',()=>{
- assert.match(route,/setComponents\(\(previous:string\[\]\)=>\[\.\.\.new Set\(\[\.\.\.detectedComponents,\.\.\.previous\]\)\]\)/);
+ assert.match(route,/setComponents\(\(previous:string\[\]\)=>previous\.length\?\[\.\.\.previous\]:\[\.\.\.detectedComponents\]\)/);
  assert.doesNotMatch(route,/setComponents\(detectedComponents\)/);
  assert.match(route,/baseInspection:r\.baseInspection\|\|null/);
- assert.match(route,/components:type==="engine"\?\[\.\.\.new Set\(\[\.\.\.detectedComponents,\.\.\.components\]\)\]:components/);
+ assert.match(route,/components:type==="engine"\?\(components\.length\?components:detectedComponents\):components/);
 });
 
 test('server inspects Base release source independently and rejects stale selection at dispatch',()=>{
@@ -39,4 +39,12 @@ test('Shared Engine Host is independently selectable, source-detected and dispat
  assert.match(server,/selected\.includes\("engine-shared"\)/);
  assert.match(workspace,/\["base","engine-shared","apex","mcp","studio"\]/);
  assert.match(workspace,/name==="engine-shared"\?"ENGINE HOST"/);
+});
+
+test('Operator can deselect detected Engine Host to package Base only and vice versa',()=>{
+ assert.doesNotMatch(server,/if\(missingDetectedComponents\.length\)throw/);
+ assert.match(server,/const excludedDetectedComponents=detectedComponents\.filter/);
+ assert.match(workspace,/detected\?"Source changes detected; you may include or exclude this target"/);
+ assert.match(workspace,/onClick=\{\(\)=>p\.setComponents\(\(old:string\[\]\)=>old\.includes\(name\)\?/);
+ assert.doesNotMatch(workspace,/if\(detected\)return/);
 });
