@@ -30,7 +30,7 @@ const VAULT_DESTINATIONS = [
   {mode:"fallback",system:"Dev",service:"Vercel",value:"orbitfs-dev-panel-fallback"}
 ] as const;
 
-const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"change-me",usedIn:["main"],destinationSystem:"v2-billing-store"},{service:"GitHub",system:"Billing",keyName:"VERCEL_TOKEN",keyValue:"change-me",usedIn:["fallback"],destinationSystem:"remipetrovich-design/OrbitFS-Billing-Shopfront"}]};
+const IMPORT_TEMPLATE={format:"orbitfs-vault-import-v2",entries:[{service:"Vercel",system:"Dev",keyName:"APP_URL",keyValue:"",vercelType:"config",usedIn:["main"],destinationSystem:"base-deploy-panel"},{service:"Vercel",system:"Billing",keyName:"BILLING_API_TOKEN",keyValue:"",vercelType:"secret",usedIn:["fallback"],destinationSystem:"orbitfs-billing-fallback"}]};
 const SERVICES=[...VAULT_SERVICES];
 const VAULT_TABS = ["License","Billing","Dev","Base System","Shared Engine","AI Repair Centre","Database","Other"] as const;
 type VaultTab = typeof VAULT_TABS[number];
