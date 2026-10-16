@@ -244,7 +244,7 @@ function Index() {
         if(!String(minBase||"").trim())setMinBase(resolvedMinBase);
         if(bootstrapVersion)setVersion(bootstrapVersion);
         // Keep manually chosen BASE and optional targets when re-inspecting Engine.
-        setComponents((previous:string[])=>[...new Set([...detectedComponents,...previous])]);
+        setComponents((previous:string[])=>previous.length?[...previous]:[...detectedComponents]);
       }
       setChangelogTemplate(type === "base" ? "base_deployment_log" : "update_changelog");
       setChangelogDraft(buildChangelog(type, {
@@ -253,7 +253,7 @@ function Index() {
         files: r.files || [],
         commits: r.commits || [],
         notes,
-        components:type==="engine"?[...new Set([...detectedComponents,...components])]:components,
+        components:type==="engine"?(components.length?components:detectedComponents):components,
         minBase:resolvedMinBase,
         protocol,
         repo: r.repo,
