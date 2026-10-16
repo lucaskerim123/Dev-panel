@@ -55,6 +55,10 @@ jobs:
         if: steps.profile.outputs.run == 'true'
         run: node scripts/database-automation-contract.test.mjs
 
+      - name: Verify Update Base inspection and selection contract
+        if: steps.profile.outputs.run == 'true'
+        run: node --test scripts/update-base-inspection-contract.test.mjs
+
       - name: Build
         if: steps.profile.outputs.run == 'true'
         env:
