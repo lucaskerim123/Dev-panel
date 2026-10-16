@@ -95,6 +95,7 @@ jobs:
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
+          fetch-depth: 0
           path: source-base
       - name: Checkout Base target
         uses: actions/checkout@v6
@@ -112,6 +113,7 @@ jobs:
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
+          fetch-depth: 0
           path: source-engine
       - name: Checkout Engine target
         uses: actions/checkout@v6
@@ -129,6 +131,7 @@ jobs:
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
+          fetch-depth: 0
           path: source-license
       - name: Checkout License target
         uses: actions/checkout@v6
@@ -146,6 +149,7 @@ jobs:
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
+          fetch-depth: 0
           path: source-billing
       - name: Checkout Billing target
         uses: actions/checkout@v6
@@ -163,6 +167,7 @@ jobs:
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
+          fetch-depth: 0
           path: source-control
       - name: Checkout Control target
         uses: actions/checkout@v6
@@ -436,43 +441,46 @@ jobs:
                 excludes+=(--exclude="src/start.ts")
                 ;;
             esac
-            # Destination edits made after a previous mirror must not be discarded.
-            last_mirror="$(git -C "$dst" log -1 --format=%H --grep="Sync main from mirror source" || true)"
-            if [ -z "$last_mirror" ]; then
-              # First synchronization must never overwrite an existing destination
-              # file. New portable files may be copied after a clean preflight.
-              echo "::notice::$key has no mirror baseline; validating an additive-only bootstrap."
-              bootstrap_conflicts="$(rsync -ani --existing "${excludes[@]}" "$src/" "$dst/" | grep -vE '^\\.d' || true)"
-              if [ -n "$bootstrap_conflicts" ]; then
-                echo "::error::$key initial sync has differing existing portable files. Review and reconcile these paths manually before bootstrapping."
-                printf '%s\n' "$bootstrap_conflicts"
-                exit 1
-              fi
-            else
-              while IFS= read -r changed; do
-              [ -n "$changed" ] || continue
-              case "$changed" in
-                .github/workflows/*|.env|.env.*|.vercel/*|supabase/config.toml) continue ;;
-              esac
-              protected=false
-              for argument in "${excludes[@]}"; do
-                if [ "$argument" = "--exclude=$changed" ]; then protected=true; break; fi
-              done
-              if [ "$protected" = true ]; then continue; fi
-              # Destination-only diagnostic/support files are preserved by additive rsync.
-              # They must not be treated as conflicts when the source has no path.
-              if [ ! -e "$src/$changed" ]; then continue; fi
-              if [ -f "$src/$changed" ] && [ -f "$dst/$changed" ] && cmp -s "$src/$changed" "$dst/$changed"; then continue; fi
-              echo "::error::$key has an independent portable change: $changed. Manual conflict resolution required."
-              exit 1
-              done < <(git -C "$dst" diff --name-only "$last_mirror" HEAD)
+            # Preserve destination edits and examine every pair before any push.
+            last_mirror="$(git -C "$dst" log -1 --format=%H --grep="^Sync main from mirror source" || true)"
+            source_sha="$(git -C "$src" rev-parse HEAD)"
+            previous_source=""
+            if [ -n "$last_mirror" ]; then
+              previous_source="$(git -C "$dst" log -1 --format=%B "$last_mirror" | sed -n "s/^OrbitFS-Source-SHA: //p" | head -1)"
             fi
-            echo "::notice::$key protected configuration is excluded from this transfer."
+            if [ -n "$previous_source" ] && ! git -C "$src" cat-file -e "$previous_source^{commit}" 2>/dev/null; then previous_source=""; fi
+            conflicts="$RUNNER_TEMP/orbitfs-sync/$key.conflicts"
+            : > "$conflicts"
+            candidates="$RUNNER_TEMP/orbitfs-sync/$key.candidates"
+            rsync -ani "${excludes[@]}" "$src/" "$dst/" | awk '/^>f/ {print substr($0,12)}' > "$candidates"
+            while IFS= read -r changed; do
+              [ -f "$src/$changed" ] && [ -f "$dst/$changed" ] || continue
+              cmp -s "$src/$changed" "$dst/$changed" && continue
+              destination_changed=true
+              if [ -n "$last_mirror" ] && git -C "$dst" diff --quiet "$last_mirror" HEAD -- "$changed"; then destination_changed=false; fi
+              [ "$destination_changed" = true ] || continue
+              merged=false
+              if [ -n "$previous_source" ] && git -C "$src" cat-file -e "$previous_source:$changed" 2>/dev/null; then
+                base_file="$(mktemp)"
+                output_file="$(mktemp)"
+                git -C "$src" show "$previous_source:$changed" > "$base_file"
+                if git merge-file -p "$dst/$changed" "$base_file" "$src/$changed" > "$output_file"; then
+                  cp "$output_file" "$dst/$changed"
+                  merged=true
+                fi
+                rm -f "$base_file" "$output_file"
+              fi
+              excludes+=("--exclude=$changed")
+              if [ "$merged" = false ]; then
+                printf "%s\n" "$changed" >> "$conflicts"
+                echo "::warning::$key independent destination edit preserved: $changed"
+              else
+                echo "::notice::$key merged independent change: $changed"
+              fi
+            done < "$candidates"
             rsync -a "${excludes[@]}" "$src/" "$dst/"
-
             remaining="$(rsync -ani "${excludes[@]}" "$src/" "$dst/")"
-            test -z "$remaining" || { echo "::error::Mirror verification failed for $key."; printf "%s\n" "$remaining"; exit 1; }
-
+            test -z "$remaining" || { echo "::error::Portable sync verification failed for $key"; printf "%s\n" "$remaining"; exit 1; }
             git -C "$dst" config user.name "OrbitFS Repository Sync"
             git -C "$dst" config user.email "actions@users.noreply.github.com"
             git -C "$dst" add -A
@@ -499,14 +507,14 @@ jobs:
                 echo "$key already current and marker is present"
               else
                 echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
-                git -C "$dst" commit --allow-empty --quiet -m "Sync main from mirror source"
+                git -C "$dst" commit --allow-empty --quiet -m "Sync main from mirror source" -m "OrbitFS-Source-SHA: $source_sha"
                 target_ref="main"
                 git -C "$dst" push --dry-run origin "HEAD:$target_ref"
                 echo "$key content is current; bootstrap marker prepared"
               fi
             else
               echo "changed" > "$RUNNER_TEMP/orbitfs-sync/$key.state"
-              git -C "$dst" commit --quiet -m "Sync main from mirror source"
+              git -C "$dst" commit --quiet -m "Sync main from mirror source" -m "OrbitFS-Source-SHA: $source_sha"
               target_ref="main"
               git -C "$dst" push --dry-run origin "HEAD:$target_ref"
               echo "$key prepared and push permission verified"
@@ -520,7 +528,13 @@ jobs:
         run: |
           echo "## Five-pair synchronization preview" >> "$GITHUB_STEP_SUMMARY"
           echo "No changes pushed. Review this preflight before approving Apply in Dev Panel." >> "$GITHUB_STEP_SUMMARY"
-          for key in base engine license billing control; do echo "- $key: $(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")" >> "$GITHUB_STEP_SUMMARY"; done
+          for key in base engine license billing control; do
+            echo "- $key: $(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")" >> "$GITHUB_STEP_SUMMARY"
+            if [ -s "$RUNNER_TEMP/orbitfs-sync/$key.conflicts" ]; then
+              echo "  - Destination edits preserved; require reconciliation:" >> "$GITHUB_STEP_SUMMARY"
+              sed "s/^/    - /" "$RUNNER_TEMP/orbitfs-sync/$key.conflicts" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       - name: Apply and verify
         if: ${{ inputs.preview == 'false' }}
@@ -539,6 +553,13 @@ jobs:
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # Apply remains all-or-nothing when unresolved edits exist.
+          for key in base engine license billing control; do
+            if [ -s "$RUNNER_TEMP/orbitfs-sync/$key.conflicts" ]; then
+              echo "::error::$key has unresolved independent edits; review preview before Apply."
+              exit 1
+            fi
+          done
           # Re-check every target before the first push so a late edit cannot
           # leave the five repositories half-synced.
           for key in base engine license billing control; do
