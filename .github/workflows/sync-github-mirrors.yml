@@ -1,9 +1,26 @@
 name: Sync GitHub mirrors
-run-name: OrbitFS sync ${{ inputs.preview == 'true' && 'PREVIEW' || 'APPLY' }} · ${{ github.actor }}
+run-name: OrbitFS sync ${{ inputs.preview == 'true' && 'PREVIEW' || 'APPLY' }} · ${{ inputs.pair }} · ${{ inputs.direction }} · ${{ github.actor }}
 
 on:
   workflow_dispatch:
     inputs:
+      pair:
+        description: Repository pair to synchronize, one at a time
+        required: true
+        type: choice
+        options:
+          - base
+          - engine
+          - license
+          - billing
+          - control
+      direction:
+        description: Explicit source-to-target direction, independent of active mode
+        required: true
+        type: choice
+        options:
+          - main-to-fallback
+          - fallback-to-main
       preview:
         description: Preview/preflight only; never push changes
         required: true
@@ -13,7 +30,7 @@ on:
           - "true"
           - "false"
       confirmation:
-        description: Type SYNC to mirror all five main branches in this direction
+        description: Type SYNC to preview or apply the selected repository only
         required: true
         default: ""
         type: string
@@ -22,17 +39,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: orbitfs-five-repo-sync
+  group: orbitfs-repository-sync
   cancel-in-progress: false
 
 jobs:
   sync:
-    name: Sync five main repositories
+    name: Sync selected repository pair
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SOURCE_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && (secrets.MAIN_GITHUB_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN) || (secrets.FALLBACK_GITHUB_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN) }}
-      TARGET_TOKEN: ${{ github.repository == 'lucaskerim123/Dev-panel' && (secrets.FALLBACK_GITHUB_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN) || (secrets.MAIN_GITHUB_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN) }}
+      SYNC_PAIR: ${{ inputs.pair }}
+      SYNC_DIRECTION: ${{ inputs.direction }}
+      SOURCE_TOKEN: ${{ inputs.direction == 'main-to-fallback' && (secrets.MAIN_GITHUB_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN) || (secrets.FALLBACK_GITHUB_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN) }}
+      TARGET_TOKEN: ${{ inputs.direction == 'main-to-fallback' && (secrets.FALLBACK_GITHUB_TOKEN || secrets.ORBITFS_FALLBACK_GITHUB_TOKEN) || (secrets.MAIN_GITHUB_TOKEN || secrets.ORBITFS_RELEASE_DISPATCH_TOKEN) }}
     steps:
       - name: Verify direction and credentials
         shell: bash
@@ -40,6 +59,8 @@ jobs:
           set -euo pipefail
           test "${{ vars.ORBITFS_REPOSITORY_SYNC_ENABLED }}" = "true" || { echo "::error::Cross-mode sync is disabled. Explicitly activate repository variable ORBITFS_REPOSITORY_SYNC_ENABLED=true before manual dispatch."; exit 1; }
           test "${{ inputs.confirmation }}" = "SYNC" || { echo "::error::Confirmation must be SYNC."; exit 1; }
+          case "$SYNC_PAIR" in base|engine|license|billing|control) ;; *) echo "::error::Invalid selected pair."; exit 1 ;; esac
+          case "$SYNC_DIRECTION" in main-to-fallback|fallback-to-main) ;; *) echo "::error::Invalid direction."; exit 1 ;; esac
           case "$GITHUB_REPOSITORY" in
             lucaskerim123/Dev-panel|remipetrovich-design/OrbitFS-Control-Centre) ;;
             *) echo "::error::This workflow may only run from Dev-panel or OrbitFS-Control-Centre."; exit 1 ;;
@@ -47,7 +68,7 @@ jobs:
           test -n "${SOURCE_TOKEN:-}" || { echo "::error::Source GitHub credential is missing."; exit 1; }
           test -n "${TARGET_TOKEN:-}" || { echo "::error::Target GitHub credential is missing."; exit 1; }
 
-          if [ "$GITHUB_REPOSITORY" = "remipetrovich-design/OrbitFS-Control-Centre" ]; then
+          if [ "$SYNC_DIRECTION" = "fallback-to-main" ]; then
             target_repos=(
               "lucaskerim123/V1-vercel-base"
               "lucaskerim123/V1-vercel-engine"
@@ -69,6 +90,15 @@ jobs:
             target_secret="ORBITFS_FALLBACK_GITHUB_TOKEN"
           fi
 
+          case "$SYNC_PAIR" in
+            base) pair_index=0 ;;
+            engine) pair_index=1 ;;
+            license) pair_index=2 ;;
+            billing) pair_index=3 ;;
+            control) pair_index=4 ;;
+          esac
+          target_repos=("${target_repos[$pair_index]}")
+          echo "Selected pair: $SYNC_PAIR · direction: $SYNC_DIRECTION"
           failed=0
           for target_repo in "${target_repos[@]}"; do
             response_file="$(mktemp)"
@@ -85,101 +115,111 @@ jobs:
             rm -f "$response_file"
           done
           test "$failed" = "0" || {
-            echo "::error::$target_label sync credential is not writable for all five target repositories. Update the named Actions secret before retrying repository sync."
+            echo "::error::$target_label sync credential is not writable for the selected target repository. Update the named Actions secret before retrying repository sync."
             exit 1
           }
 
       - name: Checkout Base source
+        if: ${{ inputs.pair == 'base' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-base' || 'remipetrovich-design/OrbitFS-Base-System' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'lucaskerim123/V1-vercel-base' || 'remipetrovich-design/OrbitFS-Base-System' }}
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
           path: source-base
       - name: Checkout Base target
+        if: ${{ inputs.pair == 'base' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Base-System' || 'lucaskerim123/V1-vercel-base' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'remipetrovich-design/OrbitFS-Base-System' || 'lucaskerim123/V1-vercel-base' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
           fetch-depth: 0
           path: target-base
 
       - name: Checkout Engine source
+        if: ${{ inputs.pair == 'engine' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V1-vercel-engine' || 'remipetrovich-design/OrbitFS_Engine' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'lucaskerim123/V1-vercel-engine' || 'remipetrovich-design/OrbitFS_Engine' }}
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
           path: source-engine
       - name: Checkout Engine target
+        if: ${{ inputs.pair == 'engine' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS_Engine' || 'lucaskerim123/V1-vercel-engine' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'remipetrovich-design/OrbitFS_Engine' || 'lucaskerim123/V1-vercel-engine' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
           fetch-depth: 0
           path: target-engine
 
       - name: Checkout License source
+        if: ${{ inputs.pair == 'license' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/Custom-licence-manager' || 'remipetrovich-design/OrbitFS-License-Administration' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'lucaskerim123/Custom-licence-manager' || 'remipetrovich-design/OrbitFS-License-Administration' }}
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
           path: source-license
       - name: Checkout License target
+        if: ${{ inputs.pair == 'license' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-License-Administration' || 'lucaskerim123/Custom-licence-manager' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'remipetrovich-design/OrbitFS-License-Administration' || 'lucaskerim123/Custom-licence-manager' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
           fetch-depth: 0
           path: target-license
 
       - name: Checkout Billing source
+        if: ${{ inputs.pair == 'billing' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/V2_Billing_Store' || 'remipetrovich-design/OrbitFS-Billing-Shopfront' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'lucaskerim123/V2_Billing_Store' || 'remipetrovich-design/OrbitFS-Billing-Shopfront' }}
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
           path: source-billing
       - name: Checkout Billing target
+        if: ${{ inputs.pair == 'billing' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Billing-Shopfront' || 'lucaskerim123/V2_Billing_Store' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'remipetrovich-design/OrbitFS-Billing-Shopfront' || 'lucaskerim123/V2_Billing_Store' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
           fetch-depth: 0
           path: target-billing
 
       - name: Checkout Control source
+        if: ${{ inputs.pair == 'control' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'lucaskerim123/Dev-panel' || 'remipetrovich-design/OrbitFS-Control-Centre' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'lucaskerim123/Dev-panel' || 'remipetrovich-design/OrbitFS-Control-Centre' }}
           ref: main
           token: ${{ env.SOURCE_TOKEN }}
           persist-credentials: false
           fetch-depth: 0
           path: source-control
       - name: Checkout Control target
+        if: ${{ inputs.pair == 'control' }}
         uses: actions/checkout@v6
         with:
-          repository: ${{ github.repository == 'lucaskerim123/Dev-panel' && 'remipetrovich-design/OrbitFS-Control-Centre' || 'lucaskerim123/Dev-panel' }}
+          repository: ${{ inputs.direction == 'main-to-fallback' && 'remipetrovich-design/OrbitFS-Control-Centre' || 'lucaskerim123/Dev-panel' }}
           ref: main
           token: ${{ env.TARGET_TOKEN }}
           fetch-depth: 0
           path: target-control
 
-      - name: Prepare and preflight all five targets
+      - name: Prepare and preflight selected repository
         shell: bash
         run: |
           set -euo pipefail
@@ -190,7 +230,7 @@ jobs:
             local key="$2"
             local strict="${3:-true}"
             local target_base target_engine target_engine_id target_license target_billing target_control target_profile target_label target_token_env
-            if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
+            if [ "$SYNC_DIRECTION" = "main-to-fallback" ]; then
               target_base="remipetrovich-design/OrbitFS-Base-System"
               target_engine="remipetrovich-design/OrbitFS_Engine"
               target_engine_id="1393749443"
@@ -349,7 +389,7 @@ jobs:
           NODE
           }
 
-          for key in base engine license billing control; do
+          for key in "$SYNC_PAIR"; do
             src="source-$key"
             dst="target-$key"
             echo "::group::Prepare $key"
@@ -399,7 +439,7 @@ jobs:
                 # credentials or changing FALLBACK's authentication boundary.
                 api_key_file="$src/lib/core/api-keys.ts"
                 test -f "$api_key_file" || { echo "::error::Missing License Manager API key identity file."; exit 1; }
-                if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
+                if [ "$SYNC_DIRECTION" = "main-to-fallback" ]; then
                   api_key_environment="fallback"
                 else
                   api_key_environment="main"
@@ -527,9 +567,9 @@ jobs:
         if: ${{ inputs.preview != 'false' }}
         shell: bash
         run: |
-          echo "## Five-pair synchronization preview" >> "$GITHUB_STEP_SUMMARY"
-          echo "No changes pushed. Review this preflight before approving Apply in Dev Panel." >> "$GITHUB_STEP_SUMMARY"
-          for key in base engine license billing control; do
+          echo "## Selected-repository synchronization preview: $SYNC_PAIR ($SYNC_DIRECTION)" >> "$GITHUB_STEP_SUMMARY"
+          echo "No changes pushed. Review this single-pair preflight before approving Apply in Dev Panel." >> "$GITHUB_STEP_SUMMARY"
+          for key in "$SYNC_PAIR"; do
             echo "- $key: $(cat "$RUNNER_TEMP/orbitfs-sync/$key.state")" >> "$GITHUB_STEP_SUMMARY"
             if [ -s "$RUNNER_TEMP/orbitfs-sync/$key.conflicts" ]; then
               echo "  - Destination edits preserved; require reconciliation:" >> "$GITHUB_STEP_SUMMARY"
@@ -542,7 +582,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$GITHUB_REPOSITORY" = "lucaskerim123/Dev-panel" ]; then
+          if [ "$SYNC_DIRECTION" = "main-to-fallback" ]; then
             direction="lucaskerim123 → remipetrovich-design"
           else
             direction="remipetrovich-design → lucaskerim123"
@@ -554,24 +594,23 @@ jobs:
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Apply remains all-or-nothing when unresolved edits exist.
-          for key in base engine license billing control; do
+          # Apply refuses unresolved edits in the selected repository.
+          for key in "$SYNC_PAIR"; do
             if [ -s "$RUNNER_TEMP/orbitfs-sync/$key.conflicts" ]; then
               echo "::error::$key has unresolved independent edits; review preview before Apply."
               exit 1
             fi
           done
-          # Re-check every target before the first push so a late edit cannot
-          # leave the five repositories half-synced.
-          for key in base engine license billing control; do
+          # Re-check the selected target immediately before any push.
+          for key in "$SYNC_PAIR"; do
             dst="target-$key"
             expected="$(cat "$RUNNER_TEMP/orbitfs-sync/$key.expected")"
             git -C "$dst" fetch --quiet origin main
             remote_before="$(git -C "$dst" rev-parse origin/main)"
-            test "$remote_before" = "$expected" || { echo "::error::Remote main changed after preflight for $key; refusing to start a partial five-repo sync."; exit 1; }
+            test "$remote_before" = "$expected" || { echo "::error::Remote main changed after preflight for $key; refusing the selected repository sync."; exit 1; }
           done
 
-          for key in base engine license billing control; do
+          for key in "$SYNC_PAIR"; do
             src="source-$key"
             dst="target-$key"
             target_ref="main"
@@ -666,4 +705,4 @@ jobs:
             fi
           done
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "All five prepared commits verified; independent target configuration and workflows are preserved." >> "$GITHUB_STEP_SUMMARY"
+          echo "Selected repository commit verified; independent target configuration and workflows are preserved." >> "$GITHUB_STEP_SUMMARY"
