@@ -8,6 +8,8 @@ export type VaultRecord={
   secret:string;
   /** Vercel visibility; config values are readable to authorized project members. */
   vercelType?:"secret"|"config";
+  /** GitHub Actions destination visibility: encrypted Secret or readable Variable. */
+  githubType?:"secret"|"variable";
   purpose?:string;
   valueSource?:string;
   /** Main/Fallback are source modes, not key-name prefixes. */
